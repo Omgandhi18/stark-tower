@@ -314,6 +314,65 @@ fn get_chat(state: tauri::State<AppState>, agent_id: String, limit: Option<i64>)
     state.ledger.messages(&agent_id, limit.unwrap_or(500))
 }
 
+#[derive(serde::Serialize)]
+struct PathEntry {
+    path: String,
+    dir: bool,
+}
+
+/// List files AND folders under `dir` (relative paths, recursively into every
+/// subfolder) for the chat's `@` picker. Respects .gitignore and skips heavy
+/// noise dirs, so it mirrors what Claude Code would see.
+#[tauri::command]
+fn list_files(dir: String, limit: Option<usize>) -> Vec<PathEntry> {
+    let root = shellexpand_home(dir.trim());
+    if root.is_empty() || !std::path::Path::new(&root).is_dir() {
+        return vec![];
+    }
+    let cap = limit.unwrap_or(50_000);
+    let root_path = std::path::Path::new(&root);
+    // Heavy/noise dirs to skip even when there's no .gitignore (e.g. ~/Documents).
+    const SKIP: &[&str] = &[
+        ".git", "node_modules", "target", "dist", "build", ".next", ".nuxt",
+        ".svelte-kit", "out", ".turbo", ".cache", "vendor", ".venv", "venv",
+        "__pycache__", ".mypy_cache", ".pytest_cache", ".gradle", ".idea",
+        "Pods", "DerivedData", ".terraform",
+    ];
+    let mut out: Vec<PathEntry> = Vec::new();
+    for entry in ignore::WalkBuilder::new(&root)
+        .hidden(false) // show dotfiles; .gitignore still applies
+        .git_ignore(true)
+        .git_global(true)
+        .filter_entry(|e| {
+            e.file_name()
+                .to_str()
+                .map(|n| !SKIP.contains(&n))
+                .unwrap_or(true)
+        })
+        .build()
+        .flatten()
+    {
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let is_file = entry.file_type().map(|t| t.is_file()).unwrap_or(false);
+        if !is_dir && !is_file {
+            continue; // skip symlinks-to-nowhere etc.
+        }
+        if let Ok(rel) = entry.path().strip_prefix(root_path) {
+            let path = rel.to_string_lossy().to_string();
+            if path.is_empty() {
+                continue; // the root itself
+            }
+            out.push(PathEntry { path, dir: is_dir });
+            if out.len() >= cap {
+                break;
+            }
+        }
+    }
+    // Folders first, then files, each alphabetical — a natural tree order.
+    out.sort_by(|a, b| b.dir.cmp(&a.dir).then_with(|| a.path.cmp(&b.path)));
+    out
+}
+
 /// Reset button: end the live session AND wipe this agent's saved transcript +
 /// resume pointer, so the next message starts a genuinely fresh conversation.
 #[tauri::command]
@@ -613,6 +672,7 @@ pub fn run() {
             chat_send,
             chat_stop,
             get_chat,
+            list_files,
             review_respond
         ])
         .run(tauri::generate_context!())

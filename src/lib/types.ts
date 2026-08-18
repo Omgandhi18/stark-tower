@@ -75,6 +75,12 @@ export interface ChatEvent {
   cwd?: string;
 }
 
+/** A file or folder under a project dir, for the chat's @ picker. */
+export interface PathEntry {
+  path: string;
+  dir: boolean;
+}
+
 /** A persisted chat turn, returned by get_chat to rehydrate the transcript. */
 export interface StoredMessage {
   id: number;

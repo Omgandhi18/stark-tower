@@ -7,6 +7,7 @@ import type {
   LedgerEntry,
   ProjectsState,
   PtyData,
+  PathEntry,
   ReviewRequest,
   StatusEvent,
   StoredMessage,
@@ -45,6 +46,10 @@ export const chatStop = (agentId: string) =>
 /** Load an agent's persisted transcript to rehydrate the chat on reopen. */
 export const getChat = (agentId: string, limit?: number) =>
   invoke<StoredMessage[]>("get_chat", { agentId, limit: limit ?? null });
+
+/** List files and folders under a directory for the chat's @ file picker. */
+export const listFiles = (dir: string, limit?: number) =>
+  invoke<PathEntry[]>("list_files", { dir, limit: limit ?? null });
 
 export const onChatEvent = (cb: (e: ChatEvent) => void): Promise<UnlistenFn> =>
   listen<ChatEvent>("chat://event", (evt) => cb(evt.payload));
