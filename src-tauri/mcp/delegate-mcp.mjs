@@ -1,0 +1,246 @@
+#!/usr/bin/env node
+// MCP stdio server bridging a headless Claude Code agent to the Stark Tower app
+// over a Unix socket. Two tools:
+//   • delegate   — hand a task to a worker agent (JARVIS only)
+//   • ask_human  — the lavish alternative: render a review in-app and block for
+//                  the human's decision (any agent)
+// Line-delimited JSON-RPC 2.0 over stdio. No external deps.
+import net from "node:net";
+import readline from "node:readline";
+
+const SOCK = process.env.STARK_DELEGATE_SOCK;
+const AGENT_ID = process.env.STARK_AGENT_ID || "jarvis";
+
+function send(msg) {
+  process.stdout.write(JSON.stringify(msg) + "\n");
+}
+function log(...a) {
+  process.stderr.write("[stark-mcp] " + a.join(" ") + "\n");
+}
+
+const DELEGATE_TOOL = {
+  name: "delegate",
+  description:
+    "Dispatch a task to a Stark Tower worker agent. NON-BLOCKING: this returns immediately with " +
+    "an acknowledgement, NOT the worker's output — the worker runs in the background and its " +
+    "result is delivered to you later as a [DELEGATION RESULTS] message. " +
+    "Agents: friday (full-stack), edith (recon & research), karen (frontend & UI), " +
+    "veronica (ops & infra), vision (architecture & strategy). " +
+    "To run agents in parallel, emit multiple delegate tool calls in the SAME turn. " +
+    "Provide a complete, self-contained task — the worker does not see this conversation.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      agent: {
+        type: "string",
+        enum: ["friday", "edith", "karen", "veronica", "vision"],
+      },
+      task: { type: "string", description: "Full self-contained instructions." },
+      directory: { type: "string", description: "Absolute project dir (optional)." },
+    },
+    required: ["agent", "task"],
+  },
+};
+
+const ASK_HUMAN_TOOL = {
+  name: "ask_human",
+  description:
+    "Show Om a review and BLOCK until he decides — the human-in-the-loop surface " +
+    "(use this instead of any lavish/browser step). Use it to get sign-off on a plan, " +
+    "approval of a diff, Fix/Defer/Decline decisions on review findings, an answer to " +
+    "questions, a choice between options, or to show a rendered UI mockup. It renders in the " +
+    "app as a review card from you and returns Om's decision (plus any notes). For most kinds " +
+    "put the content in `body` as markdown (code fences and tables render). For kind 'mockup' " +
+    "put a COMPLETE self-contained HTML document in `body` (inline CSS, no external network/CDN) " +
+    "and the app renders it as a live screen preview. Keep `title` short.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      title: { type: "string", description: "Short header for the review card." },
+      body: {
+        type: "string",
+        description:
+          "Markdown for plan/diff/findings/questions/choice, or a complete self-contained " +
+          "HTML document when kind is 'mockup'.",
+      },
+      kind: {
+        type: "string",
+        enum: ["plan", "diff", "findings", "questions", "choice", "mockup"],
+        description:
+          "Shapes how it's shown. 'mockup' renders body as a live HTML UI preview; the rest " +
+          "render body as markdown. Default 'choice'.",
+      },
+      choices: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Decision buttons (e.g. ['Approve','Request changes'] or ['Fix','Defer','Decline']). " +
+          "Omit for a free-text answer (kind 'questions').",
+      },
+    },
+    required: ["title", "body"],
+  },
+};
+
+// ---- command permission gate (auto-run safe, route risky) ----
+const SAFE_CMDS = new Set([
+  "npm", "pnpm", "yarn", "bun", "npx", "node", "deno", "tsc", "tsx", "ts-node",
+  "vite", "next", "expo", "jest", "vitest", "mocha", "cypress", "playwright",
+  "eslint", "prettier", "biome", "cargo", "rustc", "rustup", "go", "python",
+  "python3", "pip", "pip3", "poetry", "uv", "pytest", "ruff", "black", "mypy",
+  "ruby", "bundle", "rails", "rake", "mvn", "gradle", "make", "cmake", "git",
+  "gh", "ls", "cat", "head", "tail", "grep", "rg", "ag", "find", "fd", "mkdir",
+  "touch", "echo", "pwd", "wc", "sed", "awk", "sort", "uniq", "cut", "tr",
+  "diff", "cp", "mv", "which", "type", "env", "date", "whoami", "du", "df",
+  "tree", "jq", "yq", "stat", "basename", "dirname", "readlink", "realpath",
+  "xargs", "true", "test", "printf", "cd", "export", "source", "nvm", "fnm",
+]);
+const RISKY = [
+  /\brm\s+-\w*[rf]/, /\bsudo\b/, /(^|\s)su\s/,
+  /\|\s*(sudo\s+)?(sh|bash|zsh|fish)\b/,
+  /\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(sh|bash)/,
+  /\bdd\b/, /\bmkfs\w*/, /\bfdisk\b/, /\bdiskutil\b/, /\bchmod\b/, /\bchown\b/,
+  /git\s+push\b.*(--force|-f\b)/, /git\s+reset\s+--hard/, /git\s+clean\s+-\w*f/,
+  /\b(npm|pnpm|yarn)\s+(publish|unpublish)\b/,
+  /\b(kill|pkill|killall)\b/, /\b(shutdown|reboot|halt)\b/,
+  /\blaunchctl\b/, /\bsystemctl\b/, /\bcrontab\b/, /:\(\)\s*\{/,
+  />\s*\/(etc|dev|sys|System|usr|bin|sbin|boot|Library)\b/,
+];
+function classifyBash(cmd) {
+  const c = String(cmd || "");
+  for (const r of RISKY) if (r.test(c)) return "route";
+  const tokens = c.trim().split(/\s+/);
+  let i = 0;
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
+  const first = (tokens[i] || "").replace(/^.*\//, "");
+  return SAFE_CMDS.has(first) ? "allow" : "route";
+}
+
+const APPROVE_TOOL = {
+  name: "approve",
+  description:
+    "Runtime permission gate — called automatically by Claude Code, not by you. Do not invoke directly.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      tool_name: { type: "string" },
+      input: { type: "object" },
+      tool_use_id: { type: "string" },
+    },
+  },
+};
+
+function bridge(payload) {
+  return new Promise((resolve) => {
+    if (!SOCK) return resolve({ error: "bridge socket not configured" });
+    const conn = net.createConnection(SOCK);
+    let buf = "";
+    conn.on("connect", () => conn.write(JSON.stringify(payload) + "\n"));
+    conn.on("data", (d) => {
+      buf += d.toString();
+      const nl = buf.indexOf("\n");
+      if (nl >= 0) {
+        const line = buf.slice(0, nl);
+        conn.end();
+        try {
+          resolve(JSON.parse(line));
+        } catch {
+          resolve({ error: "bad response from app" });
+        }
+      }
+    });
+    conn.on("error", (e) => resolve({ error: String(e && e.message ? e.message : e) }));
+  });
+}
+
+function toolsList() {
+  const tools = [ASK_HUMAN_TOOL, APPROVE_TOOL];
+  if (AGENT_ID === "jarvis") tools.unshift(DELEGATE_TOOL);
+  return tools;
+}
+
+function result(id, text, isError) {
+  send({
+    jsonrpc: "2.0",
+    id,
+    result: { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) },
+  });
+}
+
+const rl = readline.createInterface({ input: process.stdin });
+rl.on("line", async (raw) => {
+  const line = raw.trim();
+  if (!line) return;
+  let msg;
+  try {
+    msg = JSON.parse(line);
+  } catch {
+    return;
+  }
+  const { id, method, params } = msg;
+
+  if (method === "initialize") {
+    send({
+      jsonrpc: "2.0",
+      id,
+      result: {
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "stark-bridge", version: "0.2.0" },
+      },
+    });
+  } else if (method === "notifications/initialized") {
+    // no reply
+  } else if (method === "tools/list") {
+    send({ jsonrpc: "2.0", id, result: { tools: toolsList() } });
+  } else if (method === "tools/call") {
+    const name = params && params.name;
+    const args = (params && params.arguments) || {};
+    if (name === "delegate") {
+      log("delegate ->", args.agent);
+      const res = await bridge({
+        type: "delegate",
+        agent: args.agent,
+        task: args.task,
+        directory: args.directory || "",
+      });
+      if (res.error) result(id, "Delegation failed: " + res.error, true);
+      else result(id, res.result || "(no result)");
+    } else if (name === "ask_human") {
+      log("ask_human ->", args.title);
+      const res = await bridge({
+        type: "review",
+        agentId: AGENT_ID,
+        title: args.title || "Review",
+        body: args.body || "",
+        kind: args.kind || "choice",
+        choices: Array.isArray(args.choices) ? args.choices : [],
+      });
+      if (res.error) result(id, "ask_human failed: " + res.error, true);
+      else result(id, res.result || "(no decision)");
+    } else if (name === "approve") {
+      const toolName = args.tool_name || args.toolName || "";
+      const input = args.input || args.tool_input || {};
+      let decision;
+      if (toolName === "Bash") {
+        const cmd = String((input && input.command) || "");
+        if (classifyBash(cmd) === "allow") {
+          decision = { behavior: "allow", updatedInput: input };
+        } else {
+          log("gate ->", cmd.slice(0, 60));
+          const res = await bridge({ type: "approve", agentId: AGENT_ID, command: cmd });
+          decision = res.approved
+            ? { behavior: "allow", updatedInput: input }
+            : { behavior: "deny", message: res.reason || "Om denied this command." };
+        }
+      } else {
+        decision = { behavior: "allow", updatedInput: input };
+      }
+      result(id, JSON.stringify(decision));
+    } else {
+      result(id, "unknown tool", true);
+    }
+  } else if (method && id !== undefined) {
+    send({ jsonrpc: "2.0", id, error: { code: -32601, message: "method not found" } });
+  }
+});
