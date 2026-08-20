@@ -29,7 +29,9 @@ pub fn resolve_engine(engine_id: &str) -> EngineSpec {
 /// sure `claude` (and Node, Homebrew tools) resolve even when the app is
 /// launched from Finder with a minimal PATH.
 pub fn build_command(spec: &EngineSpec, cwd: &str) -> CommandBuilder {
-    let mut cmd = CommandBuilder::new(&spec.program);
+    // Resolve via a login shell so a Finder-launched app finds nvm/brew CLIs.
+    let program = crate::chat::resolve_program(&spec.program).unwrap_or_else(|| spec.program.clone());
+    let mut cmd = CommandBuilder::new(&program);
     for a in &spec.args {
         cmd.arg(a);
     }

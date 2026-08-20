@@ -10,6 +10,9 @@ import readline from "node:readline";
 
 const SOCK = process.env.STARK_DELEGATE_SOCK;
 const AGENT_ID = process.env.STARK_AGENT_ID || "jarvis";
+// Per-launch secret the app expects on every bridge request; without it the app
+// rejects the connection as unauthorized.
+const TOKEN = process.env.STARK_DELEGATE_TOKEN || "";
 // Only the orchestrator gets the delegate tool. STARK_ROLE is set by the app;
 // fall back to the legacy id check if it's somehow missing.
 const IS_ORCH =
@@ -146,7 +149,9 @@ function bridge(payload) {
     if (!SOCK) return resolve({ error: "bridge socket not configured" });
     const conn = net.createConnection(SOCK);
     let buf = "";
-    conn.on("connect", () => conn.write(JSON.stringify(payload) + "\n"));
+    conn.on("connect", () =>
+      conn.write(JSON.stringify({ ...payload, token: TOKEN }) + "\n"),
+    );
     conn.on("data", (d) => {
       buf += d.toString();
       const nl = buf.indexOf("\n");

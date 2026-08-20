@@ -32,7 +32,12 @@ pub struct AppState {
     /// so the periodic roster reconcile doesn't clobber chat/pty state.
     pub statuses: Mutex<HashMap<String, AgentStatus>>,
     /// Unix socket the Stark bridge MCP tools (delegate, ask_human) talk to.
+    /// Lives in the app data dir (0700), with a per-launch random name so two
+    /// instances don't collide.
     pub sock_path: String,
+    /// Per-launch secret every bridge request must carry, so a stray local
+    /// process can't dispatch work or answer approvals over the socket.
+    pub sock_token: String,
     /// Pending human-review requests (id → channel that unblocks the agent).
     pub reviews: Mutex<HashMap<String, std::sync::mpsc::Sender<String>>>,
     /// The current batch of background delegations JARVIS is waiting on, so their
@@ -60,6 +65,27 @@ impl AppState {
 
 fn default_workdir() -> String {
     std::env::var("HOME").unwrap_or_else(|_| ".".into())
+}
+
+/// A per-launch secret for the delegation socket. 16 bytes from the OS CSPRNG,
+/// hex-encoded; falls back to a time+pid mix if /dev/urandom is unavailable.
+fn gen_token() -> String {
+    let mut buf = [0u8; 16];
+    let ok = std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| {
+            use std::io::Read;
+            f.read_exact(&mut buf)
+        })
+        .is_ok();
+    if !ok {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let mix = nanos ^ ((std::process::id() as u128) << 64);
+        buf.copy_from_slice(&mix.to_le_bytes());
+    }
+    buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Default project the tower opens in: ~/Documents (falling back to HOME).
@@ -750,7 +776,23 @@ pub fn run() {
             let ledger =
                 Ledger::open(&data_dir.join("ledger.db")).expect("failed to open ledger db");
 
-            let sock_path = "/tmp/stark-tower-delegate.sock".to_string();
+            // Per-launch token + a randomly-named socket inside the app data dir
+            // (which is user-only, 0700), instead of a predictable world-reachable
+            // /tmp path. Sweep any stale delegate sockets from a previous run.
+            let sock_token = gen_token();
+            if let Ok(rd) = std::fs::read_dir(&data_dir) {
+                for e in rd.flatten() {
+                    let n = e.file_name();
+                    let n = n.to_string_lossy();
+                    if n.starts_with("delegate-") && n.ends_with(".sock") {
+                        let _ = std::fs::remove_file(e.path());
+                    }
+                }
+            }
+            let sock_path = data_dir
+                .join(format!("delegate-{sock_token}.sock"))
+                .to_string_lossy()
+                .to_string();
             let projects_file = data_dir.join("projects.json").to_string_lossy().to_string();
             let (projects, active) = load_projects(&projects_file);
 
@@ -769,6 +811,7 @@ pub fn run() {
                 workdirs: Mutex::new(HashMap::new()),
                 statuses: Mutex::new(HashMap::new()),
                 sock_path: sock_path.clone(),
+                sock_token: sock_token.clone(),
                 reviews: Mutex::new(HashMap::new()),
                 delegations: Mutex::new(chat::DelegationState::default()),
                 config: Mutex::new(cfg),

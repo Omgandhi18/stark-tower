@@ -6,7 +6,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use tauri::{Emitter, Manager};
 
 static REVIEW_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -299,6 +299,71 @@ fn system_prompt_for(app: &tauri::AppHandle, agent_id: &str) -> String {
     }
 }
 
+fn program_cache() -> &'static Mutex<HashMap<String, String>> {
+    static C: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    C.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Resolve a CLI's absolute path the way a login shell would, so an engine
+/// binary installed via nvm / fnm / asdf / volta / Homebrew resolves even when
+/// the app is launched from Finder with a minimal PATH. Positive results are
+/// cached; misses are deliberately not, so a just-installed CLI is seen next try.
+pub fn resolve_program(cmd: &str) -> Option<String> {
+    let cmd = cmd.trim();
+    if cmd.is_empty() {
+        return None;
+    }
+    // An explicit path is honored as-is (if it exists).
+    if cmd.contains('/') {
+        return std::path::Path::new(cmd).exists().then(|| cmd.to_string());
+    }
+    if let Some(p) = program_cache().lock().unwrap().get(cmd) {
+        if std::path::Path::new(p).exists() {
+            return Some(p.clone());
+        }
+    }
+    // Only a plain binary name may go through the shell (no metacharacters).
+    let simple = cmd.chars().all(|c| c.is_ascii_alphanumeric() || "._+-".contains(c));
+    if simple {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+        if let Ok(out) = Command::new(&shell)
+            .args(["-lc", &format!("command -v {cmd} 2>/dev/null | tail -n1")])
+            .output()
+        {
+            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !path.is_empty() && std::path::Path::new(&path).exists() {
+                program_cache().lock().unwrap().insert(cmd.to_string(), path.clone());
+                return Some(path);
+            }
+        }
+    }
+    // Fallback: probe the common install locations directly.
+    let home = std::env::var("HOME").unwrap_or_default();
+    let candidates = [
+        format!("{home}/.local/bin/{cmd}"),
+        format!("{home}/.claude/local/{cmd}"),
+        format!("{home}/.bun/bin/{cmd}"),
+        format!("{home}/.volta/bin/{cmd}"),
+        format!("/opt/homebrew/bin/{cmd}"),
+        format!("/usr/local/bin/{cmd}"),
+    ];
+    for c in candidates {
+        if std::path::Path::new(&c).exists() {
+            program_cache().lock().unwrap().insert(cmd.to_string(), c.clone());
+            return Some(c);
+        }
+    }
+    None
+}
+
+/// A friendly error when an engine's CLI isn't installed / on PATH.
+fn missing_engine_error(engine: &EngineConfig) -> String {
+    format!(
+        "{} (`{}`) wasn't found. Install it and make sure it's on your PATH, then reopen Stark Tower.",
+        engine.label, engine.command
+    )
+}
+
 /// Build the headless command for an agent's session on a given engine.
 ///
 /// The Claude Code adapter (`kind == "claude-code"`) drives our full protocol:
@@ -316,8 +381,11 @@ fn build_headless(
     system_prompt: Option<&str>,
     resume: Option<&str>,
     sock_path: &str,
+    sock_token: &str,
 ) -> Command {
-    let mut cmd = Command::new(&engine.command);
+    // Resolve to an absolute path so a Finder-launched app finds nvm/brew CLIs.
+    let program = resolve_program(&engine.command).unwrap_or_else(|| engine.command.clone());
+    let mut cmd = Command::new(&program);
     let mut args: Vec<String> = Vec::new();
 
     if engine.kind == "claude-code" {
@@ -373,7 +441,8 @@ fn build_headless(
                             "env": {
                                 "STARK_DELEGATE_SOCK": sock_path,
                                 "STARK_AGENT_ID": aid,
-                                "STARK_ROLE": role
+                                "STARK_ROLE": role,
+                                "STARK_DELEGATE_TOKEN": sock_token
                             }
                         }
                     }
@@ -564,6 +633,9 @@ pub fn start_session(
 ) -> Result<(), String> {
     let prompt = system_prompt_for(app, agent_id);
     let engine = agent_engine(app, agent_id);
+    if resolve_program(&engine.command).is_none() {
+        return Err(missing_engine_error(&engine));
+    }
     let model = agent_model(app, agent_id, &engine);
     let is_orch = agent_is_orchestrator(app, agent_id);
     // If we've talked to this agent in this directory before, resume that
@@ -572,6 +644,10 @@ pub fn start_session(
         .try_state::<crate::AppState>()
         .and_then(|s| s.ledger.get_session(agent_id, cwd));
     let resumed = resume.is_some();
+    let token = app
+        .try_state::<crate::AppState>()
+        .map(|s| s.sock_token.clone())
+        .unwrap_or_default();
     let mut child = build_headless(
         &engine,
         &model,
@@ -581,6 +657,7 @@ pub fn start_session(
         Some(&prompt),
         resume.as_deref(),
         sock_path,
+        &token,
     )
     .spawn()
     .map_err(|e| e.to_string())?;
@@ -732,12 +809,15 @@ pub fn run_task_blocking(
 
     // Delegated workers also get their skill kit + the ask_human bridge, so
     // their review gates work even when JARVIS delegated the task.
-    let sock = app
+    let (sock, token) = app
         .try_state::<crate::AppState>()
-        .map(|s| s.sock_path.clone())
+        .map(|s| (s.sock_path.clone(), s.sock_token.clone()))
         .unwrap_or_default();
     let prompt = system_prompt_for(app, agent_id);
     let engine = agent_engine(app, agent_id);
+    if resolve_program(&engine.command).is_none() {
+        return Err(missing_engine_error(&engine));
+    }
     let model = agent_model(app, agent_id, &engine);
     let is_orch = agent_is_orchestrator(app, agent_id);
     let mut child = build_headless(
@@ -749,6 +829,7 @@ pub fn run_task_blocking(
         Some(&prompt),
         None,
         &sock,
+        &token,
     )
     .spawn()
     .map_err(|e| e.to_string())?;
@@ -876,6 +957,11 @@ pub fn start_delegation_server(app: tauri::AppHandle, sock_path: String) {
         Ok(l) => l,
         Err(_) => return,
     };
+    // Owner-only on the socket node itself, on top of the 0700 app data dir.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o600));
+    }
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
@@ -906,6 +992,17 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
             return;
         }
     };
+    // Reject anything not carrying this launch's secret, so a stray local process
+    // can't dispatch work, answer approvals, or enumerate the roster.
+    let expected = app
+        .try_state::<crate::AppState>()
+        .map(|s| s.sock_token.clone())
+        .unwrap_or_default();
+    let got = req.get("token").and_then(|t| t.as_str()).unwrap_or("");
+    if expected.is_empty() || got != expected {
+        reply(&mut writer, serde_json::json!({"error": "unauthorized"}));
+        return;
+    }
     match req.get("type").and_then(|t| t.as_str()) {
         Some("review") => {
             handle_review(app, &mut writer, &req);
