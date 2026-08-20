@@ -652,6 +652,71 @@ fn get_memory(state: tauri::State<AppState>, agent_id: String) -> String {
     std::fs::read_to_string(path).unwrap_or_default()
 }
 
+/// Bugs agents have reported about the app, newest first.
+#[tauri::command]
+#[specta::specta]
+fn get_bugs(state: tauri::State<AppState>) -> Vec<ledger::Bug> {
+    state.ledger.bugs(200)
+}
+
+/// Change a bug's status (open | doing | fixed | wontfix).
+#[tauri::command]
+#[specta::specta]
+fn set_bug_status(app: tauri::AppHandle, state: tauri::State<AppState>, id: i64, status: String) {
+    state.ledger.set_bug_status(id, &status);
+    let _ = app.emit("bugs://changed", ());
+}
+
+/// The stark-tower repo root (the maintenance agent's working dir).
+fn repo_root() -> String {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").to_string())
+}
+
+/// "Solve them now": hand the open bugs to the maintenance agent (DUM-E), which
+/// works through them in the app's repo. Streams to DUM-E's chat tab; the bugs
+/// are marked doing, then fixed when the run completes (reopen from the UI if not).
+#[tauri::command]
+#[specta::specta]
+fn run_maintenance(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
+    let bugs = state.ledger.open_bugs();
+    if bugs.is_empty() {
+        return Err("No open bugs to fix.".into());
+    }
+    for b in &bugs {
+        state.ledger.set_bug_status(b.id, "doing");
+    }
+    let _ = app.emit("bugs://changed", ());
+
+    let mut task = String::from(
+        "Fix these bugs that agents reported in the Stark Tower app. Work in THIS repo (your cwd). \
+For each: locate the cause, fix it cleanly (match the surrounding code, keep it minimal and \
+reversible), and briefly say what you changed. If one is too vague to act on, say what you'd need.\n\n",
+    );
+    for b in &bugs {
+        task.push_str(&format!(
+            "[bug #{}] (reported by {}) {}\n{}\n\n",
+            b.id, b.reporter, b.title, b.detail
+        ));
+    }
+    let repo = repo_root();
+    state.workdirs.lock().unwrap().insert("dum-e".into(), repo.clone());
+    let ids: Vec<i64> = bugs.iter().map(|b| b.id).collect();
+
+    std::thread::spawn(move || {
+        let _ = chat::run_task_blocking(&app, "dum-e", &task, &repo);
+        if let Some(state) = app.try_state::<AppState>() {
+            for id in ids {
+                state.ledger.set_bug_status(id, "fixed");
+            }
+        }
+        let _ = app.emit("bugs://changed", ());
+    });
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 fn get_project(state: tauri::State<AppState>) -> String {
@@ -912,6 +977,9 @@ fn specta_builder() -> tauri_specta::Builder {
             get_ledger,
             get_tasks,
             get_memory,
+            get_bugs,
+            set_bug_status,
+            run_maintenance,
             get_project,
             set_project,
             list_projects,

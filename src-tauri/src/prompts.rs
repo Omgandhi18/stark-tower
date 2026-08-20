@@ -176,7 +176,10 @@ Use it instead of any lavish or browser step.";
 const MESSAGE_NOTE: &str = "You can also `message` a teammate directly by their agent id — a \
 question, a heads-up, or a hand-off note. It's delivered to them when they're next free (no reply \
 on the call). Teammates' messages to you arrive inline as [MESSAGE from …]; read and act on them. \
-Use `message` to coordinate with a specialist; use `ask_human` for anything that needs Om.";
+Use `message` to coordinate with a specialist; use `ask_human` for anything that needs Om. If you \
+hit a bug or error in the Stark Tower APP itself (a broken tool, a crash, wrong behavior — not the \
+project you're working on), file it with `report_bug` and carry on; the maintenance agent fixes \
+those later.";
 
 const JARVIS_PLAYBOOK: &str = "Planning playbook (the sarathi funnel) — for a large or foggy \
 request, think before delegating: (1) if the idea is foggy, open it into a few distinct \

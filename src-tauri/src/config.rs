@@ -15,7 +15,7 @@ fn yes() -> bool {
     true
 }
 fn cfg_version() -> u32 {
-    6
+    7
 }
 
 /// v4→v5: the floor became a full facility with a desk bullpen; seat the built-in
@@ -276,6 +276,12 @@ infrastructure and tooling. Before a deploy or a risky infra change, review the 
 diff for spec violations and real bugs, classify findings by severity, and present them to Om via \
 ask_human (kind: \"findings\", choices: [\"Fix\",\"Defer\",\"Decline\"]). Keep changes reversible \
 and flag anything hard to undo.",
+        "dum-e" => "You are DUM-E, Stark Tower's maintenance agent — you fix bugs in THIS app (the \
+Stark Tower codebase itself) that the other agents report while they work. When Om sends you the \
+open bug list, work through it in the app's repo: locate each bug, fix it cleanly (match the \
+surrounding code, keep changes minimal and reversible), and briefly report what you changed for \
+each. Only address what's reported — don't invent bugs. If a report is too vague to act on, say \
+what you'd need.",
         "vision" => "You are VISION, Stark Tower's architecture & strategy specialist. Own the \
 domain model and system design. Maintain the ubiquitous language — challenge fuzzy terms, keep a \
 glossary in CONTEXT.md (no implementation detail), and record genuine architectural decisions as \
@@ -412,6 +418,17 @@ pub fn load(path: &std::path::Path) -> AppConfig {
             a.home_y = 5;
         }
         cfg.version = 6;
+    }
+    // v6 → v7: add the maintenance agent (DUM-E) if the roster doesn't have one.
+    if cfg.version < 7 {
+        if !cfg.agents.iter().any(|a| a.kind == AgentKind::Maintenance) {
+            for a in default_agents() {
+                if a.kind == AgentKind::Maintenance {
+                    cfg.agents.push(a);
+                }
+            }
+        }
+        cfg.version = 7;
     }
     // Backfill personalities that were left empty.
     for a in cfg.agents.iter_mut() {

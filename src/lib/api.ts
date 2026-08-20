@@ -73,6 +73,18 @@ export const openConversation = (conversationId: number) =>
 export const onConversationsChanged = (cb: () => void): Promise<UnlistenFn> =>
   listen("conversations://changed", () => cb());
 
+// ---- maintenance (bugs) ----
+
+export const getBugs = () => commands.getBugs();
+
+export const setBugStatus = (id: number, status: string) =>
+  commands.setBugStatus(id, status);
+
+export const runMaintenance = () => ok(commands.runMaintenance());
+
+export const onBugsChanged = (cb: () => void): Promise<UnlistenFn> =>
+  listen("bugs://changed", () => cb());
+
 /** List files and folders under a directory for the chat's @ file picker. */
 export const listFiles = (dir: string, limit?: number) =>
   commands.listFiles(dir, limit ?? null);

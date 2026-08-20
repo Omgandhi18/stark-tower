@@ -1468,3 +1468,50 @@ body {
 .history-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-agent { flex: none; color: var(--dim); font-size: 10px; letter-spacing: 0.03em; }
 .history-ago { flex: none; color: var(--dim); font-size: 10px; font-variant-numeric: tabular-nums; }
+
+/* Bugs / maintenance overlay */
+.ov-bugs {
+  top: 16px;
+  left: 282px;
+  width: 280px;
+  max-height: 50%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.bugs-list { overflow-y: auto; padding: 4px 2px 6px; display: flex; flex-direction: column; gap: 3px; }
+.bugs-fix {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 2px 0 6px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--working) 40%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--working) 12%, transparent);
+  color: var(--working);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.bugs-fix:hover { background: color-mix(in srgb, var(--working) 20%, transparent); }
+.bug-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; font-size: 12px; }
+.bug-status {
+  flex: none;
+  border: none;
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.bug-status-open { background: color-mix(in srgb, var(--danger) 18%, transparent); color: var(--danger); }
+.bug-status-doing { background: color-mix(in srgb, var(--reactor) 18%, transparent); color: var(--reactor); }
+.bug-status-fixed { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.bug-status-wontfix { background: rgba(255, 255, 255, 0.08); color: var(--dim); }
+.bug-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.bug-row.bug-fixed .bug-title, .bug-row.bug-wontfix .bug-title { color: var(--dim); text-decoration: line-through; }
+.bug-reporter { flex: none; color: var(--dim); font-size: 10px; letter-spacing: 0.03em; }

@@ -8,6 +8,7 @@ export type {
   AgentConfig,
   AppConfig,
   AuthConfig,
+  Bug,
   Conversation,
   EngineConfig,
   LedgerEntry,

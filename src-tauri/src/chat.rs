@@ -345,9 +345,9 @@ fn build_headless(
         if engine.supports_mcp {
             if let Some(aid) = agent_id {
                 let tools = if is_orchestrator {
-                    "mcp__stark__ask_human,mcp__stark__delegate,mcp__stark__message"
+                    "mcp__stark__ask_human,mcp__stark__delegate,mcp__stark__message,mcp__stark__report_bug"
                 } else {
-                    "mcp__stark__ask_human,mcp__stark__message"
+                    "mcp__stark__ask_human,mcp__stark__message,mcp__stark__report_bug"
                 };
                 args.push("--allowedTools".into());
                 args.push(tools.into());

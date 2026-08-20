@@ -24,6 +24,31 @@ async getTasks(limit: number | null) : Promise<Task[]> {
 async getMemory(agentId: string) : Promise<string> {
     return await TAURI_INVOKE("get_memory", { agentId });
 },
+/**
+ * Bugs agents have reported about the app, newest first.
+ */
+async getBugs() : Promise<Bug[]> {
+    return await TAURI_INVOKE("get_bugs");
+},
+/**
+ * Change a bug's status (open | doing | fixed | wontfix).
+ */
+async setBugStatus(id: number, status: string) : Promise<void> {
+    await TAURI_INVOKE("set_bug_status", { id, status });
+},
+/**
+ * "Solve them now": hand the open bugs to the maintenance agent (DUM-E), which
+ * works through them in the app's repo. Streams to DUM-E's chat tab; the bugs
+ * are marked doing, then fixed when the run completes (reopen from the UI if not).
+ */
+async runMaintenance() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("run_maintenance") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getProject() : Promise<string> {
     return await TAURI_INVOKE("get_project");
 },
@@ -264,7 +289,11 @@ model?: string;
  * Editable character/system prompt.
  */
 personality?: string; home_x: number; home_y: number; enabled?: boolean }
-export type AgentKind = "orchestrator" | "worker"
+export type AgentKind = "orchestrator" | "worker" | 
+/**
+ * Fixes bugs in THIS app that agents report — not a normal delegation target.
+ */
+"maintenance"
 /**
  * Live status of an agent, drives the pixel sprite animation on the floor.
  */
@@ -295,6 +324,14 @@ export type AuthConfig = { method?: string;
  * Environment variables to inject into the engine process (API keys etc.).
  */
 env?: Partial<{ [key in string]: string }> }
+/**
+ * A bug in the app, reported by an agent for the maintenance agent to fix.
+ */
+export type Bug = { id: number; reporter: string; title: string; detail: string; 
+/**
+ * open | doing | fixed | wontfix
+ */
+status: string; created: number; updated: number }
 /**
  * A saved chat — one continuous conversation with an agent, resumable later.
  */

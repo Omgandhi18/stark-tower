@@ -191,8 +191,25 @@ const MESSAGE_TOOL = {
   },
 };
 
+const REPORT_BUG_TOOL = {
+  name: "report_bug",
+  description:
+    "Report a bug or error you hit in the Stark Tower APP ITSELF (the harness — not the project " +
+    "you're working on): a broken tool, a wrong behavior, a crash, a confusing failure. It's filed " +
+    "for the maintenance agent to fix later; you don't stop your work. Give a clear title and enough " +
+    "detail (what you did, what happened, any error text) to reproduce it.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      title: { type: "string", description: "One-line summary of the bug." },
+      detail: { type: "string", description: "What happened, steps, error text." },
+    },
+    required: ["title"],
+  },
+};
+
 async function toolsList() {
-  const tools = [ASK_HUMAN_TOOL, MESSAGE_TOOL, APPROVE_TOOL];
+  const tools = [ASK_HUMAN_TOOL, MESSAGE_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
   if (IS_ORCH) {
     const workers = await getRoster();
     tools.unshift(buildDelegateTool(workers));
@@ -269,6 +286,16 @@ rl.on("line", async (raw) => {
       });
       if (res.error) result(id, "message failed: " + res.error, true);
       else result(id, res.result || "(queued)");
+    } else if (name === "report_bug") {
+      log("report_bug ->", args.title);
+      const res = await bridge({
+        type: "report_bug",
+        agentId: AGENT_ID,
+        title: args.title || "",
+        detail: args.detail || "",
+      });
+      if (res.error) result(id, "report_bug failed: " + res.error, true);
+      else result(id, res.result || "(filed)");
     } else if (name === "approve") {
       const toolName = args.tool_name || args.toolName || "";
       const input = args.input || args.tool_input || {};

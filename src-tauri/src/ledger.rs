@@ -64,6 +64,19 @@ pub struct Task {
     pub detail: Option<String>,
 }
 
+/// A bug in the app, reported by an agent for the maintenance agent to fix.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct Bug {
+    pub id: i64,
+    pub reporter: String,
+    pub title: String,
+    pub detail: String,
+    /// open | doing | fixed | wontfix
+    pub status: String,
+    pub created: i64,
+    pub updated: i64,
+}
+
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -178,10 +191,88 @@ impl Ledger {
             "CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, id)",
             [],
         )?;
+        // Bugs agents report about the app, for the maintenance agent to fix.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS bugs (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                reporter TEXT    NOT NULL,
+                title    TEXT    NOT NULL,
+                detail   TEXT    NOT NULL DEFAULT '',
+                status   TEXT    NOT NULL DEFAULT 'open',
+                created  INTEGER NOT NULL,
+                updated  INTEGER NOT NULL
+            )",
+            [],
+        )?;
         Ok(Ledger {
             conn: Mutex::new(conn),
             active: Mutex::new(HashMap::new()),
         })
+    }
+
+    // ---- bugs (maintenance) ------------------------------------------------
+
+    /// File a bug reported by an agent. Returns its id.
+    pub fn add_bug(&self, reporter: &str, title: &str, detail: &str) -> i64 {
+        let ts = now_ms();
+        let conn = self.conn.lock().unwrap();
+        let _ = conn.execute(
+            "INSERT INTO bugs (reporter, title, detail, status, created, updated) \
+             VALUES (?1, ?2, ?3, 'open', ?4, ?4)",
+            rusqlite::params![reporter, title, detail, ts],
+        );
+        conn.last_insert_rowid()
+    }
+
+    fn read_bugs(&self, sql: &str, params: &[&dyn rusqlite::ToSql]) -> Vec<Bug> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = match conn.prepare(sql) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        let rows = stmt.query_map(params, |r| {
+            Ok(Bug {
+                id: r.get(0)?,
+                reporter: r.get(1)?,
+                title: r.get(2)?,
+                detail: r.get(3)?,
+                status: r.get(4)?,
+                created: r.get(5)?,
+                updated: r.get(6)?,
+            })
+        });
+        match rows {
+            Ok(it) => it.filter_map(|x| x.ok()).collect(),
+            Err(_) => vec![],
+        }
+    }
+
+    /// All bugs, newest first.
+    pub fn bugs(&self, limit: i64) -> Vec<Bug> {
+        self.read_bugs(
+            "SELECT id, reporter, title, detail, status, created, updated FROM bugs \
+             ORDER BY updated DESC LIMIT ?1",
+            &[&limit],
+        )
+    }
+
+    /// Bugs still needing work (open or in progress).
+    pub fn open_bugs(&self) -> Vec<Bug> {
+        self.read_bugs(
+            "SELECT id, reporter, title, detail, status, created, updated FROM bugs \
+             WHERE status IN ('open','doing') ORDER BY created ASC",
+            &[],
+        )
+    }
+
+    /// Move a bug to a new status.
+    pub fn set_bug_status(&self, id: i64, status: &str) {
+        let ts = now_ms();
+        let conn = self.conn.lock().unwrap();
+        let _ = conn.execute(
+            "UPDATE bugs SET status = ?2, updated = ?3 WHERE id = ?1",
+            rusqlite::params![id, status, ts],
+        );
     }
 
     // ---- conversations (saved chats) ---------------------------------------

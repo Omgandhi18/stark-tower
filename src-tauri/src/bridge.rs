@@ -83,6 +83,10 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
             handle_message(app, &mut writer, &req);
             return;
         }
+        Some("report_bug") => {
+            handle_report_bug(app, &mut writer, &req);
+            return;
+        }
         _ => {}
     }
 
@@ -169,6 +173,30 @@ fn handle_message(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_j
         serde_json::json!({
             "result": format!("Message queued for {}. They'll receive it when they're free.", to.to_uppercase())
         }),
+    );
+}
+
+/// An agent reports a bug in the app for the maintenance agent to fix later.
+fn handle_report_bug(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_json::Value) {
+    let reply = |w: &mut UnixStream, v: serde_json::Value| {
+        let _ = w.write_all((v.to_string() + "\n").as_bytes());
+    };
+    let from = req.get("agentId").and_then(|s| s.as_str()).unwrap_or("unknown");
+    let title = req.get("title").and_then(|s| s.as_str()).unwrap_or("").trim().to_string();
+    let detail = req.get("detail").and_then(|s| s.as_str()).unwrap_or("").trim().to_string();
+    if title.is_empty() {
+        reply(writer, serde_json::json!({"error": "a bug needs a title"}));
+        return;
+    }
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        state.ledger.add_bug(from, &title, &detail);
+        let e = state.ledger.record(from, "bug", &truncate(&title, 60), 2);
+        let _ = app.emit("ledger://entry", e);
+    }
+    let _ = app.emit("bugs://changed", ());
+    reply(
+        writer,
+        serde_json::json!({ "result": "Bug filed for the maintenance agent. Thanks — carry on." }),
     );
 }
 

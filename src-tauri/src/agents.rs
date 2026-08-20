@@ -16,6 +16,8 @@ pub enum AgentStatus {
 pub enum AgentKind {
     Orchestrator,
     Worker,
+    /// Fixes bugs in THIS app that agents report — not a normal delegation target.
+    Maintenance,
 }
 
 /// A member of the Stark Tower roster. `home_x`/`home_y` are tile coordinates
@@ -110,6 +112,18 @@ pub fn default_roster() -> Vec<Agent> {
             accent: "#FF9E64".into(),
             figure: "operative".into(),
             home_x: 8,
+            home_y: 13,
+            status: AgentStatus::Offline,
+        },
+        Agent {
+            id: "dum-e".into(),
+            name: "DUM-E".into(),
+            role: "Maintenance".into(),
+            kind: AgentKind::Maintenance,
+            engine: "claude-code".into(),
+            accent: "#9AA7B2".into(),
+            figure: "operative".into(),
+            home_x: 1,
             home_y: 13,
             status: AgentStatus::Offline,
         },

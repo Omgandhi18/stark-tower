@@ -43,6 +43,7 @@ import TasksBoard from "./components/TasksBoard";
 import CostHud from "./components/CostHud";
 import UpdateBadge from "./components/UpdateBadge";
 import HistoryPanel from "./components/HistoryPanel";
+import BugsPanel from "./components/BugsPanel";
 import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
 
@@ -352,6 +353,7 @@ export default function App() {
             onOpen={handleOpenConversation}
             onNew={handleNewChat}
           />
+          <BugsPanel onOpenAgent={openAgent} />
 
           <CostHud />
           <div className="floortag">
