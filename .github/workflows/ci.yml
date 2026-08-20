@@ -22,6 +22,11 @@ jobs:
           workspaces: src-tauri
       - name: Test
         run: cargo test
+      - name: Bindings up to date
+        # `cargo test` regenerates src/lib/bindings.ts; fail if it differs from
+        # what's committed (someone changed Rust types without re-exporting).
+        run: git diff --exit-code src/lib/bindings.ts
+        working-directory: ${{ github.workspace }}
       - name: Clippy
         run: cargo clippy -- -D warnings
 

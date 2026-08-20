@@ -1,73 +1,67 @@
-import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { commands, type Result } from "./bindings";
 import type {
-  Agent,
-  AgentConfig,
-  AppConfig,
   ChatEvent,
-  DispatchResult,
-  EngineConfig,
   LedgerEntry,
-  ProjectsState,
   PtyData,
-  PathEntry,
   ReviewRequest,
   StatusEvent,
-  StoredMessage,
-  Task,
 } from "./types";
+
+// Commands are the tauri-specta-generated, typed wrappers (bindings.ts). Fallible
+// Rust commands (Result<T, String>) return a Result here; `ok()` unwraps it back
+// to the throwing contract the app already expects.
+async function ok<T>(p: Promise<Result<T, string>>): Promise<T> {
+  const r = await p;
+  if (r.status === "error") throw new Error(r.error);
+  return r.data;
+}
 
 // ---- Commands (Rust) --------------------------------------------------------
 
-export const listAgents = () => invoke<Agent[]>("list_agents");
+export const listAgents = () => commands.listAgents();
 
-export const getLedger = (limit = 60) =>
-  invoke<LedgerEntry[]>("get_ledger", { limit });
+export const getLedger = (limit = 60) => commands.getLedger(limit);
 
-export const getTasks = (limit?: number) =>
-  invoke<Task[]>("get_tasks", { limit: limit ?? null });
+export const getTasks = (limit?: number) => commands.getTasks(limit ?? null);
 
 export const onTasksChanged = (cb: () => void): Promise<UnlistenFn> =>
   listen("tasks://changed", () => cb());
 
 /** An agent's durable memory markdown (what it curates across sessions). */
-export const getMemory = (agentId: string) =>
-  invoke<string>("get_memory", { agentId });
+export const getMemory = (agentId: string) => commands.getMemory(agentId);
 
 export const spawnAgent = (agentId: string, cols: number, rows: number) =>
-  invoke<void>("spawn_agent", { agentId, cols, rows });
+  ok(commands.spawnAgent(agentId, cols, rows));
 
 export const ptyWrite = (agentId: string, data: string) =>
-  invoke<void>("pty_write", { agentId, data });
+  ok(commands.ptyWrite(agentId, data));
 
 export const ptyResize = (agentId: string, cols: number, rows: number) =>
-  invoke<void>("pty_resize", { agentId, cols, rows });
+  ok(commands.ptyResize(agentId, cols, rows));
 
-export const killAgent = (agentId: string) =>
-  invoke<void>("kill_agent", { agentId });
+export const killAgent = (agentId: string) => ok(commands.killAgent(agentId));
 
 /** Release Ultron containment for a Blocked agent. */
-export const unblockAgent = (agentId: string) =>
-  invoke<void>("unblock_agent", { agentId });
+export const unblockAgent = (agentId: string) => commands.unblockAgent(agentId);
 
 export const dispatchTask = (prompt: string, cols: number, rows: number) =>
-  invoke<DispatchResult>("dispatch_task", { prompt, cols, rows });
+  ok(commands.dispatchTask(prompt, cols, rows));
 
 // ---- Chat (headless Claude Code) ----
 
 export const chatSend = (agentId: string, text: string, dir?: string) =>
-  invoke<void>("chat_send", { agentId, text, dir: dir ?? null });
+  ok(commands.chatSend(agentId, text, dir ?? null));
 
-export const chatStop = (agentId: string) =>
-  invoke<void>("chat_stop", { agentId });
+export const chatStop = (agentId: string) => commands.chatStop(agentId);
 
 /** Load an agent's persisted transcript to rehydrate the chat on reopen. */
 export const getChat = (agentId: string, limit?: number) =>
-  invoke<StoredMessage[]>("get_chat", { agentId, limit: limit ?? null });
+  commands.getChat(agentId, limit ?? null);
 
 /** List files and folders under a directory for the chat's @ file picker. */
 export const listFiles = (dir: string, limit?: number) =>
-  invoke<PathEntry[]>("list_files", { dir, limit: limit ?? null });
+  commands.listFiles(dir, limit ?? null);
 
 export const onChatEvent = (cb: (e: ChatEvent) => void): Promise<UnlistenFn> =>
   listen<ChatEvent>("chat://event", (evt) => cb(evt.payload));
@@ -80,51 +74,50 @@ export const onReviewRequest = (
   listen<ReviewRequest>("review://request", (evt) => cb(evt.payload));
 
 export const reviewRespond = (id: string, decision: string) =>
-  invoke<void>("review_respond", { id, decision });
+  commands.reviewRespond(id, decision);
 
-export const getProject = () => invoke<string>("get_project");
+export const getProject = () => commands.getProject();
 
-export const listProjects = () => invoke<ProjectsState>("list_projects");
+export const listProjects = () => commands.listProjects();
 
-export const setProject = (path: string) =>
-  invoke<ProjectsState>("set_project", { path });
+export const setProject = (path: string) => ok(commands.setProject(path));
 
-export const addProject = (path: string) =>
-  invoke<ProjectsState>("add_project", { path });
+export const addProject = (path: string) => ok(commands.addProject(path));
 
-export const removeProject = (path: string) =>
-  invoke<ProjectsState>("remove_project", { path });
+export const removeProject = (path: string) => commands.removeProject(path);
 
 // ---- configuration (engines + roster) ----
 
-export const getConfig = () => invoke<AppConfig>("get_config");
+export const getConfig = () => commands.getConfig();
 
-export const updateAgent = (agent: AgentConfig) =>
-  invoke<AppConfig>("update_agent", { agent });
+export const updateAgent = (agent: Parameters<typeof commands.updateAgent>[0]) =>
+  commands.updateAgent(agent);
 
-export const removeAgent = (id: string) =>
-  invoke<AppConfig>("remove_agent", { id });
+export const removeAgent = (id: string) => commands.removeAgent(id);
 
-export const updateEngine = (engine: EngineConfig) =>
-  invoke<AppConfig>("update_engine", { engine });
+export const updateEngine = (
+  engine: Parameters<typeof commands.updateEngine>[0],
+) => commands.updateEngine(engine);
 
-export const removeEngine = (id: string) =>
-  invoke<AppConfig>("remove_engine", { id });
+export const removeEngine = (id: string) => commands.removeEngine(id);
 
-export const setOnboarded = (value: boolean) =>
-  invoke<AppConfig>("set_onboarded", { value });
+export const setOnboarded = (value: boolean) => commands.setOnboarded(value);
 
 /** Set the standup mission cadence in minutes (0 = off). */
 export const setStandupMinutes = (minutes: number) =>
-  invoke<AppConfig>("set_standup_minutes", { minutes });
+  commands.setStandupMinutes(minutes);
 
-export const setLighting = (mode: string) =>
-  invoke<AppConfig>("set_lighting", { mode });
+export const setLighting = (mode: string) => commands.setLighting(mode);
 
-export const resetConfig = () => invoke<AppConfig>("reset_config");
+export const resetConfig = () => commands.resetConfig();
 
-export const onConfigChanged = (cb: (c: AppConfig) => void): Promise<UnlistenFn> =>
-  listen<AppConfig>("config://changed", (evt) => cb(evt.payload));
+export const onConfigChanged = (
+  cb: (c: Awaited<ReturnType<typeof commands.getConfig>>) => void,
+): Promise<UnlistenFn> =>
+  listen<Awaited<ReturnType<typeof commands.getConfig>>>(
+    "config://changed",
+    (evt) => cb(evt.payload),
+  );
 
 export const requestAssist = (
   from: string,
@@ -132,7 +125,7 @@ export const requestAssist = (
   note: string,
   cols: number,
   rows: number,
-) => invoke<void>("request_assist", { from, to, note, cols, rows });
+) => ok(commands.requestAssist(from, to, note, cols, rows));
 
 // ---- Events (Rust -> UI) ----------------------------------------------------
 
