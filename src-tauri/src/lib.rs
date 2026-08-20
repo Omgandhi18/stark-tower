@@ -1,5 +1,6 @@
 mod agents;
 mod breaker;
+mod bridge;
 mod chat;
 mod config;
 mod engine;
@@ -876,7 +877,7 @@ pub fn run() {
             });
 
             pty::start_idle_monitor(app.handle().clone());
-            chat::start_delegation_server(app.handle().clone(), sock_path);
+            bridge::start_delegation_server(app.handle().clone(), sock_path);
             start_mission_scheduler(app.handle().clone());
             Ok(())
         })
