@@ -92,7 +92,57 @@ function control(): Buf { const b = mk(58, 34); rct(b, 4, 12, 53, 30, C.metal); 
 function holoTable(): Buf { const b = mk(90, 56); for (let y = 0; y < 56; y++) for (let x = 0; x < 90; x++) { const dx = (x - 45) / 44, dy = (y - 34) / 20; if (dx * dx + dy * dy <= 1) px(b, x, y, C.metal); } for (let x = 0; x < 90; x++) for (let y = 0; y < 56; y++) { const dx = (x - 45) / 44, dy = (y - 34) / 20; if (dx * dx + dy * dy <= 1 && (x - 45) * (x - 45) / (40 * 40) + (y - 34) * (y - 34) / (17 * 17) > 1) px(b, x, y, C.metalLo); } for (let r = 0; r < 3; r++) { const rr = 6 + r * 5; for (let d = 0; d < 360; d += 6) px(b, 45 + Math.cos(d * Math.PI / 180) * rr, 22 + Math.sin(d * Math.PI / 180) * rr * 0.5, C.strip, 150 - r * 30); } rct(b, 44, 18, 46, 26, C.strip, 200); px(b, 45, 22, C.white); outline(b); return b; }
 function reactor(): Buf { const S = 92, cx = 46, cy = 46; const b = mk(S, S); const ring = (r: number, c: RGB, a: number, th = 1) => { for (let d = 0; d < 360; d += 2) { const rad = d * Math.PI / 180; for (let t = 0; t < th; t++) px(b, cx + Math.cos(rad) * (r + t), cy + Math.sin(rad) * (r + t), c, a); } }; ring(42, C.metalLo, 255, 4); ring(38, C.metal, 255, 2); ring(33, sh(C.strip, 0.7), 180, 2); ring(26, C.strip, 230, 3); ring(17, sh(C.strip, 1.2), 255, 2); for (let d = 0; d < 360; d += 45) { const rad = d * Math.PI / 180; for (let rr = 19; rr < 26; rr++) px(b, cx + Math.cos(rad) * rr, cy + Math.sin(rad) * rr, sh(C.strip, 1.1), 220); } for (let y = -9; y <= 9; y++) for (let x = -9; x <= 9; x++) { const dd = Math.hypot(x, y); if (dd < 10) px(b, cx + x, cy + y, dd < 4 ? [235, 250, 255] : sh(C.strip, 1.1), dd < 4 ? 255 : 200); } return b; }
 function reactorPad(): Buf { const S = 130, cx = 65, cy = 65; const b = mk(S, S); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const d = Math.hypot(x - cx, y - cy); if (d < 60) px(b, x, y, sh(C.floor, 1.3), d > 54 ? 200 : 255); if (d >= 56 && d < 60) px(b, x, y, C.strip, 150); } for (let a = 0; a < 360; a += 30) { const r = a * Math.PI / 180; for (let rr = 46; rr < 54; rr++) px(b, cx + Math.cos(r) * rr, cy + Math.sin(r) * rr, C.amber, 110); } return b; }
-function containment(): Buf { const b = mk(66, 66); rct(b, 3, 3, 62, 62, C.metalLo); rct(b, 3, 3, 62, 5, C.metalHi); rct(b, 10, 10, 55, 55, C.dark); for (let i = 0; i < 12; i++) { const x = 10 + i * 4; rct(b, x, 10, x + 1, 55, i % 2 ? C.amber : C.dark, 200); } rct(b, 18, 18, 47, 47, sh(C.dark, 1.4)); for (const [x, y] of [[6, 6], [58, 6], [6, 58], [58, 58]] as const) rct(b, x, y, x + 2, y + 2, C.red); outline(b); return b; }
+/** Ultron — a seething, red-eyed captive. Painted behind the containment bars. */
+function ultronFigure(): Buf {
+  const b = mk(30, 40);
+  const M = C.metal, MH = C.metalHi, ML = C.metalLo, MD = C.metalD, RED = C.red;
+  const HI: RGB = [150, 160, 178];
+  // hunched shoulders + pauldrons
+  rct(b, 3, 24, 26, 36, ML); rct(b, 3, 24, 26, 25, M);
+  rct(b, 1, 25, 5, 33, MD); rct(b, 24, 25, 28, 33, MD);
+  rct(b, 2, 25, 3, 31, ML); rct(b, 26, 25, 27, 31, ML);
+  // chest core (angry red glow-plate)
+  rct(b, 12, 27, 17, 33, MD); rct(b, 13, 28, 16, 31, sh(RED, 0.8));
+  px(b, 14, 29, [255, 200, 200]); px(b, 15, 29, [255, 200, 200]);
+  // neck
+  rct(b, 12, 21, 17, 24, MD);
+  // clenched claws raised (rage)
+  rct(b, 3, 20, 7, 25, ML); rct(b, 22, 20, 26, 25, ML);
+  for (const hx of [3, 22]) { px(b, hx + 1, 19, MD); px(b, hx + 3, 19, MD); }
+  // angular head — wide cheeks, narrow jaw
+  rct(b, 8, 7, 21, 20, M);
+  rct(b, 9, 5, 20, 7, MH); rct(b, 10, 4, 19, 5, ML);
+  px(b, 14, 2, MH); px(b, 15, 2, MH); px(b, 14, 3, MH); px(b, 15, 3, MH); // crest
+  rct(b, 8, 7, 9, 20, ML); rct(b, 20, 7, 21, 20, ML); // cheek shade
+  rct(b, 10, 18, 19, 21, ML); // jaw
+  rct(b, 9, 6, 20, 6, HI, 160); // top highlight
+  // brows sloping down to centre = furious
+  for (let i = 0; i < 4; i++) { px(b, 9 + i, 8 + i, MD); px(b, 10 + i, 8 + i, MD); px(b, 20 - i, 8 + i, MD); px(b, 19 - i, 8 + i, MD); }
+  // red slit eyes
+  rct(b, 9, 11, 12, 12, sh(RED, 1.15)); rct(b, 17, 11, 20, 12, sh(RED, 1.15));
+  px(b, 10, 11, [255, 210, 210]); px(b, 19, 11, [255, 210, 210]);
+  px(b, 12, 12, sh(RED, 0.7)); px(b, 17, 12, sh(RED, 0.7));
+  // cheek vents
+  px(b, 9, 15, MD); px(b, 9, 16, MD); px(b, 20, 15, MD); px(b, 20, 16, MD);
+  // snarling grille mouth
+  rct(b, 11, 15, 18, 17, MD);
+  for (let x = 11; x <= 18; x += 2) rct(b, x, 15, x, 16, sh(M, 1.2));
+  px(b, 14, 16, sh(RED, 0.8)); px(b, 15, 16, sh(RED, 0.8));
+  outline(b);
+  return b;
+}
+function containment(): Buf {
+  const b = mk(66, 66);
+  rct(b, 3, 3, 62, 62, C.metalLo); rct(b, 3, 3, 62, 5, C.metalHi); // outer frame
+  rct(b, 10, 10, 55, 55, C.dark); // cell interior
+  rct(b, 14, 14, 51, 51, sh(C.dark, 1.3)); // back wall
+  blit(b, ultronFigure(), 17, 12); // the prisoner
+  for (let i = 0; i < 9; i++) { const x = 10 + i * 5; rct(b, x, 10, x, 55, i % 2 ? C.amber : sh(C.dark, 1.3), 210); } // bars over him
+  rct(b, 10, 10, 55, 10, sh(C.metalLo, 1.1)); rct(b, 10, 55, 55, 55, C.metalD); // top/bottom rail
+  for (const [x, y] of [[6, 6], [58, 6], [6, 58], [58, 58]] as const) rct(b, x, y, x + 2, y + 2, C.red);
+  outline(b);
+  return b;
+}
 function wallScreen(): Buf { const b = mk(52, 26); rct(b, 2, 2, 49, 23, sh(C.metal, 0.8)); rct(b, 4, 4, 47, 21, C.screen); for (let i = 0; i < 5; i++) rct(b, 7, 6 + i * 3, 7 + (i % 2 ? 30 : 18), 6 + i * 3, C.glow, 180); rct(b, 30, 8, 44, 19, C.strip, 40); outline(b); return b; }
 function windowPane(): Buf { const b = mk(44, 26); rct(b, 2, 2, 41, 23, C.metalD); rct(b, 4, 4, 39, 21, [16, 26, 40]); for (let i = 0; i < 26; i++) px(b, 5 + (i * 7) % 34, 5 + (i * 5) % 16, C.white, 180); rct(b, 21, 4, 22, 21, C.metalD); rct(b, 4, 12, 39, 13, C.metalD); rct(b, 4, 4, 39, 5, C.strip, 90); outline(b); return b; }
 function lamp(): Buf { const b = mk(24, 12); rct(b, 1, 1, 22, 10, C.metalLo); rct(b, 3, 3, 20, 8, [255, 236, 200]); rct(b, 3, 3, 20, 3, [255, 249, 232]); rct(b, 4, 6, 19, 6, sh([255, 236, 200], 0.9)); outline(b); return b; }

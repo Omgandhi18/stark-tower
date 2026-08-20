@@ -13,6 +13,7 @@ import { COLORS, TILE } from "../lib/theme";
 import { resolveRecipe, sceneFrameBufs, SCENE_H, SCENE_W } from "../lib/charArt";
 import { type Buf, LAB_GH, LAB_GW, type LightSource, lightSources, renderFloor } from "../lib/labArt";
 import { renderLightmap } from "../lib/labLight";
+import { findPath, POIS, type Pt } from "../lib/labNav";
 
 interface Props {
   agents: Agent[];
@@ -29,6 +30,9 @@ const WALK_CYCLE = [0, 1, 0, 2]; // stand, step-L, stand, step-R
 
 const GRID_W = LAB_GW;
 const GRID_H = LAB_GH;
+
+// Boot-in entrance (bottom-centre) — agents spawn here and walk to their desks.
+const DOOR = { x: 15 * TILE, y: (GRID_H - 1) * TILE + TILE * 0.6 };
 
 interface CharFrames {
   front: Texture[];
@@ -52,10 +56,29 @@ interface FloorSprite {
   animPhase: number;
   animTimer: number;
   waitTimer: number;
-  target: { x: number; y: number } | null;
+  poiDwell: number;
+  target: Pt | null; // current waypoint
+  dest: Pt | null; // final goal the path leads to
+  path: Pt[]; // remaining waypoints after target
+  isBoss: boolean; // orchestrator — anchored at the reactor, faces the user
   status: AgentStatus;
   selected: boolean;
   accent: number;
+}
+
+/** Route a sprite to a world-space goal, following aisles/doors (A*). No-op if
+ *  it's already heading there, so it's cheap to call every frame. */
+function routeTo(s: FloorSprite, x: number, y: number) {
+  if (s.dest && Math.abs(s.dest.x - x) < 2 && Math.abs(s.dest.y - y) < 2) return;
+  s.dest = { x, y };
+  s.path = findPath({ x: s.x, y: s.y }, { x, y });
+  s.target = s.path.shift() ?? { x, y };
+}
+
+function stopHere(s: FloorSprite) {
+  s.dest = null;
+  s.path = [];
+  s.target = null;
 }
 
 function hexToNum(hex: string): number {
@@ -137,7 +160,9 @@ export default function StarkFloor({
   const darknessRef = useRef<Sprite | null>(null);
   const glowRef = useRef<Sprite | null>(null);
   const labelLayerRef = useRef<Container | null>(null);
+  const ultronRef = useRef<Graphics | null>(null);
   const sourcesRef = useRef<LightSource[]>([]);
+  const bootRef = useRef(true);
   const linkLayerRef = useRef<Graphics | null>(null);
   const spriteLayerRef = useRef<Container | null>(null);
   const spritesRef = useRef<Map<string, FloorSprite>>(new Map());
@@ -203,6 +228,13 @@ export default function StarkFloor({
         world.addChild(glow);
         glowRef.current = glow;
 
+        // Ultron's eyes + rage flash glow ABOVE the lighting (he burns through the
+        // dark), but below the labels.
+        const ultron = new Graphics();
+        ultron.eventMode = "none";
+        world.addChild(ultron);
+        ultronRef.current = ultron;
+
         // Name labels ride ABOVE the lighting so they stay crisp day or night.
         const labelLayer = new Container();
         labelLayer.eventMode = "none";
@@ -240,6 +272,8 @@ export default function StarkFloor({
           spritesRef.current.forEach((s) =>
             updateSprite(s, dt, t, helperOf, spritesRef.current),
           );
+
+          drawUltron(ultronRef.current, t);
 
           // assist beams
           const layer = linkLayerRef.current;
@@ -301,6 +335,14 @@ export default function StarkFloor({
         layer.addChild(s.container);
         labelLayerRef.current?.addChild(s.nameText);
         map.set(agent.id, s);
+        // Boot-in: the first roster enters through the door and walks to desks.
+        if (bootRef.current) {
+          s.x = DOOR.x + (Math.random() * 2 - 1) * TILE * 1.6;
+          s.y = DOOR.y;
+          s.container.x = s.x;
+          s.container.y = s.y;
+          routeTo(s, s.homeX, s.homeY);
+        }
       } else {
         // Live-apply appearance edits (character / accent / home / name).
         if (s.figure !== figure) {
@@ -311,11 +353,13 @@ export default function StarkFloor({
         const pos = feetPos(agent);
         s.homeX = pos.x;
         s.homeY = pos.y;
+        s.isBoss = agent.kind === "orchestrator";
         s.nameText.text = agent.name;
       }
       s.status = agent.status;
       s.selected = agent.id === selectedId;
     }
+    if (map.size > 0) bootRef.current = false; // entrance only plays once
 
     // Drop sprites for agents that were removed.
     for (const [id, s] of map) {
@@ -404,7 +448,11 @@ function createSprite(
     animPhase: 0,
     animTimer: 0,
     waitTimer: Math.random() * 2,
+    poiDwell: 0,
     target: null,
+    dest: null,
+    path: [],
+    isBoss: agent.kind === "orchestrator",
     status: agent.status,
     selected: false,
     accent: hexToNum(agent.accent),
@@ -419,67 +467,87 @@ function updateSprite(
   all: Map<string, FloorSprite>,
 ) {
   let moving = false;
+  const reqId = helperOf.get(s.id);
+  const requester = reqId ? all.get(reqId) : undefined;
+  const atHome = Math.hypot(s.x - s.homeX, s.y - s.homeY) < 8;
 
-  if (s.status === "offline") {
-    s.char.alpha = 0.9;
-    s.target = null;
-    s.animPhase = 0;
+  s.char.alpha = 1;
+
+  if (s.isBoss) {
+    // The orchestrator runs the room from the reactor and always faces the team.
+    if (!atHome) routeTo(s, s.homeX, s.homeY);
+    else stopHere(s);
+  } else if (requester) {
+    // pair up beside whoever asked for help
+    const side = s.x < requester.x ? -30 : 30;
+    routeTo(s, requester.x + side, requester.y);
+  } else if (s.status === "blocked") {
+    // awaiting your decision — hold position (the alert reads as "needs you")
+    stopHere(s);
+  } else if (s.status === "working" || s.status === "thinking") {
+    // heads-down: at the desk (walk there if displaced), then stay put
+    if (!atHome) routeTo(s, s.homeX, s.homeY);
+    else stopHere(s);
   } else {
-    s.char.alpha = 1;
-    const reqId = helperOf.get(s.id);
-    const requester = reqId ? all.get(reqId) : undefined;
-
-    if (requester) {
-      // walk next to the agent that asked for help
-      const side = s.x < requester.x ? -30 : 30;
-      s.target = { x: requester.x + side, y: requester.y };
-    } else if (s.status === "blocked") {
-      // awaiting your decision — hold position (the alert reads as "needs you")
-      s.target = null;
-    } else {
-      // working, thinking, idle all keep pacing near home so nobody freezes
-      if (!s.target) {
-        if (s.waitTimer > 0) {
-          s.waitTimer -= dt;
-        } else {
-          s.target = {
-            x: s.homeX + (Math.random() * 2 - 1) * TILE * 1.6,
-            y: s.homeY + (Math.random() * 2 - 1) * TILE * 1.1,
-          };
-        }
-      }
-    }
-
-    if (s.target) {
-      const dx = s.target.x - s.x;
-      const dy = s.target.y - s.y;
-      const d = Math.hypot(dx, dy);
-      if (d > 2) {
-        const step = Math.min(SPEED * dt, d);
-        const ux = dx / d;
-        const uy = dy / d;
-        s.x += ux * step;
-        s.y += uy * step;
-        // Only front + back views exist; face away only when heading up-screen.
-        if (uy < -0.35) s.facingBack = true;
-        else if (uy > 0.1 || Math.abs(ux) > 0.3) s.facingBack = false;
-        moving = true;
+    // idle or offline → free-roam the facility: coffee, servers, poke Ultron in
+    // containment, the fabricator, then drift back to the desk. Full pathfinding.
+    if (!s.dest && !s.target) {
+      if (s.waitTimer > 0) {
+        s.waitTimer -= dt;
+      } else if (Math.random() < 0.32) {
+        routeTo(s, s.homeX, s.homeY); // back to the desk for a bit
+        s.poiDwell = 2 + Math.random() * 3;
       } else {
-        s.target = null;
-        s.waitTimer = 0.6 + Math.random() * 2.4;
-        if (s.status === "working" || requester) s.facingBack = false; // face camera
+        const p = POIS[Math.floor(Math.random() * POIS.length)];
+        routeTo(s, p.x, p.y);
+        s.poiDwell = p.dwell[0] + Math.random() * (p.dwell[1] - p.dwell[0]);
       }
     }
+  }
 
-    if (moving) {
-      s.animTimer += dt;
-      if (s.animTimer > 0.16) {
-        s.animTimer = 0;
-        s.animPhase = (s.animPhase + 1) % WALK_CYCLE.length;
-      }
+  // Follow the current path: advance waypoint-to-waypoint toward the goal.
+  if (!s.target && s.path.length) s.target = s.path.shift() ?? null;
+  if (s.target) {
+    const dx = s.target.x - s.x;
+    const dy = s.target.y - s.y;
+    const d = Math.hypot(dx, dy);
+    if (d > 2) {
+      const step = Math.min(SPEED * dt, d);
+      const ux = dx / d;
+      const uy = dy / d;
+      s.x += ux * step;
+      s.y += uy * step;
+      // Only front + back views exist; face away only when heading up-screen.
+      if (uy < -0.35) s.facingBack = true;
+      else if (uy > 0.1 || Math.abs(ux) > 0.3) s.facingBack = false;
+      moving = true;
     } else {
-      s.animPhase = 0;
+      s.x = s.target.x;
+      s.y = s.target.y;
+      s.target = s.path.length ? (s.path.shift() ?? null) : null;
+      if (!s.target) {
+        // reached the final destination — linger, then decide again
+        s.dest = null;
+        s.waitTimer = s.poiDwell > 0 ? s.poiDwell : 0.6 + Math.random() * 2.4;
+        s.poiDwell = 0;
+      }
     }
+  }
+
+  // Face the user when settled at a "presenting" spot (boss always; desk work).
+  if (!s.target) {
+    if (s.isBoss || s.status === "working" || s.status === "thinking" || requester)
+      s.facingBack = false;
+  }
+
+  if (moving) {
+    s.animTimer += dt;
+    if (s.animTimer > 0.16) {
+      s.animTimer = 0;
+      s.animPhase = (s.animPhase + 1) % WALK_CYCLE.length;
+    }
+  } else {
+    s.animPhase = 0;
   }
 
   const set = s.facingBack ? s.frames.back : s.frames.front;
@@ -491,6 +559,29 @@ function updateSprite(
 
   drawRing(s, t);
   drawBubble(s, t);
+}
+
+// Ultron rages in the containment unit (tile 22,15). His eyes simmer, flare on a
+// slow anger surge, and rattle the cell — glowing over the night lighting.
+const ULTRON = { ex1: 625, ex2: 633, ey: 406, cellX: 598, cellY: 383, cellS: 64, mouthX: 629, mouthY: 410 };
+function drawUltron(g: Graphics | null, t: number) {
+  if (!g) return;
+  g.clear();
+  const surge = Math.max(0, Math.sin(t * 0.8)) ** 8; // rare, sharp rage peaks
+  const flick = 0.7 + Math.sin(t * 19) * 0.09 + Math.sin(t * 6.3) * 0.07; // restless flicker
+  const eyeA = Math.min(1, flick + surge * 0.4);
+  const rattle = surge > 0.25 ? Math.sin(t * 46) * 1.3 : 0; // shaking the bars
+
+  if (surge > 0.04) {
+    g.rect(ULTRON.cellX, ULTRON.cellY, ULTRON.cellS, ULTRON.cellS)
+      .fill({ color: 0xff2a34, alpha: 0.04 + surge * 0.16 });
+    g.rect(ULTRON.mouthX - 5, ULTRON.mouthY, 10, 2)
+      .fill({ color: 0xff3a42, alpha: surge * 0.55 });
+  }
+  for (const ex of [ULTRON.ex1, ULTRON.ex2]) {
+    g.circle(ex + rattle, ULTRON.ey, 3.4).fill({ color: 0xff3038, alpha: 0.26 * eyeA });
+    g.circle(ex + rattle, ULTRON.ey, 1.4).fill({ color: 0xffd2d2, alpha: 0.92 * eyeA });
+  }
 }
 
 function drawRing(s: FloorSprite, t: number) {

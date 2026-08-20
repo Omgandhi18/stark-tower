@@ -19,6 +19,7 @@ import type {
   ProjectInfo,
   ReviewRequest,
 } from "./lib/types";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   getConfig,
   listAgents,
@@ -71,6 +72,16 @@ export default function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [phase, setPhase] = useState<LightPhase>("day");
+  const [closePrompt, setClosePrompt] = useState(false);
+  const [booting, setBooting] = useState(true);
+  const agentsRef = useRef<Agent[]>([]);
+  agentsRef.current = agents;
+
+  // Boot-in: a brief "coming online" caption while the crew walks to their desks.
+  useEffect(() => {
+    const t = window.setTimeout(() => setBooting(false), 3200);
+    return () => window.clearTimeout(t);
+  }, []);
 
   // Apply a new config: keep it, and refresh the derived roster/floor.
   const applyConfig = useCallback((c: AppConfig) => {
@@ -136,6 +147,21 @@ export default function App() {
       unsub.then((f) => f());
     };
   }, [applyConfig]);
+
+  // Guard the window close: if any agent session is live, confirm first.
+  useEffect(() => {
+    const win = getCurrentWindow();
+    const unlisten = win.onCloseRequested((e) => {
+      const running = agentsRef.current.filter((a) => a.status !== "offline").length;
+      if (running > 0) {
+        e.preventDefault();
+        setClosePrompt(true);
+      }
+    });
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, []);
 
   // Live status → sprites + roster.
   useEffect(() => {
@@ -287,6 +313,14 @@ export default function App() {
               stark lab · {agents.length} agents · live
             </span>
           </div>
+          {booting && (
+            <div className="boot-veil">
+              <div className="boot-caption glass">
+                <span className="boot-core" />
+                <span className="boot-text">Bringing the lab online…</span>
+              </div>
+            </div>
+          )}
           {reviews.length > 0 && (
             <ReviewPanel
               review={reviews[0]}
@@ -326,6 +360,37 @@ export default function App() {
 
       {config && !config.onboarded && (
         <Onboarding config={config} onDone={applyConfig} />
+      )}
+
+      {closePrompt && (
+        <div className="settings-backdrop" onMouseDown={() => setClosePrompt(false)}>
+          <div className="close-prompt glass" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="close-prompt-head">
+              <span className="close-prompt-icon" />
+              <div>
+                <div className="close-prompt-title">
+                  {online} agent{online === 1 ? "" : "s"} still running
+                </div>
+                <div className="close-prompt-sub">
+                  Closing the tower ends their sessions. Any work they haven't
+                  saved to disk is lost when the process exits.
+                </div>
+              </div>
+            </div>
+            <div className="close-prompt-actions">
+              <button className="ob-ghost" onClick={() => setClosePrompt(false)}>
+                Keep running
+              </button>
+              <span style={{ flex: 1 }} />
+              <button
+                className="btn-danger"
+                onClick={() => getCurrentWindow().destroy()}
+              >
+                Shut down &amp; quit
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
