@@ -1355,3 +1355,23 @@ body {
 }
 .task-row.task-done .task-title { color: var(--dim); text-decoration: line-through; }
 .task-assignee { color: var(--dim); font-size: 10px; letter-spacing: 0.04em; flex: none; }
+
+/* Standup cadence control in the task board */
+.standup-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 2px 0 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+.standup-toggle:hover { border-color: var(--reactor); color: var(--fg, #e7eef4); }
+.standup-toggle.on { color: var(--reactor); border-color: var(--reactor); }
+.standup-label { flex: 1; text-align: left; letter-spacing: 0.03em; }
+.standup-val { font-variant-numeric: tabular-nums; font-weight: 600; }

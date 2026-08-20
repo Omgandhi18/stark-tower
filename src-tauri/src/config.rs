@@ -163,6 +163,11 @@ pub struct AppConfig {
     /// "evening" | "night".
     #[serde(default = "default_lighting")]
     pub lighting: String,
+    /// Standup mission cadence in minutes (0 = off). When set, a live
+    /// orchestrator is periodically nudged to review the board and re-engage
+    /// stalled workers — the "keeps working while you're away" autonomy.
+    #[serde(default)]
+    pub standup_minutes: u32,
     pub engines: Vec<EngineConfig>,
     pub agents: Vec<AgentConfig>,
 }
@@ -314,6 +319,7 @@ pub fn default_config() -> AppConfig {
         version: cfg_version(),
         onboarded: false,
         lighting: default_lighting(),
+        standup_minutes: 0,
         engines: default_engines(),
         agents: default_agents(),
     }

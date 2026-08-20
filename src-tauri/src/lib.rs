@@ -526,6 +526,17 @@ fn set_lighting(app: tauri::AppHandle, state: tauri::State<AppState>, mode: Stri
     commit_config(&app, &state)
 }
 
+/// Set the standup mission cadence in minutes (0 = off).
+#[tauri::command]
+fn set_standup_minutes(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    minutes: u32,
+) -> AppConfig {
+    state.config.lock().unwrap().standup_minutes = minutes;
+    commit_config(&app, &state)
+}
+
 /// Restore the built-in engines + roster (wipes customizations).
 #[tauri::command]
 fn reset_config(app: tauri::AppHandle, state: tauri::State<AppState>) -> AppConfig {
@@ -845,6 +856,7 @@ pub fn run() {
 
             pty::start_idle_monitor(app.handle().clone());
             chat::start_delegation_server(app.handle().clone(), sock_path);
+            start_mission_scheduler(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -876,6 +888,7 @@ pub fn run() {
             remove_engine,
             set_onboarded,
             set_lighting,
+            set_standup_minutes,
             reset_config
         ])
         .build(tauri::generate_context!())
@@ -893,6 +906,26 @@ pub fn run() {
 fn cleanup_children(app: &tauri::AppHandle) {
     chat::kill_all(app);
     pty::kill_all(app);
+}
+
+/// Background loop that fires the standup mission every `standup_minutes` (0 =
+/// off). It only nudges a live orchestrator — never spawns one — so autonomy
+/// stays within a session the user actually opened.
+fn start_mission_scheduler(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let mut minutes_elapsed: u64 = 0;
+        loop {
+            std::thread::sleep(Duration::from_secs(60));
+            minutes_elapsed += 1;
+            let interval = app
+                .try_state::<AppState>()
+                .map(|s| s.config.lock().unwrap().standup_minutes as u64)
+                .unwrap_or(0);
+            if interval > 0 && minutes_elapsed.is_multiple_of(interval) {
+                chat::run_standup(&app);
+            }
+        }
+    });
 }
 
 #[cfg(test)]

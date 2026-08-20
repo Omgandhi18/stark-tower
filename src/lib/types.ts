@@ -130,6 +130,7 @@ export interface AppConfig {
   version: number;
   onboarded: boolean;
   lighting: string; // "auto" | "system" | "morning" | "day" | "evening" | "night"
+  standup_minutes: number; // 0 = off
   engines: EngineConfig[];
   agents: AgentConfig[];
 }

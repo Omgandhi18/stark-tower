@@ -114,6 +114,10 @@ export const removeEngine = (id: string) =>
 export const setOnboarded = (value: boolean) =>
   invoke<AppConfig>("set_onboarded", { value });
 
+/** Set the standup mission cadence in minutes (0 = off). */
+export const setStandupMinutes = (minutes: number) =>
+  invoke<AppConfig>("set_standup_minutes", { minutes });
+
 export const setLighting = (mode: string) =>
   invoke<AppConfig>("set_lighting", { mode });
 

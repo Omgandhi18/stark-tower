@@ -1202,13 +1202,12 @@ fn orchestrator_id(app: &tauri::AppHandle) -> String {
     "jarvis".to_string()
 }
 
-/// Feed a message into the orchestrator's live session as a new user turn (used
-/// to deliver delegation results). Returns false if his session isn't running.
-fn inject_to_orchestrator(app: &tauri::AppHandle, text: &str) -> bool {
-    let oid = orchestrator_id(app);
+/// Feed a message into an agent's live session as a new user turn. Returns false
+/// if the session isn't running. No side effects beyond the write + Thinking.
+fn inject_user_turn(app: &tauri::AppHandle, agent_id: &str, text: &str) -> bool {
     let Some(state) = app.try_state::<crate::AppState>() else { return false };
     let mut map = state.chat.sessions.lock().unwrap();
-    let Some(s) = map.get_mut(&oid) else { return false };
+    let Some(s) = map.get_mut(agent_id) else { return false };
     let msg = serde_json::json!({
         "type": "user",
         "message": { "role": "user", "content": text }
@@ -1216,11 +1215,40 @@ fn inject_to_orchestrator(app: &tauri::AppHandle, text: &str) -> bool {
     if s.stdin.write_all(format!("{}\n", msg).as_bytes()).is_ok() {
         let _ = s.stdin.flush();
         drop(map);
-        persist(app, &oid, "system", Some("Worker results received — synthesizing."), None, None);
-        crate::pty::emit_status(app, &oid, AgentStatus::Thinking);
+        crate::pty::emit_status(app, agent_id, AgentStatus::Thinking);
         true
     } else {
         false
+    }
+}
+
+/// Feed a message into the orchestrator's live session as a new user turn (used
+/// to deliver delegation results). Returns false if his session isn't running.
+fn inject_to_orchestrator(app: &tauri::AppHandle, text: &str) -> bool {
+    let oid = orchestrator_id(app);
+    if inject_user_turn(app, &oid, text) {
+        persist(app, &oid, "system", Some("Worker results received — synthesizing."), None, None);
+        true
+    } else {
+        false
+    }
+}
+
+/// A standup mission: nudge a LIVE orchestrator to review the board and
+/// re-engage stalled workers. Never spawns one — autonomy only extends a session
+/// the user already opened.
+pub fn run_standup(app: &tauri::AppHandle) {
+    let oid = orchestrator_id(app);
+    let msg = "[STANDUP] Floor check. Review the in-flight tasks and each worker's status: \
+re-engage anyone stalled or blocked, close or reassign tasks that are done, and keep the board \
+accurate. If everything in-flight is on track and nothing needs Om, say so briefly. Do NOT start \
+new work Om didn't ask for.";
+    if inject_user_turn(app, &oid, msg) {
+        persist(app, &oid, "system", Some("Standup — reviewing the floor."), None, None);
+        if let Some(state) = app.try_state::<crate::AppState>() {
+            let e = state.ledger.record(&oid, "standup", "floor check", 1);
+            let _ = app.emit("ledger://entry", e);
+        }
     }
 }
 
