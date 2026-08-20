@@ -332,24 +332,35 @@ pub fn default_config() -> AppConfig {
 /// personality gets the built-in default, and the engine list always contains
 /// the built-in engines (merged by id).
 pub fn load(path: &std::path::Path) -> AppConfig {
-    let mut cfg = match std::fs::read_to_string(path) {
+    // `safe_to_save` is the empty-first-write guard: only (re)write config.json if
+    // we either parsed it, backed up an unparseable one, or it genuinely doesn't
+    // exist. If the file EXISTS but merely couldn't be read (transient lock /
+    // permission), we run on defaults in memory but never clobber it.
+    let existed = path.exists();
+    let (mut cfg, safe_to_save) = match std::fs::read_to_string(path) {
         Ok(txt) => match serde_json::from_str::<AppConfig>(&txt) {
-            Ok(c) => c,
+            Ok(c) => (c, true),
             Err(e) => {
-                // The file exists but won't parse. Do NOT silently overwrite the
-                // user's roster with defaults — preserve the original in a sibling
-                // backup first, so a hand-edit mistake or a schema change is
-                // recoverable rather than a permanent data loss.
+                // Exists but won't parse: preserve the original in a sibling
+                // backup, then start from defaults (recoverable, not data loss).
                 let saved = backup_unreadable(path, &txt);
                 eprintln!(
                     "[config] {} is unreadable ({e}); backed up to {} — starting from defaults",
                     path.display(),
                     saved.as_deref().unwrap_or("(backup failed)")
                 );
-                default_config()
+                (default_config(), true)
             }
         },
-        Err(_) => default_config(), // genuinely absent — first run
+        Err(_) if existed => {
+            // Exists but unreadable right now — do NOT overwrite it with defaults.
+            eprintln!(
+                "[config] {} exists but could not be read; using defaults in-memory only",
+                path.display()
+            );
+            (default_config(), false)
+        }
+        Err(_) => (default_config(), true), // genuinely absent — first run
     };
     // v1 → v2: the orchestrator prompt used to hardcode the team by name. If an
     // agent still carries that (un-customized), refresh it to the name-agnostic
@@ -417,7 +428,9 @@ pub fn load(path: &std::path::Path) -> AppConfig {
             cfg.engines.push(be);
         }
     }
-    save(path, &cfg);
+    if safe_to_save {
+        save(path, &cfg);
+    }
     cfg
 }
 
@@ -454,9 +467,37 @@ fn set_owner_only(path: &std::path::Path) {
 #[cfg(not(unix))]
 fn set_owner_only(_path: &std::path::Path) {}
 
-/// Atomic write (temp + rename) so a concurrent reader never sees a partial file.
+/// Append-only backup of the current config before it's overwritten, into a
+/// sibling `config-backups/` dir (never pruned), so any bad edit is recoverable.
+fn backup_previous(path: &std::path::Path) {
+    let Ok(prev) = std::fs::read_to_string(path) else {
+        return;
+    };
+    if prev.trim().is_empty() {
+        return;
+    }
+    let Some(dir) = path.parent().map(|p| p.join("config-backups")) else {
+        return;
+    };
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    for n in 0..100_000 {
+        let candidate = dir.join(format!("config-{n}.json"));
+        if !candidate.exists() {
+            if std::fs::write(&candidate, &prev).is_ok() {
+                set_owner_only(&candidate);
+            }
+            return;
+        }
+    }
+}
+
+/// Atomic write (temp + rename) so a concurrent reader never sees a partial file,
+/// after backing up the previous version (append-only).
 pub fn save(path: &std::path::Path, cfg: &AppConfig) {
     if let Ok(out) = serde_json::to_string_pretty(cfg) {
+        backup_previous(path);
         let tmp = path.with_extension("json.starktmp");
         if std::fs::write(&tmp, out).is_ok() {
             set_owner_only(&tmp);
@@ -519,6 +560,19 @@ mod tests {
         save(&path, &c);
         let loaded = load(&path);
         assert!(!loaded.agent("jarvis").unwrap().personality.trim().is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn save_backs_up_the_previous_config() {
+        let dir = tmp_dir("bk");
+        let path = dir.join("config.json");
+        let mut c = default_config();
+        save(&path, &c); // first write — nothing to back up yet
+        assert!(!dir.join("config-backups/config-0.json").exists());
+        c.onboarded = true;
+        save(&path, &c); // overwrites — backs up the previous version
+        assert!(dir.join("config-backups/config-0.json").exists());
         std::fs::remove_dir_all(&dir).ok();
     }
 }
