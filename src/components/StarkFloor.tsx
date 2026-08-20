@@ -8,15 +8,17 @@ import {
   TextStyle,
   Texture,
 } from "pixi.js";
-import type { Agent, AgentStatus, AssistLink } from "../lib/types";
+import type { Agent, AgentStatus, AssistLink, LightPhase } from "../lib/types";
 import { COLORS, TILE } from "../lib/theme";
 import { resolveRecipe, sceneFrameBufs, SCENE_H, SCENE_W } from "../lib/charArt";
-import { type Buf, LAB_GH, LAB_GW, renderFloor } from "../lib/labArt";
+import { type Buf, LAB_GH, LAB_GW, type LightSource, lightSources, renderFloor } from "../lib/labArt";
+import { renderLightmap } from "../lib/labLight";
 
 interface Props {
   agents: Agent[];
   selectedId: string | null;
   assistLinks: AssistLink[];
+  lighting: LightPhase;
   onSelect: (id: string) => void;
 }
 
@@ -74,6 +76,20 @@ function bufToTexture(buf: Uint8ClampedArray): Texture {
   return tex;
 }
 
+/** A smoothly-scaled (linear) texture from a raw RGBA light-map layer. */
+function lightTexture(data: Uint8ClampedArray, w: number, h: number): Texture {
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  const img = ctx.createImageData(w, h);
+  img.data.set(data);
+  ctx.putImageData(img, 0, 0);
+  const tex = Texture.from(canvas);
+  tex.source.scaleMode = "linear";
+  return tex;
+}
+
 /** Rasterize a labArt RGBA buffer (arbitrary size) into a nearest texture. */
 function labTexture(buf: Buf): Texture {
   const canvas = document.createElement("canvas");
@@ -112,11 +128,16 @@ export default function StarkFloor({
   agents,
   selectedId,
   assistLinks,
+  lighting,
   onSelect,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const worldRef = useRef<Container | null>(null);
+  const darknessRef = useRef<Sprite | null>(null);
+  const glowRef = useRef<Sprite | null>(null);
+  const labelLayerRef = useRef<Container | null>(null);
+  const sourcesRef = useRef<LightSource[]>([]);
   const linkLayerRef = useRef<Graphics | null>(null);
   const spriteLayerRef = useRef<Container | null>(null);
   const spritesRef = useRef<Map<string, FloorSprite>>(new Map());
@@ -167,6 +188,26 @@ export default function StarkFloor({
         spriteLayer.sortableChildren = true;
         world.addChild(spriteLayer);
         spriteLayerRef.current = spriteLayer;
+
+        // Day/night lighting: a darkness layer (normal blend) + a glow layer
+        // (additive) above everything, driven by the light-map. Light pools from
+        // the reactor, lamps and screens reveal the floor; the rest sits in dark.
+        sourcesRef.current = lightSources();
+        const darkness = new Sprite();
+        darkness.eventMode = "none";
+        world.addChild(darkness);
+        darknessRef.current = darkness;
+        const glow = new Sprite();
+        glow.eventMode = "none";
+        glow.blendMode = "add";
+        world.addChild(glow);
+        glowRef.current = glow;
+
+        // Name labels ride ABOVE the lighting so they stay crisp day or night.
+        const labelLayer = new Container();
+        labelLayer.eventMode = "none";
+        world.addChild(labelLayer);
+        labelLayerRef.current = labelLayer;
 
         const layout = () => {
           const lw = GRID_W * TILE;
@@ -258,6 +299,7 @@ export default function StarkFloor({
       if (!s) {
         s = createSprite(agent, figure, frames, () => onSelect(agent.id));
         layer.addChild(s.container);
+        labelLayerRef.current?.addChild(s.nameText);
         map.set(agent.id, s);
       } else {
         // Live-apply appearance edits (character / accent / home / name).
@@ -279,10 +321,28 @@ export default function StarkFloor({
     for (const [id, s] of map) {
       if (!live.has(id)) {
         s.container.destroy({ children: true });
+        s.nameText.destroy();
         map.delete(id);
       }
     }
   }, [agents, selectedId, ready, onSelect]);
+
+  // Rebuild the light-map when the phase changes.
+  useEffect(() => {
+    if (!ready) return;
+    const darkness = darknessRef.current, glow = glowRef.current;
+    if (!darkness || !glow) return;
+    const W = GRID_W * TILE, H = GRID_H * TILE;
+    const lm = renderLightmap(lighting, sourcesRef.current);
+    const apply = (sprite: Sprite, data: Uint8ClampedArray) => {
+      const old = sprite.texture;
+      sprite.texture = lightTexture(data, lm.w, lm.h);
+      sprite.setSize(W, H);
+      if (old && old !== Texture.EMPTY) old.destroy(true);
+    };
+    apply(darkness, lm.darkness);
+    apply(glow, lm.glow);
+  }, [lighting, ready]);
 
   return <div ref={hostRef} className="stark-floor" />;
 }
@@ -316,8 +376,8 @@ function createSprite(
     }),
   });
   nameText.anchor.set(0.5, 0);
-  nameText.y = 8;
-  container.addChild(nameText);
+  // Not a child of the container — it lives in the label layer (above lighting),
+  // positioned in world coords each frame.
 
   const bubbleGfx = new Graphics();
   bubbleGfx.y = -SCENE_H * SCALE - 6;
@@ -427,6 +487,7 @@ function updateSprite(
   s.container.x = s.x;
   s.container.y = s.y;
   s.container.zIndex = s.y;
+  s.nameText.position.set(s.x, s.y + 8);
 
   drawRing(s, t);
   drawBubble(s, t);

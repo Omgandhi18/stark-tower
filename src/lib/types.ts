@@ -114,9 +114,13 @@ export interface AgentConfig {
 export interface AppConfig {
   version: number;
   onboarded: boolean;
+  lighting: string; // "auto" | "system" | "morning" | "day" | "evening" | "night"
   engines: EngineConfig[];
   agents: AgentConfig[];
 }
+
+/** Resolved floor lighting phase (what StarkFloor actually renders). */
+export type LightPhase = "morning" | "day" | "evening" | "night";
 
 /** A file or folder under a project dir, for the chat's @ picker. */
 export interface PathEntry {

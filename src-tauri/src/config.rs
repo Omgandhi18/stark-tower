@@ -148,6 +148,10 @@ impl AgentConfig {
     }
 }
 
+fn default_lighting() -> String {
+    "auto".into()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default = "cfg_version")]
@@ -155,6 +159,10 @@ pub struct AppConfig {
     /// Whether the user has completed (or skipped) the first-run setup wizard.
     #[serde(default)]
     pub onboarded: bool,
+    /// Floor lighting mode: "auto" (clock) | "system" | "morning" | "day" |
+    /// "evening" | "night".
+    #[serde(default = "default_lighting")]
+    pub lighting: String,
     pub engines: Vec<EngineConfig>,
     pub agents: Vec<AgentConfig>,
 }
@@ -305,6 +313,7 @@ pub fn default_config() -> AppConfig {
     AppConfig {
         version: cfg_version(),
         onboarded: false,
+        lighting: default_lighting(),
         engines: default_engines(),
         agents: default_agents(),
     }

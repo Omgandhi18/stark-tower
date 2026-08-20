@@ -487,6 +487,13 @@ fn set_onboarded(app: tauri::AppHandle, state: tauri::State<AppState>, value: bo
     commit_config(&app, &state)
 }
 
+/// Set the floor lighting mode ("auto" | "system" | morning/day/evening/night).
+#[tauri::command]
+fn set_lighting(app: tauri::AppHandle, state: tauri::State<AppState>, mode: String) -> AppConfig {
+    state.config.lock().unwrap().lighting = mode;
+    commit_config(&app, &state)
+}
+
 /// Restore the built-in engines + roster (wipes customizations).
 #[tauri::command]
 fn reset_config(app: tauri::AppHandle, state: tauri::State<AppState>) -> AppConfig {
@@ -791,6 +798,7 @@ pub fn run() {
             update_engine,
             remove_engine,
             set_onboarded,
+            set_lighting,
             reset_config
         ])
         .run(tauri::generate_context!())

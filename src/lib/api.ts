@@ -99,6 +99,9 @@ export const removeEngine = (id: string) =>
 export const setOnboarded = (value: boolean) =>
   invoke<AppConfig>("set_onboarded", { value });
 
+export const setLighting = (mode: string) =>
+  invoke<AppConfig>("set_lighting", { mode });
+
 export const resetConfig = () => invoke<AppConfig>("reset_config");
 
 export const onConfigChanged = (cb: (c: AppConfig) => void): Promise<UnlistenFn> =>

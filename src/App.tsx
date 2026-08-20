@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Settings as SettingsIcon } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Monitor,
+  Moon,
+  Settings as SettingsIcon,
+  Sun,
+  Sunrise,
+  Sunset,
+} from "lucide-react";
 import "./App.css";
 import type {
   Agent,
   AppConfig,
   AssistLink,
+  LightPhase,
   ProjectInfo,
   ReviewRequest,
 } from "./lib/types";
@@ -17,7 +28,9 @@ import {
   onConfigChanged,
   onReviewRequest,
   reviewRespond,
+  setLighting,
 } from "./lib/api";
+import { LIGHT_LABEL, LIGHT_MODES, resolvePhase } from "./lib/lighting";
 import StarkFloor from "./components/StarkFloor";
 import Roster from "./components/Roster";
 import Chat from "./components/Chat";
@@ -25,6 +38,24 @@ import ProjectsBar from "./components/ProjectsBar";
 import ReviewPanel from "./components/ReviewPanel";
 import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
+
+function lightIcon(mode: string, size = 16) {
+  const p = { size, strokeWidth: 2 };
+  switch (mode) {
+    case "morning":
+      return <Sunrise {...p} />;
+    case "day":
+      return <Sun {...p} />;
+    case "evening":
+      return <Sunset {...p} />;
+    case "night":
+      return <Moon {...p} />;
+    case "system":
+      return <Monitor {...p} />;
+    default:
+      return <Clock {...p} />;
+  }
+}
 
 export default function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -39,12 +70,29 @@ export default function App() {
   const [questions, setQuestions] = useState<Record<string, ReviewRequest>>({});
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [phase, setPhase] = useState<LightPhase>("day");
 
   // Apply a new config: keep it, and refresh the derived roster/floor.
   const applyConfig = useCallback((c: AppConfig) => {
     setConfig(c);
     listAgents().then(setAgents).catch(() => {});
   }, []);
+
+  // Resolve the lighting mode into a phase, re-checking periodically so "auto"
+  // (clock) and "system" follow the time of day / OS theme.
+  const lightMode = config?.lighting ?? "auto";
+  useEffect(() => {
+    const update = () => setPhase(resolvePhase(lightMode));
+    update();
+    const iv = window.setInterval(update, 60000);
+    return () => window.clearInterval(iv);
+  }, [lightMode]);
+
+  const cycleLight = useCallback(() => {
+    const modes = LIGHT_MODES as readonly string[];
+    const next = modes[(modes.indexOf(lightMode) + 1) % modes.length];
+    setLighting(next).then(applyConfig).catch(() => {});
+  }, [lightMode, applyConfig]);
 
   const openAgent = useCallback((id: string) => {
     setSelectedId(id);
@@ -183,6 +231,13 @@ export default function App() {
         </div>
         <button
           className="gear"
+          onClick={cycleLight}
+          title={`Lighting: ${LIGHT_LABEL[lightMode] ?? "Auto"} · ${phase}`}
+        >
+          {lightIcon(lightMode)}
+        </button>
+        <button
+          className="gear"
           onClick={() => setSettingsOpen(true)}
           title="Configuration"
         >
@@ -196,6 +251,7 @@ export default function App() {
             agents={agents}
             selectedId={selectedId}
             assistLinks={assistLinks}
+            lighting={phase}
             onSelect={openAgent}
           />
           <div className={`ov ov-roster glass ${rosterOpen ? "open" : ""}`}>

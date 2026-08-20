@@ -16,19 +16,36 @@ export const BULLPEN_DESKS: [number, number][] = [
   [2, 16], [5, 16], [8, 16], [11, 16], [14, 16],
 ];
 
+/** Ceiling-lamp tiles (fixtures + warm light sources at night). Placed in aisles
+ *  and along edges — off the agents/desks — for even coverage with no dark corners. */
+const LAMP_TILES: [number, number][] = [
+  [1, 1], [7, 1],                                        // reactor bay: top corners
+  [10, 1], [18, 1], [10, 6], [18, 6],                    // meeting: corners
+  [22, 1], [22, 6],                                      // server: center column (sparse room)
+  [3, 8], [13, 8],                                       // bullpen: top (sides, no centre column)
+  [3, 12], [13, 12],                                     // bullpen: aisle
+  [3, 15], [13, 15],                                     // bullpen: aisle
+  [3, 18], [13, 18],                                     // bullpen: bottom
+  [23, 8], [19, 11], [24, 11],                           // canteen: sides
+  [19, 15], [24, 15],                                    // containment: sides (sparse room)
+];
+
 type RGB = [number, number, number];
 export interface Buf { w: number; h: number; d: Uint8ClampedArray }
 
+/** A light source for the day/night light-map (world-pixel coords). */
+export interface LightSource { x: number; y: number; r: number; c: RGB; i: number }
+
 const C = {
-  bg: [9, 12, 16] as RGB,
-  floor: [24, 30, 38] as RGB, floorB: [22, 27, 34] as RGB, seam: [16, 20, 26] as RGB, rivet: [38, 46, 56] as RGB, inlay: [44, 58, 72] as RGB,
-  grate: [20, 25, 32] as RGB, grateLine: [30, 38, 48] as RGB,
-  wall: [40, 46, 56] as RGB, wallHi: [58, 66, 80] as RGB, wallLo: [22, 26, 33] as RGB, strip: [59, 207, 255] as RGB,
-  part: [46, 52, 63] as RGB, partHi: [64, 72, 88] as RGB, partLo: [26, 30, 38] as RGB,
-  metal: [52, 58, 70] as RGB, metalHi: [72, 80, 96] as RGB, metalLo: [34, 38, 48] as RGB, metalD: [28, 32, 40] as RGB,
-  screen: [14, 20, 28] as RGB, glow: [70, 200, 255] as RGB, amber: [230, 190, 90] as RGB, green: [110, 220, 140] as RGB,
-  red: [255, 90, 100] as RGB, white: [222, 228, 236] as RGB, dark: [18, 22, 28] as RGB,
-  pot: [64, 56, 48] as RGB, leaf: [72, 150, 92] as RGB, leafHi: [120, 200, 130] as RGB, wood: [92, 74, 54] as RGB,
+  bg: [12, 15, 20] as RGB,
+  floor: [48, 56, 68] as RGB, floorB: [43, 51, 62] as RGB, seam: [30, 36, 45] as RGB, rivet: [66, 78, 92] as RGB, inlay: [64, 150, 180] as RGB,
+  grate: [40, 47, 58] as RGB, grateLine: [54, 64, 78] as RGB,
+  wall: [58, 66, 80] as RGB, wallHi: [78, 88, 105] as RGB, wallLo: [30, 35, 44] as RGB, strip: [70, 210, 255] as RGB,
+  part: [50, 57, 70] as RGB, partHi: [70, 80, 98] as RGB, partLo: [30, 35, 44] as RGB,
+  metal: [44, 50, 62] as RGB, metalHi: [64, 72, 88] as RGB, metalLo: [30, 34, 43] as RGB, metalD: [24, 28, 36] as RGB,
+  screen: [16, 24, 34] as RGB, glow: [90, 210, 255] as RGB, amber: [235, 195, 95] as RGB, green: [120, 225, 150] as RGB,
+  red: [255, 95, 105] as RGB, white: [226, 232, 240] as RGB, dark: [18, 22, 28] as RGB,
+  pot: [70, 60, 50] as RGB, leaf: [80, 165, 100] as RGB, leafHi: [130, 210, 140] as RGB, wood: [96, 78, 56] as RGB,
 };
 const clamp = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : Math.round(v));
 const sh = (c: RGB, f: number): RGB => [clamp(c[0] * f), clamp(c[1] * f), clamp(c[2] * f)];
@@ -43,12 +60,16 @@ function floorTile(kind: string): Buf {
   const b = mk(T, T);
   const base = kind === "grate" ? C.grate : (kind === "alt" ? C.floorB : C.floor);
   rct(b, 0, 0, T - 1, T - 1, base);
-  rct(b, 1, 1, T - 2, T - 2, kind === "alt" ? C.floor : C.floorB, 55);
+  // bevel: bright top/left edge, shaded bottom/right → panels read cleanly
+  rct(b, 1, 1, T - 2, 1, sh(base, 1.14));
+  rct(b, 1, 1, 1, T - 2, sh(base, 1.14));
+  rct(b, 1, T - 2, T - 2, T - 2, sh(base, 0.82));
+  rct(b, T - 2, 1, T - 2, T - 2, sh(base, 0.82));
   for (let x = 0; x < T; x++) { px(b, x, 0, C.seam); px(b, x, T - 1, C.seam); }
   for (let y = 0; y < T; y++) { px(b, 0, y, C.seam); px(b, T - 1, y, C.seam); }
-  for (const [rx, ry] of [[3, 3], [T - 4, 3], [3, T - 4], [T - 4, T - 4]] as const) px(b, rx, ry, C.rivet);
   if (kind === "grate") for (let y = 5; y < T - 4; y += 3) rct(b, 4, y, T - 5, y, C.grateLine);
-  if (kind === "alt") for (const [ox, oy] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]] as const) px(b, T / 2 + ox, T / 2 + oy, C.inlay, ox || oy ? 60 : 110);
+  else if (kind === "alt") for (const [ox, oy] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]] as const) px(b, T / 2 + ox, T / 2 + oy, C.inlay, ox || oy ? 70 : 150);
+  else for (const [rx, ry] of [[3, 3], [T - 4, 3], [3, T - 4], [T - 4, T - 4]] as const) px(b, rx, ry, C.rivet);
   if (kind === "walk") rct(b, T / 2 - 1, 2, T / 2, T - 3, C.strip, 40);
   return b;
 }
@@ -74,6 +95,18 @@ function reactorPad(): Buf { const S = 130, cx = 65, cy = 65; const b = mk(S, S)
 function containment(): Buf { const b = mk(66, 66); rct(b, 3, 3, 62, 62, C.metalLo); rct(b, 3, 3, 62, 5, C.metalHi); rct(b, 10, 10, 55, 55, C.dark); for (let i = 0; i < 12; i++) { const x = 10 + i * 4; rct(b, x, 10, x + 1, 55, i % 2 ? C.amber : C.dark, 200); } rct(b, 18, 18, 47, 47, sh(C.dark, 1.4)); for (const [x, y] of [[6, 6], [58, 6], [6, 58], [58, 58]] as const) rct(b, x, y, x + 2, y + 2, C.red); outline(b); return b; }
 function wallScreen(): Buf { const b = mk(52, 26); rct(b, 2, 2, 49, 23, sh(C.metal, 0.8)); rct(b, 4, 4, 47, 21, C.screen); for (let i = 0; i < 5; i++) rct(b, 7, 6 + i * 3, 7 + (i % 2 ? 30 : 18), 6 + i * 3, C.glow, 180); rct(b, 30, 8, 44, 19, C.strip, 40); outline(b); return b; }
 function windowPane(): Buf { const b = mk(44, 26); rct(b, 2, 2, 41, 23, C.metalD); rct(b, 4, 4, 39, 21, [16, 26, 40]); for (let i = 0; i < 26; i++) px(b, 5 + (i * 7) % 34, 5 + (i * 5) % 16, C.white, 180); rct(b, 21, 4, 22, 21, C.metalD); rct(b, 4, 12, 39, 13, C.metalD); rct(b, 4, 4, 39, 5, C.strip, 90); outline(b); return b; }
+function lamp(): Buf { const b = mk(24, 12); rct(b, 1, 1, 22, 10, C.metalLo); rct(b, 3, 3, 20, 8, [255, 236, 200]); rct(b, 3, 3, 20, 3, [255, 249, 232]); rct(b, 4, 6, 19, 6, sh([255, 236, 200], 0.9)); outline(b); return b; }
+
+/** Light sources for the day/night light-map (world-pixel coords). */
+export function lightSources(): LightSource[] {
+  const CYAN: RGB = [90, 210, 255], WARM: RGB = [255, 214, 150], COOL: RGB = [130, 190, 255], MOON: RGB = [150, 180, 225], RED: RGB = [255, 110, 120];
+  const s: LightSource[] = [{ x: 4 * T + T / 2, y: 3 * T + T / 2, r: 165, c: CYAN, i: 1.6 }];
+  for (const [tx, ty] of LAMP_TILES) s.push({ x: tx * T + T / 2, y: ty * T + T / 2, r: 120, c: WARM, i: 1.0 });
+  for (const [tx, ty] of BULLPEN_DESKS) s.push({ x: tx * T + T / 2, y: ty * T + 10, r: 48, c: COOL, i: 0.5 });
+  s.push({ x: 24 * T + T / 2, y: 6 * T + T / 2, r: 100, c: MOON, i: 0.7 });
+  s.push({ x: 22 * T + T / 2, y: 15 * T + T / 2, r: 60, c: RED, i: 0.6 });
+  return s;
+}
 
 /** Compose the full static facility into one RGBA buffer. */
 export function renderFloor(): Buf {
@@ -114,6 +147,9 @@ export function renderFloor(): Buf {
   place(fridge(), 24, 9); place(coffee(), 20, 9); place(waterCooler(), 22, 11, 6); place(chair(), 21, 11); place(chair(), 23, 11);
   // containment
   place(containment(), 22, 15);
+  // ceiling lamp fixtures (light sources at night)
+  const lmp = lamp();
+  for (const [tx, ty] of LAMP_TILES) blit(room, lmp, tx * T + T / 2 - lmp.w / 2, ty * T + 2);
   // décor
   blit(room, wallScreen(), 11 * T, 4); blit(room, windowPane(), 24 * T, 6);
   for (const [pxu, pyu] of [[1, 18], [15, 18], [28, 18], [1, 8], [28, 1]] as const) place(plant(), pxu, pyu);
