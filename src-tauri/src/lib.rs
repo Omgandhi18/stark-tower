@@ -3,6 +3,7 @@ mod breaker;
 mod bridge;
 mod chat;
 mod config;
+mod delegation;
 mod engine;
 mod floor;
 mod ledger;
@@ -945,7 +946,7 @@ fn start_mission_scheduler(app: tauri::AppHandle) {
                 .map(|s| s.config.lock().unwrap().standup_minutes as u64)
                 .unwrap_or(0);
             if interval > 0 && minutes_elapsed.is_multiple_of(interval) {
-                chat::run_standup(&app);
+                delegation::run_standup(&app);
             }
         }
     });
