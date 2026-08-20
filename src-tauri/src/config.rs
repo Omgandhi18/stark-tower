@@ -327,8 +327,23 @@ pub fn default_config() -> AppConfig {
 /// the built-in engines (merged by id).
 pub fn load(path: &std::path::Path) -> AppConfig {
     let mut cfg = match std::fs::read_to_string(path) {
-        Ok(txt) => serde_json::from_str::<AppConfig>(&txt).unwrap_or_else(|_| default_config()),
-        Err(_) => default_config(),
+        Ok(txt) => match serde_json::from_str::<AppConfig>(&txt) {
+            Ok(c) => c,
+            Err(e) => {
+                // The file exists but won't parse. Do NOT silently overwrite the
+                // user's roster with defaults — preserve the original in a sibling
+                // backup first, so a hand-edit mistake or a schema change is
+                // recoverable rather than a permanent data loss.
+                let saved = backup_unreadable(path, &txt);
+                eprintln!(
+                    "[config] {} is unreadable ({e}); backed up to {} — starting from defaults",
+                    path.display(),
+                    saved.as_deref().unwrap_or("(backup failed)")
+                );
+                default_config()
+            }
+        },
+        Err(_) => default_config(), // genuinely absent — first run
     };
     // v1 → v2: the orchestrator prompt used to hardcode the team by name. If an
     // agent still carries that (un-customized), refresh it to the name-agnostic
@@ -398,6 +413,24 @@ pub fn load(path: &std::path::Path) -> AppConfig {
     }
     save(path, &cfg);
     cfg
+}
+
+/// Preserve an unparseable config next to the original before it's replaced, so
+/// an editing mistake or a schema change never costs the user their roster.
+/// Writes to `config.corrupt-N.json` (first free N). Returns the path written.
+fn backup_unreadable(path: &std::path::Path, contents: &str) -> Option<String> {
+    if contents.trim().is_empty() {
+        return None; // nothing worth keeping
+    }
+    for n in 0..1000 {
+        let candidate = path.with_extension(format!("corrupt-{n}.json"));
+        if !candidate.exists() {
+            return std::fs::write(&candidate, contents)
+                .ok()
+                .map(|_| candidate.to_string_lossy().to_string());
+        }
+    }
+    None
 }
 
 /// Atomic write (temp + rename) so a concurrent reader never sees a partial file.

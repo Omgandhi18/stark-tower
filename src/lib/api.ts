@@ -35,6 +35,10 @@ export const ptyResize = (agentId: string, cols: number, rows: number) =>
 export const killAgent = (agentId: string) =>
   invoke<void>("kill_agent", { agentId });
 
+/** Release Ultron containment for a Blocked agent. */
+export const unblockAgent = (agentId: string) =>
+  invoke<void>("unblock_agent", { agentId });
+
 export const dispatchTask = (prompt: string, cols: number, rows: number) =>
   invoke<DispatchResult>("dispatch_task", { prompt, cols, rows });
 

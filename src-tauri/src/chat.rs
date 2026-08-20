@@ -571,6 +571,7 @@ pub fn start_session(
     let resume = app
         .try_state::<crate::AppState>()
         .and_then(|s| s.ledger.get_session(agent_id, cwd));
+    let resumed = resume.is_some();
     let mut child = build_headless(
         &engine,
         &model,
@@ -591,15 +592,38 @@ pub fn start_session(
 
     let app2 = app.clone();
     let id2 = agent_id.to_string();
+    let cwd2 = cwd.to_string();
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
+        let mut saw_init = false;
         for line in reader.lines().map_while(Result::ok) {
             if line.trim().is_empty() {
                 continue;
             }
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                if !saw_init
+                    && v.get("type").and_then(|t| t.as_str()) == Some("system")
+                    && v.get("subtype").and_then(|s| s.as_str()) == Some("init")
+                {
+                    saw_init = true;
+                }
                 handle_line(&app2, &id2, &v, true);
             }
+        }
+        // A resumed session that never reached `init` means the stored session id
+        // no longer resolves (Claude rotated or pruned it). Forget the stale
+        // pointer so the next message starts a genuinely fresh session instead of
+        // re-resuming the dead id forever, and tell the user to resend once.
+        if resumed && !saw_init {
+            if let Some(state) = app2.try_state::<crate::AppState>() {
+                state.ledger.forget_session(&id2, &cwd2);
+            }
+            simple(
+                &app2,
+                &id2,
+                "system",
+                Some("Previous session expired — starting fresh. Please resend your last message.".into()),
+            );
         }
         simple(&app2, &id2, "exit", None);
         let state = app2.state::<crate::AppState>();

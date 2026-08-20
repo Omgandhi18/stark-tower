@@ -154,6 +154,17 @@ impl Ledger {
         );
     }
 
+    /// Forget only the resume pointer for (agent, cwd), keeping the transcript.
+    /// Used when a stored session id no longer resolves, so the next message
+    /// starts a fresh session instead of re-resuming a dead one forever.
+    pub fn forget_session(&self, agent_id: &str, cwd: &str) {
+        let conn = self.conn.lock().unwrap();
+        let _ = conn.execute(
+            "DELETE FROM sessions WHERE agent_id = ?1 AND cwd = ?2",
+            rusqlite::params![agent_id, cwd],
+        );
+    }
+
     /// The session id to resume for (agent, cwd), if any.
     pub fn get_session(&self, agent_id: &str, cwd: &str) -> Option<String> {
         let conn = self.conn.lock().unwrap();

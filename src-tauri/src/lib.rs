@@ -611,6 +611,12 @@ fn kill_agent(app: tauri::AppHandle, agent_id: String) -> Result<(), String> {
     pty::kill(&app, &agent_id)
 }
 
+/// Release Ultron containment for a Blocked agent (the "release" action).
+#[tauri::command]
+fn unblock_agent(app: tauri::AppHandle, agent_id: String) {
+    pty::unblock(&app, &agent_id);
+}
+
 #[derive(serde::Serialize)]
 pub struct DispatchResult {
     pub agent_id: String,
@@ -785,6 +791,7 @@ pub fn run() {
             pty_write,
             pty_resize,
             kill_agent,
+            unblock_agent,
             dispatch_task,
             request_assist,
             chat_send,

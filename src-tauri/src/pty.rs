@@ -218,6 +218,27 @@ pub fn kill(app: &tauri::AppHandle, agent_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Manually release Ultron containment (the UI's "release" action): reset the
+/// runaway window and put a Blocked session back to Idle right away.
+pub fn unblock(app: &tauri::AppHandle, agent_id: &str) {
+    let released = {
+        let state = app.state::<crate::AppState>();
+        let mut map = state.pty.sessions.lock().unwrap();
+        match map.get_mut(agent_id) {
+            Some(s) if s.status == AgentStatus::Blocked => {
+                s.status = AgentStatus::Idle;
+                s.out_window_count = 0;
+                s.window_start = Instant::now();
+                true
+            }
+            _ => false,
+        }
+    };
+    if released {
+        emit_status(app, agent_id, AgentStatus::Idle);
+    }
+}
+
 /// Background monitor that demotes Working→Idle after a lull, so sprites settle
 /// back down when an agent stops streaming.
 pub fn start_idle_monitor(app: tauri::AppHandle) {
@@ -228,8 +249,17 @@ pub fn start_idle_monitor(app: tauri::AppHandle) {
             let state = app.state::<crate::AppState>();
             let mut map = state.pty.sessions.lock().unwrap();
             for (id, s) in map.iter_mut() {
-                if s.status == AgentStatus::Working && s.last_activity.elapsed().as_secs() >= 4 {
+                let quiet = s.last_activity.elapsed().as_secs();
+                if s.status == AgentStatus::Working && quiet >= 4 {
                     s.status = AgentStatus::Idle;
+                    to_idle.push(id.clone());
+                } else if s.status == AgentStatus::Blocked && quiet >= 8 {
+                    // Ultron containment auto-releases once the runaway output has
+                    // actually stopped, so a tripped agent never gets stuck
+                    // Blocked forever. Reset the runaway window too.
+                    s.status = AgentStatus::Idle;
+                    s.out_window_count = 0;
+                    s.window_start = Instant::now();
                     to_idle.push(id.clone());
                 }
             }
