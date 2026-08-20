@@ -24,10 +24,12 @@ import {
   getConfig,
   listAgents,
   listProjects,
+  newChat,
   onAgentStatus,
   onAssistLink,
   onConfigChanged,
   onReviewRequest,
+  openConversation,
   reviewRespond,
   setLighting,
 } from "./lib/api";
@@ -40,6 +42,7 @@ import ReviewPanel from "./components/ReviewPanel";
 import TasksBoard from "./components/TasksBoard";
 import CostHud from "./components/CostHud";
 import UpdateBadge from "./components/UpdateBadge";
+import HistoryPanel from "./components/HistoryPanel";
 import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
 
@@ -112,6 +115,37 @@ export default function App() {
     setSelectedId(id);
     setOpenAgents((prev) => (prev.includes(id) ? prev : [...prev, id]));
   }, []);
+
+  // Bumping an agent's reload key remounts its Chat so it re-hydrates from the
+  // (now different) active conversation.
+  const [reloadKeys, setReloadKeys] = useState<Record<string, number>>({});
+  const bumpReload = useCallback((id: string) => {
+    setReloadKeys((prev) => ({ ...prev, [id]: (prev[id] ?? 0) + 1 }));
+  }, []);
+
+  const handleOpenConversation = useCallback(
+    (conversationId: number, agentId: string) => {
+      openConversation(conversationId)
+        .then(() => {
+          openAgent(agentId);
+          bumpReload(agentId);
+        })
+        .catch(() => {});
+    },
+    [openAgent, bumpReload],
+  );
+
+  const handleNewChat = useCallback(
+    (agentId: string) => {
+      newChat(agentId)
+        .then(() => {
+          openAgent(agentId);
+          bumpReload(agentId);
+        })
+        .catch(() => {});
+    },
+    [openAgent, bumpReload],
+  );
 
   const decideReview = useCallback((id: string, decision: string) => {
     reviewRespond(id, decision).catch(() => {});
@@ -312,6 +346,12 @@ export default function App() {
             )}
           </div>
           <TasksBoard />
+          <HistoryPanel
+            agents={agents}
+            selectedId={selectedId}
+            onOpen={handleOpenConversation}
+            onNew={handleNewChat}
+          />
 
           <CostHud />
           <div className="floortag">
@@ -344,7 +384,7 @@ export default function App() {
             if (!a) return null;
             return (
               <Chat
-                key={id}
+                key={`${id}-${reloadKeys[id] ?? 0}`}
                 agent={a}
                 active={id === selectedId}
                 projects={projects}

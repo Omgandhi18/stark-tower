@@ -377,15 +377,56 @@ fn chat_send(
     let _ = app.emit("ledger://entry", e);
     // Persist the user turn so the transcript can be rebuilt on reopen.
     state.ledger.add_message(&agent_id, "user", Some(&text), None, None);
+    let _ = app.emit("conversations://changed", ()); // a title/order may have changed
 
     chat::send(&app, &agent_id, &text, &cwd, &state.sock_path)
 }
 
-/// The persisted transcript for an agent, oldest first (for rehydrating the UI).
+/// The persisted transcript for an agent's active conversation (for rehydration).
 #[tauri::command]
 #[specta::specta]
 fn get_chat(state: tauri::State<AppState>, agent_id: String, limit: Option<i64>) -> Vec<StoredMessage> {
     state.ledger.messages(&agent_id, limit.unwrap_or(500))
+}
+
+/// All saved chats across agents, most-recently-active first.
+#[tauri::command]
+#[specta::specta]
+fn list_conversations(state: tauri::State<AppState>) -> Vec<ledger::Conversation> {
+    state.ledger.conversations(200)
+}
+
+/// Start a fresh conversation with an agent (ends the live session so the next
+/// message begins a genuinely new chat). Returns the new conversation id.
+#[tauri::command]
+#[specta::specta]
+fn new_chat(app: tauri::AppHandle, state: tauri::State<AppState>, agent_id: String) -> i64 {
+    chat::stop(&app, &agent_id);
+    let cwd = state
+        .workdirs
+        .lock()
+        .unwrap()
+        .get(&agent_id)
+        .cloned()
+        .unwrap_or_else(|| current_project(&state));
+    let id = state.ledger.new_conversation(&agent_id, &cwd);
+    let _ = app.emit("conversations://changed", ());
+    id
+}
+
+/// Reopen a saved conversation: make it active, end the live session, and point
+/// the agent's workdir at the conversation's dir so the next message resumes it.
+#[tauri::command]
+#[specta::specta]
+fn open_conversation(app: tauri::AppHandle, state: tauri::State<AppState>, conversation_id: i64) {
+    state.ledger.open_conversation(conversation_id);
+    if let Some(c) = state.ledger.conversation(conversation_id) {
+        chat::stop(&app, &c.agent_id);
+        if !c.cwd.trim().is_empty() {
+            state.workdirs.lock().unwrap().insert(c.agent_id.clone(), c.cwd.clone());
+        }
+    }
+    let _ = app.emit("conversations://changed", ());
 }
 
 #[derive(serde::Serialize, specta::Type)]
@@ -455,6 +496,7 @@ fn list_files(dir: String, limit: Option<usize>) -> Vec<PathEntry> {
 fn chat_stop(app: tauri::AppHandle, state: tauri::State<AppState>, agent_id: String) {
     chat::stop(&app, &agent_id);
     state.ledger.clear_agent(&agent_id);
+    let _ = app.emit("conversations://changed", ());
 }
 
 /// Deliver the human's decision back to a blocked `ask_human` review.
@@ -886,6 +928,9 @@ fn specta_builder() -> tauri_specta::Builder {
             chat_send,
             chat_stop,
             get_chat,
+            list_conversations,
+            new_chat,
+            open_conversation,
             list_files,
             review_respond,
             get_config,

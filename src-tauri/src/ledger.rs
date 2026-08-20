@@ -1,5 +1,6 @@
 use rusqlite::Connection;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -8,6 +9,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// activity, not dollars).
 pub struct Ledger {
     conn: Mutex<Connection>,
+    /// The conversation each agent is currently talking in (agent id → conv id).
+    active: Mutex<HashMap<String, i64>>,
+}
+
+/// A saved chat — one continuous conversation with an agent, resumable later.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct Conversation {
+    pub id: i64,
+    pub agent_id: String,
+    pub title: String,
+    pub cwd: String,
+    pub created: i64,
+    pub updated: i64,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -114,9 +128,186 @@ impl Ledger {
             )",
             [],
         )?;
+        // Saved chats: one continuous, resumable conversation with an agent. Each
+        // message belongs to a conversation; the session id (for --resume) lives
+        // here so opening a past chat continues its real context.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS conversations (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id   TEXT    NOT NULL,
+                title      TEXT    NOT NULL,
+                cwd        TEXT    NOT NULL DEFAULT '',
+                session_id TEXT,
+                created    INTEGER NOT NULL,
+                updated    INTEGER NOT NULL
+            )",
+            [],
+        )?;
+        // Migrate: add messages.conversation_id, then backfill one conversation
+        // per agent for any pre-conversation transcript.
+        let has_conv = conn
+            .prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name='conversation_id'")
+            .and_then(|mut s| s.exists([]))
+            .unwrap_or(true);
+        if !has_conv {
+            conn.execute("ALTER TABLE messages ADD COLUMN conversation_id INTEGER", [])?;
+            // one conversation per distinct agent with orphaned messages
+            let agents: Vec<String> = {
+                let mut stmt = conn.prepare(
+                    "SELECT DISTINCT agent_id FROM messages WHERE conversation_id IS NULL",
+                )?;
+                let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+                rows.filter_map(|x| x.ok()).collect()
+            };
+            let ts = now_ms();
+            for a in agents {
+                conn.execute(
+                    "INSERT INTO conversations (agent_id, title, cwd, created, updated) \
+                     VALUES (?1, 'Chat', '', ?2, ?2)",
+                    rusqlite::params![a, ts],
+                )?;
+                let cid = conn.last_insert_rowid();
+                conn.execute(
+                    "UPDATE messages SET conversation_id = ?1 \
+                     WHERE agent_id = ?2 AND conversation_id IS NULL",
+                    rusqlite::params![cid, a],
+                )?;
+            }
+        }
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, id)",
+            [],
+        )?;
         Ok(Ledger {
             conn: Mutex::new(conn),
+            active: Mutex::new(HashMap::new()),
         })
+    }
+
+    // ---- conversations (saved chats) ---------------------------------------
+
+    /// The conversation the agent is talking in, creating one if none exists.
+    fn ensure_active(&self, agent_id: &str) -> i64 {
+        if let Some(id) = self.active.lock().unwrap().get(agent_id).copied() {
+            return id;
+        }
+        // Reuse the agent's most recent conversation, else start a fresh one.
+        let latest: Option<i64> = {
+            let conn = self.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT id FROM conversations WHERE agent_id = ?1 ORDER BY updated DESC LIMIT 1",
+                [agent_id],
+                |r| r.get(0),
+            )
+            .ok()
+        };
+        let id = latest.unwrap_or_else(|| self.create_conversation(agent_id, "", "New chat"));
+        self.active.lock().unwrap().insert(agent_id.to_string(), id);
+        id
+    }
+
+    fn create_conversation(&self, agent_id: &str, cwd: &str, title: &str) -> i64 {
+        let ts = now_ms();
+        let conn = self.conn.lock().unwrap();
+        let _ = conn.execute(
+            "INSERT INTO conversations (agent_id, title, cwd, created, updated) \
+             VALUES (?1, ?2, ?3, ?4, ?4)",
+            rusqlite::params![agent_id, title, cwd, ts],
+        );
+        conn.last_insert_rowid()
+    }
+
+    /// Start a fresh conversation for an agent and make it active. Returns its id.
+    pub fn new_conversation(&self, agent_id: &str, cwd: &str) -> i64 {
+        let id = self.create_conversation(agent_id, cwd, "New chat");
+        self.active.lock().unwrap().insert(agent_id.to_string(), id);
+        id
+    }
+
+    /// Make an existing conversation the active one for its agent.
+    pub fn open_conversation(&self, conversation_id: i64) {
+        if let Some(c) = self.conversation(conversation_id) {
+            self.active.lock().unwrap().insert(c.agent_id, conversation_id);
+        }
+    }
+
+    /// The agent's active conversation id (creating one if needed).
+    pub fn active_conversation(&self, agent_id: &str) -> i64 {
+        self.ensure_active(agent_id)
+    }
+
+    pub fn conversation(&self, id: i64) -> Option<Conversation> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, agent_id, title, cwd, created, updated FROM conversations WHERE id = ?1",
+            [id],
+            |r| {
+                Ok(Conversation {
+                    id: r.get(0)?,
+                    agent_id: r.get(1)?,
+                    title: r.get(2)?,
+                    cwd: r.get(3)?,
+                    created: r.get(4)?,
+                    updated: r.get(5)?,
+                })
+            },
+        )
+        .ok()
+    }
+
+    /// All saved chats, most-recently-active first.
+    pub fn conversations(&self, limit: i64) -> Vec<Conversation> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = match conn.prepare(
+            "SELECT id, agent_id, title, cwd, created, updated FROM conversations \
+             ORDER BY updated DESC LIMIT ?1",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        let rows = stmt.query_map([limit], |r| {
+            Ok(Conversation {
+                id: r.get(0)?,
+                agent_id: r.get(1)?,
+                title: r.get(2)?,
+                cwd: r.get(3)?,
+                created: r.get(4)?,
+                updated: r.get(5)?,
+            })
+        });
+        match rows {
+            Ok(it) => it.filter_map(|x| x.ok()).collect(),
+            Err(_) => vec![],
+        }
+    }
+
+    /// The session id to resume for a conversation, if any.
+    pub fn conversation_session(&self, id: i64) -> Option<String> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT session_id FROM conversations WHERE id = ?1",
+            [id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
+    }
+
+    pub fn set_conversation_session(&self, id: i64, session_id: &str, cwd: &str) {
+        let conn = self.conn.lock().unwrap();
+        let _ = conn.execute(
+            "UPDATE conversations SET session_id = ?2, cwd = ?3 WHERE id = ?1",
+            rusqlite::params![id, session_id, cwd],
+        );
+    }
+
+    /// Forget a conversation's resume pointer (a stale session that won't resume).
+    pub fn forget_conversation_session(&self, id: i64) {
+        let conn = self.conn.lock().unwrap();
+        let _ = conn.execute(
+            "UPDATE conversations SET session_id = NULL WHERE id = ?1",
+            [id],
+        );
     }
 
     /// Create or update a task card (idempotent by id; preserves the original
@@ -172,7 +363,37 @@ impl Ledger {
         }
     }
 
-    /// Append one chat message to the durable transcript.
+    /// The agent's current conversation without creating one (for reads).
+    fn current_conversation(&self, agent_id: &str) -> Option<i64> {
+        if let Some(id) = self.active.lock().unwrap().get(agent_id).copied() {
+            return Some(id);
+        }
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id FROM conversations WHERE agent_id = ?1 ORDER BY updated DESC LIMIT 1",
+            [agent_id],
+            |r| r.get(0),
+        )
+        .ok()
+    }
+
+    /// Title an untitled conversation from its first user message.
+    fn maybe_title(&self, conv: i64, text: &str) {
+        let conn = self.conn.lock().unwrap();
+        let cur: Option<String> = conn
+            .query_row("SELECT title FROM conversations WHERE id = ?1", [conv], |r| r.get(0))
+            .ok();
+        if matches!(cur.as_deref(), Some("New chat") | Some("Chat")) {
+            let t: String = text.trim().lines().next().unwrap_or("").chars().take(48).collect();
+            let title = if t.trim().is_empty() { "Chat".to_string() } else { t };
+            let _ = conn.execute(
+                "UPDATE conversations SET title = ?2 WHERE id = ?1",
+                rusqlite::params![conv, title],
+            );
+        }
+    }
+
+    /// Append one chat message to the agent's active conversation.
     pub fn add_message(
         &self,
         agent_id: &str,
@@ -181,26 +402,46 @@ impl Ledger {
         tool: Option<&str>,
         detail: Option<&str>,
     ) {
+        let conv = self.ensure_active(agent_id);
         let ts = now_ms();
-        let conn = self.conn.lock().unwrap();
-        let _ = conn.execute(
-            "INSERT INTO messages (ts, agent_id, role, text, tool, detail) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![ts, agent_id, role, text, tool, detail],
-        );
+        {
+            let conn = self.conn.lock().unwrap();
+            let _ = conn.execute(
+                "INSERT INTO messages (ts, agent_id, role, text, tool, detail, conversation_id) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![ts, agent_id, role, text, tool, detail, conv],
+            );
+            let _ = conn.execute(
+                "UPDATE conversations SET updated = ?2 WHERE id = ?1",
+                rusqlite::params![conv, ts],
+            );
+        }
+        if role == "user" {
+            if let Some(t) = text {
+                self.maybe_title(conv, t);
+            }
+        }
     }
 
-    /// The last `limit` messages for an agent, in chronological order.
+    /// The last `limit` messages of the agent's current conversation, chronological.
     pub fn messages(&self, agent_id: &str, limit: i64) -> Vec<StoredMessage> {
+        match self.current_conversation(agent_id) {
+            Some(conv) => self.conversation_messages(conv, limit),
+            None => vec![],
+        }
+    }
+
+    /// The last `limit` messages of a specific conversation, chronological.
+    pub fn conversation_messages(&self, conv: i64, limit: i64) -> Vec<StoredMessage> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = match conn.prepare(
             "SELECT id, ts, role, text, tool, detail FROM messages \
-             WHERE agent_id = ?1 ORDER BY id DESC LIMIT ?2",
+             WHERE conversation_id = ?1 ORDER BY id DESC LIMIT ?2",
         ) {
             Ok(s) => s,
             Err(_) => return vec![],
         };
-        let rows = stmt.query_map(rusqlite::params![agent_id, limit], |r| {
+        let rows = stmt.query_map(rusqlite::params![conv, limit], |r| {
             Ok(StoredMessage {
                 id: r.get(0)?,
                 ts: r.get(1)?,
@@ -218,10 +459,16 @@ impl Ledger {
         v
     }
 
-    /// Wipe an agent's transcript and resume pointer (the reset button).
+    /// Reset button: delete the agent's current conversation (messages + row) and
+    /// its legacy resume pointers, so the next message starts a genuinely fresh one.
     pub fn clear_agent(&self, agent_id: &str) {
+        let conv = self.current_conversation(agent_id);
+        self.active.lock().unwrap().remove(agent_id);
         let conn = self.conn.lock().unwrap();
-        let _ = conn.execute("DELETE FROM messages WHERE agent_id = ?1", [agent_id]);
+        if let Some(c) = conv {
+            let _ = conn.execute("DELETE FROM messages WHERE conversation_id = ?1", [c]);
+            let _ = conn.execute("DELETE FROM conversations WHERE id = ?1", [c]);
+        }
         let _ = conn.execute("DELETE FROM sessions WHERE agent_id = ?1", [agent_id]);
     }
 

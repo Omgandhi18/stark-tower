@@ -61,6 +61,18 @@ export const chatStop = (agentId: string) => commands.chatStop(agentId);
 export const getChat = (agentId: string, limit?: number) =>
   commands.getChat(agentId, limit ?? null);
 
+// ---- saved chats (conversations) ----
+
+export const listConversations = () => commands.listConversations();
+
+export const newChat = (agentId: string) => commands.newChat(agentId);
+
+export const openConversation = (conversationId: number) =>
+  commands.openConversation(conversationId);
+
+export const onConversationsChanged = (cb: () => void): Promise<UnlistenFn> =>
+  listen("conversations://changed", () => cb());
+
 /** List files and folders under a directory for the chat's @ file picker. */
 export const listFiles = (dir: string, limit?: number) =>
   commands.listFiles(dir, limit ?? null);

@@ -140,10 +140,30 @@ async chatStop(agentId: string) : Promise<void> {
     await TAURI_INVOKE("chat_stop", { agentId });
 },
 /**
- * The persisted transcript for an agent, oldest first (for rehydrating the UI).
+ * The persisted transcript for an agent's active conversation (for rehydration).
  */
 async getChat(agentId: string, limit: number | null) : Promise<StoredMessage[]> {
     return await TAURI_INVOKE("get_chat", { agentId, limit });
+},
+/**
+ * All saved chats across agents, most-recently-active first.
+ */
+async listConversations() : Promise<Conversation[]> {
+    return await TAURI_INVOKE("list_conversations");
+},
+/**
+ * Start a fresh conversation with an agent (ends the live session so the next
+ * message begins a genuinely new chat). Returns the new conversation id.
+ */
+async newChat(agentId: string) : Promise<number> {
+    return await TAURI_INVOKE("new_chat", { agentId });
+},
+/**
+ * Reopen a saved conversation: make it active, end the live session, and point
+ * the agent's workdir at the conversation's dir so the next message resumes it.
+ */
+async openConversation(conversationId: number) : Promise<void> {
+    await TAURI_INVOKE("open_conversation", { conversationId });
 },
 /**
  * List files AND folders under `dir` (relative paths, recursively into every
@@ -275,6 +295,10 @@ export type AuthConfig = { method?: string;
  * Environment variables to inject into the engine process (API keys etc.).
  */
 env?: Partial<{ [key in string]: string }> }
+/**
+ * A saved chat — one continuous conversation with an agent, resumable later.
+ */
+export type Conversation = { id: number; agent_id: string; title: string; cwd: string; created: number; updated: number }
 export type DispatchResult = { agent_id: string; name: string; spawned: boolean }
 /**
  * A backend an agent can run on. `kind` selects the adapter (how we build the

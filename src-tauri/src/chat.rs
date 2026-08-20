@@ -455,7 +455,8 @@ fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, re
                         v.get("session_id").and_then(|s| s.as_str()),
                     ) {
                         if let Some(state) = app.try_state::<crate::AppState>() {
-                            state.ledger.set_session(agent_id, c, sid);
+                            let conv = state.ledger.active_conversation(agent_id);
+                            state.ledger.set_conversation_session(conv, sid, c);
                         }
                     }
                 }
@@ -606,11 +607,10 @@ pub fn start_session(
     }
     let model = crate::prompts::agent_model(app, agent_id, &engine);
     let is_orch = crate::prompts::agent_is_orchestrator(app, agent_id);
-    // If we've talked to this agent in this directory before, resume that
-    // session so the conversation continues with full context.
+    // Resume the active conversation's session so it continues with full context.
     let resume = app
         .try_state::<crate::AppState>()
-        .and_then(|s| s.ledger.get_session(agent_id, cwd));
+        .and_then(|s| s.ledger.conversation_session(s.ledger.active_conversation(agent_id)));
     let resumed = resume.is_some();
     let token = app
         .try_state::<crate::AppState>()
@@ -639,7 +639,6 @@ pub fn start_session(
 
     let app2 = app.clone();
     let id2 = agent_id.to_string();
-    let cwd2 = cwd.to_string();
     let orch = is_orch;
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
@@ -664,7 +663,8 @@ pub fn start_session(
         // re-resuming the dead id forever, and tell the user to resend once.
         if resumed && !saw_init {
             if let Some(state) = app2.try_state::<crate::AppState>() {
-                state.ledger.forget_session(&id2, &cwd2);
+                let conv = state.ledger.active_conversation(&id2);
+                state.ledger.forget_conversation_session(conv);
             }
             simple(
                 &app2,
