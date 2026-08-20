@@ -89,7 +89,14 @@ or the same task across two directories) — they run concurrently. Delegation i
 `delegate` tool returns IMMEDIATELY with just an acknowledgement, NOT the worker's output. So after \
 delegating, briefly tell Om what you dispatched and to whom, then END YOUR TURN — do not wait or \
 claim you have results yet. When the workers finish you'll automatically receive their outputs as a \
-`[DELEGATION RESULTS]` message; THAT is when you synthesize everything into one clear reply for Om.";
+`[DELEGATION RESULTS]` message; THAT is when you synthesize everything into one clear reply for Om.\n\n\
+Write each `delegate` task as a complete, self-contained CONTRACT — the worker never sees this \
+conversation, so it must stand on its own. Cover four parts:\n\
+- OBJECTIVE: the concrete outcome to achieve.\n\
+- OUTPUT: exactly what to report back to you (a summary, a diff, a decision, findings…).\n\
+- CONTEXT: the paths, commands, versions, and facts it needs — pass the right `directory`.\n\
+- BOUNDARIES: what it must NOT touch or do, and anything to leave for a human.\n\
+Keep it tight for a small task, but never omit the OBJECTIVE and OUTPUT.";
 
 fn emit(app: &tauri::AppHandle, ev: ChatEvent) {
     let _ = app.emit("chat://event", ev);
@@ -226,20 +233,37 @@ fn agent_name(app: &tauri::AppHandle, agent_id: &str) -> String {
 /// The live team the orchestrator can delegate to, built from the current config
 /// so renamed and newly-added specialists show up automatically.
 fn team_block(app: &tauri::AppHandle, self_id: &str) -> String {
-    let mut lines = Vec::new();
-    if let Some(state) = app.try_state::<crate::AppState>() {
+    let Some(state) = app.try_state::<crate::AppState>() else {
+        return String::new();
+    };
+    // Snapshot the roster first (drop the config lock before taking statuses, so
+    // the two locks are never held at once).
+    let workers: Vec<(String, String, String)> = {
         let cfg = state.config.lock().unwrap();
-        for a in &cfg.agents {
-            if a.enabled && a.id != self_id && a.kind == AgentKind::Worker {
-                lines.push(format!("- `{}`: {} ({})", a.id, a.name, a.role));
-            }
-        }
-    }
-    if lines.is_empty() {
+        cfg.agents
+            .iter()
+            .filter(|a| a.enabled && a.id != self_id && a.kind == AgentKind::Worker)
+            .map(|a| (a.id.clone(), a.name.clone(), a.role.clone()))
+            .collect()
+    };
+    if workers.is_empty() {
         return String::new();
     }
+    let statuses = state.statuses.lock().unwrap();
+    let lines: Vec<String> = workers
+        .iter()
+        .map(|(id, name, role)| {
+            let word = match statuses.get(id).copied().unwrap_or(AgentStatus::Offline) {
+                AgentStatus::Idle => "idle",
+                AgentStatus::Thinking | AgentStatus::Working => "busy",
+                AgentStatus::Blocked => "blocked",
+                AgentStatus::Offline => "offline",
+            };
+            format!("- `{id}`: {name} ({role}) — {word}")
+        })
+        .collect();
     format!(
-        "Your team (delegate a task to a specialist by passing their id to the `delegate` tool):\n{}",
+        "Your team — live status shown. Prefer an `idle` or `offline` worker; avoid piling work onto one that's already `busy` or `blocked`. Delegate by passing the worker's id to the `delegate` tool:\n{}",
         lines.join("\n")
     )
 }
