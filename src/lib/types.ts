@@ -56,15 +56,17 @@ export interface StatusEvent {
   status: AgentStatus;
 }
 
+// Mirrors the `kind` values emitted by the Rust `ChatEvent` (chat.rs). Keep in
+// sync until these types are generated from Rust (see roadmap §03.3).
 export type ChatEventKind =
   | "init"
   | "text"
   | "thinking"
   | "tool"
-  | "tool_result"
   | "result"
   | "error"
-  | "exit";
+  | "exit"
+  | "system";
 
 export interface ChatEvent {
   agentId: string;

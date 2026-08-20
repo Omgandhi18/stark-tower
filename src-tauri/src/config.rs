@@ -427,17 +427,33 @@ fn backup_unreadable(path: &std::path::Path, contents: &str) -> Option<String> {
         if !candidate.exists() {
             return std::fs::write(&candidate, contents)
                 .ok()
-                .map(|_| candidate.to_string_lossy().to_string());
+                .map(|_| {
+                    set_owner_only(&candidate);
+                    candidate.to_string_lossy().to_string()
+                });
         }
     }
     None
 }
+
+/// Owner read/write only (0600). The config can hold `api-key-env` secrets, so
+/// keep it off any group/other read even if the data dir's perms ever loosen.
+/// (Full secret storage should move to the OS keychain — a follow-up coupled to
+/// the Settings UI's secret round-trip.)
+#[cfg(unix)]
+fn set_owner_only(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+}
+#[cfg(not(unix))]
+fn set_owner_only(_path: &std::path::Path) {}
 
 /// Atomic write (temp + rename) so a concurrent reader never sees a partial file.
 pub fn save(path: &std::path::Path, cfg: &AppConfig) {
     if let Ok(out) = serde_json::to_string_pretty(cfg) {
         let tmp = path.with_extension("json.starktmp");
         if std::fs::write(&tmp, out).is_ok() {
+            set_owner_only(&tmp);
             let _ = std::fs::rename(&tmp, path);
         }
     }
