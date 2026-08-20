@@ -7,6 +7,7 @@ mod engine;
 mod floor;
 mod ledger;
 mod proc;
+mod prompts;
 mod pty;
 
 use agents::{Agent, AgentKind, AgentStatus};

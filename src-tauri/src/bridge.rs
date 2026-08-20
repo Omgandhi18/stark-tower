@@ -3,7 +3,8 @@
 //! drives the session and delegation primitives that still live there.
 
 use crate::agents::{AgentKind, AgentStatus};
-use crate::chat::{complete_delegation, register_delegation, resolve_worker_id, run_task_blocking, truncate};
+use crate::chat::{complete_delegation, register_delegation, run_task_blocking, truncate};
+use crate::prompts::resolve_worker_id;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicU64, Ordering};
