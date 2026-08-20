@@ -1,29 +1,32 @@
 import type { AgentStatus } from "./types";
+import { PALETTE, hex } from "./tokens";
 
-// Steel / graphite palette (Ambient Lab direction).
+// Numeric palette for the Pixi floor — derived from the single source in
+// tokens.ts (so it can never drift from the CSS vars). Steel / graphite,
+// "Ambient Lab" direction.
 export const COLORS = {
-  bg: 0x0d1116,
-  floor: 0x161b21,
-  floorAlt: 0x12171c,
-  seam: 0x2a333d,
-  wall: 0x0a0d11,
-  reactorCore: 0x59cfff,
-  reactorGlow: 0x3a8ba8,
-  gold: 0xe8c06a,
-  danger: 0xff6b78,
-  text: 0xe4ebf2,
-  textDim: 0x78848f,
+  bg: hex(PALETTE.void),
+  floor: hex(PALETTE.floor),
+  floorAlt: hex(PALETTE.floorAlt),
+  seam: hex(PALETTE.seam),
+  wall: hex(PALETTE.wall),
+  reactorCore: hex(PALETTE.reactor),
+  reactorGlow: hex(PALETTE.reactorDim),
+  gold: hex(PALETTE.gold),
+  danger: hex(PALETTE.danger),
+  text: hex(PALETTE.text),
+  textDim: hex(PALETTE.dim),
 };
 
 export const STATUS_META: Record<
   AgentStatus,
   { label: string; color: string; glyph: string }
 > = {
-  offline: { label: "Offline", color: "#78848f", glyph: "○" },
-  idle: { label: "Standby", color: "#6ee7b7", glyph: "●" },
-  thinking: { label: "Thinking", color: "#59cfff", glyph: "…" },
-  working: { label: "Working", color: "#e8c06a", glyph: "▮" },
-  blocked: { label: "Contained", color: "#ff6b78", glyph: "!" },
+  offline: { label: "Offline", color: PALETTE.dim, glyph: "○" },
+  idle: { label: "Standby", color: PALETTE.ok, glyph: "●" },
+  thinking: { label: "Thinking", color: PALETTE.reactor, glyph: "…" },
+  working: { label: "Working", color: PALETTE.working, glyph: "▮" },
+  blocked: { label: "Contained", color: PALETTE.danger, glyph: "!" },
 };
 
 export const TILE = 28; // px per floor tile (matches labArt LAB_TILE)

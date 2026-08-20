@@ -1,4 +1,7 @@
 /* Stark Tower — Ambient Lab layout · Comms-Terminal steel palette. */
+/* Palette vars below MIRROR src/lib/tokens.ts (PALETTE / CSS_TOKENS) — the single
+   source, also consumed numerically by the Pixi floor. Change both together;
+   assertTokensInSync() warns in dev if they drift. */
 :root {
   --void: #0e1114;
   --panel: #151a1f;
