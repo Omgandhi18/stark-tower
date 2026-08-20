@@ -1,18 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Application,
-  Assets,
   Container,
   Graphics,
-  Rectangle,
   Sprite,
   Text,
   TextStyle,
   Texture,
-  TilingSprite,
 } from "pixi.js";
 import type { Agent, AgentStatus, AssistLink } from "../lib/types";
 import { COLORS, TILE } from "../lib/theme";
+import { resolveRecipe, sceneFrameBufs, SCENE_H, SCENE_W } from "../lib/charArt";
+import { type Buf, LAB_GH, LAB_GW, renderFloor } from "../lib/labArt";
 
 interface Props {
   agents: Agent[];
@@ -21,42 +20,34 @@ interface Props {
   onSelect: (id: string) => void;
 }
 
-// Chrome District sheet contract: rows = 8 directions (front, clockwise),
-// cols = 6 walk frames, 56x84 px per cell.
-const CELL_W = 56;
-const CELL_H = 84;
-const DIRS = 8;
-const FRAMES = 6;
-const SCALE = 0.8;
-const SPEED = 46; // px/sec walk speed
+// Procedural characters are 18x32 buffers (from charArt); scaled up on the floor.
+const SCALE = 1.3;
+const SPEED = 40; // px/sec walk speed
+const WALK_CYCLE = [0, 1, 0, 2]; // stand, step-L, stand, step-R
 
-const GRID_W = 17;
-const GRID_H = 13;
+const GRID_W = LAB_GW;
+const GRID_H = LAB_GH;
 
-// Floor positions are defined here (frontend) so the lab layout can be tuned
-// without touching the Rust roster. Falls back to the agent's home_x/home_y.
-const POSITIONS: Record<string, [number, number]> = {
-  jarvis: [8, 6],
-  vision: [12, 4],
-  friday: [3, 9],
-  edith: [6, 10],
-  karen: [10, 9],
-  veronica: [13, 7],
-};
+interface CharFrames {
+  front: Texture[];
+  back: Texture[];
+}
 
 interface FloorSprite {
   id: string;
+  figure: string;
   container: Container;
   char: Sprite;
   ring: Graphics;
+  nameText: Text;
   bubbleGfx: Graphics;
-  frames: Texture[][];
+  frames: CharFrames;
   x: number;
   y: number;
   homeX: number;
   homeY: number;
-  dir: number;
-  animFrame: number;
+  facingBack: boolean;
+  animPhase: number;
   animTimer: number;
   waitTimer: number;
   target: { x: number; y: number } | null;
@@ -69,15 +60,48 @@ function hexToNum(hex: string): number {
   return parseInt(hex.replace("#", ""), 16);
 }
 
-/** Sheet row for a movement vector. Row 0 = facing camera (down). */
-function angleToRow(vx: number, vy: number): number {
-  const theta = Math.atan2(vx, vy);
-  const d = Math.round((theta / (2 * Math.PI)) * DIRS);
-  return ((d % DIRS) + DIRS) % DIRS;
+/** Rasterize an RGBA buffer into a nearest-neighbor Pixi texture. */
+function bufToTexture(buf: Uint8ClampedArray): Texture {
+  const canvas = document.createElement("canvas");
+  canvas.width = SCENE_W;
+  canvas.height = SCENE_H;
+  const ctx = canvas.getContext("2d")!;
+  const img = ctx.createImageData(SCENE_W, SCENE_H);
+  img.data.set(buf);
+  ctx.putImageData(img, 0, 0);
+  const tex = Texture.from(canvas);
+  tex.source.scaleMode = "nearest";
+  return tex;
+}
+
+/** Rasterize a labArt RGBA buffer (arbitrary size) into a nearest texture. */
+function labTexture(buf: Buf): Texture {
+  const canvas = document.createElement("canvas");
+  canvas.width = buf.w;
+  canvas.height = buf.h;
+  const ctx = canvas.getContext("2d")!;
+  const img = ctx.createImageData(buf.w, buf.h);
+  img.data.set(buf.d);
+  ctx.putImageData(img, 0, 0);
+  const tex = Texture.from(canvas);
+  tex.source.scaleMode = "nearest";
+  return tex;
+}
+
+/** Build (front + back) walk textures for an agent's character recipe. */
+function framesForFigure(figure: string): CharFrames {
+  const bufs = sceneFrameBufs(resolveRecipe(figure));
+  return {
+    front: bufs.front.map(bufToTexture),
+    back: bufs.back.map(bufToTexture),
+  };
 }
 
 function feetPos(agent: Agent): { x: number; y: number } {
-  const [tx, ty] = POSITIONS[agent.id] ?? [agent.home_x, agent.home_y];
+  // Position comes from the agent's configured home tile, so custom agents place
+  // themselves and edits move them live. Clamp into the grid as a safety net.
+  const tx = Math.min(GRID_W - 1, Math.max(0, agent.home_x || 1));
+  const ty = Math.min(GRID_H - 1, Math.max(0, agent.home_y || 1));
   return {
     x: tx * TILE + TILE / 2,
     y: ty * TILE + TILE * 0.72,
@@ -93,12 +117,10 @@ export default function StarkFloor({
   const hostRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const worldRef = useRef<Container | null>(null);
-  const reactorRef = useRef<Sprite | null>(null);
-  const reactorBaseRef = useRef<number>(1);
   const linkLayerRef = useRef<Graphics | null>(null);
   const spriteLayerRef = useRef<Container | null>(null);
   const spritesRef = useRef<Map<string, FloorSprite>>(new Map());
-  const framesRef = useRef<Map<string, Texture[][]>>(new Map());
+  const framesRef = useRef<Map<string, CharFrames>>(new Map());
   const linksRef = useRef<AssistLink[]>(assistLinks);
   const [ready, setReady] = useState(false);
   linksRef.current = assistLinks;
@@ -130,29 +152,11 @@ export default function StarkFloor({
         app.stage.addChild(world);
         worldRef.current = world;
 
-        // Load lab textures first so the floor/props render underneath.
-        let floorTex: Texture | null = null;
-        let propsTex: Texture | null = null;
-        try {
-          floorTex = await Assets.load<Texture>("/tiles/floor.png");
-          floorTex.source.scaleMode = "nearest";
-        } catch {
-          /* fall back to drawn floor */
-        }
-        try {
-          propsTex = await Assets.load<Texture>("/tiles/props.png");
-          propsTex.source.scaleMode = "nearest";
-        } catch {
-          /* fall back to drawn reactor/cell */
-        }
-        if (disposed) {
-          app.destroy(true);
-          return;
-        }
-
-        const built = drawLab(world, floorTex, propsTex);
-        reactorRef.current = built.reactor;
-        reactorBaseRef.current = built.reactorBase;
+        // Procedural sci-fi lab facility (tiles + walls + rooms + furniture),
+        // baked into a single nearest-neighbor texture. Desks are part of the
+        // floor; agents stand at their assigned desk tiles.
+        const floorSprite = new Sprite(labTexture(renderFloor()));
+        world.addChild(floorSprite);
 
         const linkLayer = new Graphics();
         world.addChild(linkLayer);
@@ -179,25 +183,8 @@ export default function StarkFloor({
         layout();
         app.renderer.on("resize", layout);
 
-        // Load + slice character sheets
-        const ids = [
-          "jarvis",
-          "vision",
-          "friday",
-          "edith",
-          "karen",
-          "veronica",
-        ];
-        for (const id of ids) {
-          try {
-            const tex = await Assets.load<Texture>(`/sprites/${id}.png`);
-            if (disposed) return;
-            tex.source.scaleMode = "nearest";
-            framesRef.current.set(id, buildFrames(tex));
-          } catch {
-            /* sprite missing -> agent will be skipped */
-          }
-        }
+        // Characters are drawn procedurally (charArt), generated on demand per
+        // agent in the sync effect below — no sprite sheets to preload.
         if (disposed) return;
         setReady(true);
 
@@ -252,49 +239,58 @@ export default function StarkFloor({
     };
   }, []);
 
-  // Sync sprites with roster + status + selection.
+  // Sync sprites with roster + status + selection + appearance.
   useEffect(() => {
     const layer = spriteLayerRef.current;
     if (!ready || !layer) return;
     const map = spritesRef.current;
+    const live = new Set(agents.map((a) => a.id));
 
     for (const agent of agents) {
-      const frames = framesRef.current.get(agent.id);
-      if (!frames) continue;
+      const figure = agent.figure || "";
+      let frames = framesRef.current.get(figure);
+      if (!frames) {
+        frames = framesForFigure(figure);
+        framesRef.current.set(figure, frames);
+      }
+
       let s = map.get(agent.id);
       if (!s) {
-        s = createSprite(agent, frames, () => onSelect(agent.id));
+        s = createSprite(agent, figure, frames, () => onSelect(agent.id));
         layer.addChild(s.container);
         map.set(agent.id, s);
+      } else {
+        // Live-apply appearance edits (character / accent / home / name).
+        if (s.figure !== figure) {
+          s.figure = figure;
+          s.frames = frames;
+        }
+        s.accent = hexToNum(agent.accent);
+        const pos = feetPos(agent);
+        s.homeX = pos.x;
+        s.homeY = pos.y;
+        s.nameText.text = agent.name;
       }
       s.status = agent.status;
       s.selected = agent.id === selectedId;
+    }
+
+    // Drop sprites for agents that were removed.
+    for (const [id, s] of map) {
+      if (!live.has(id)) {
+        s.container.destroy({ children: true });
+        map.delete(id);
+      }
     }
   }, [agents, selectedId, ready, onSelect]);
 
   return <div ref={hostRef} className="stark-floor" />;
 }
 
-function buildFrames(base: Texture): Texture[][] {
-  const rows: Texture[][] = [];
-  for (let d = 0; d < DIRS; d++) {
-    const row: Texture[] = [];
-    for (let f = 0; f < FRAMES; f++) {
-      row.push(
-        new Texture({
-          source: base.source,
-          frame: new Rectangle(f * CELL_W, d * CELL_H, CELL_W, CELL_H),
-        }),
-      );
-    }
-    rows.push(row);
-  }
-  return rows;
-}
-
 function createSprite(
   agent: Agent,
-  frames: Texture[][],
+  figure: string,
+  frames: CharFrames,
   onClick: () => void,
 ): FloorSprite {
   const container = new Container();
@@ -305,12 +301,12 @@ function createSprite(
   const ring = new Graphics();
   container.addChild(ring);
 
-  const char = new Sprite(frames[0][0]);
+  const char = new Sprite(frames.front[0]);
   char.anchor.set(0.5, 1);
   char.scale.set(SCALE);
   container.addChild(char);
 
-  const name = new Text({
+  const nameText = new Text({
     text: agent.name,
     style: new TextStyle({
       fontFamily: "monospace",
@@ -319,12 +315,12 @@ function createSprite(
       letterSpacing: 1,
     }),
   });
-  name.anchor.set(0.5, 0);
-  name.y = 8;
-  container.addChild(name);
+  nameText.anchor.set(0.5, 0);
+  nameText.y = 8;
+  container.addChild(nameText);
 
   const bubbleGfx = new Graphics();
-  bubbleGfx.y = -CELL_H * SCALE - 6;
+  bubbleGfx.y = -SCENE_H * SCALE - 6;
   container.addChild(bubbleGfx);
 
   const pos = feetPos(agent);
@@ -333,17 +329,19 @@ function createSprite(
 
   return {
     id: agent.id,
+    figure,
     container,
     char,
     ring,
+    nameText,
     bubbleGfx,
     frames,
     x: pos.x,
     y: pos.y,
     homeX: pos.x,
     homeY: pos.y,
-    dir: 0,
-    animFrame: 0,
+    facingBack: false,
+    animPhase: 0,
     animTimer: 0,
     waitTimer: Math.random() * 2,
     target: null,
@@ -365,8 +363,7 @@ function updateSprite(
   if (s.status === "offline") {
     s.char.alpha = 0.9;
     s.target = null;
-    s.animFrame = 0;
-    s.dir = 0;
+    s.animPhase = 0;
   } else {
     s.char.alpha = 1;
     const reqId = helperOf.get(s.id);
@@ -403,27 +400,30 @@ function updateSprite(
         const uy = dy / d;
         s.x += ux * step;
         s.y += uy * step;
-        s.dir = angleToRow(ux, uy);
+        // Only front + back views exist; face away only when heading up-screen.
+        if (uy < -0.35) s.facingBack = true;
+        else if (uy > 0.1 || Math.abs(ux) > 0.3) s.facingBack = false;
         moving = true;
       } else {
         s.target = null;
         s.waitTimer = 0.6 + Math.random() * 2.4;
-        if (s.status === "working" || requester) s.dir = 0; // face camera at desk
+        if (s.status === "working" || requester) s.facingBack = false; // face camera
       }
     }
 
     if (moving) {
       s.animTimer += dt;
-      if (s.animTimer > 0.11) {
+      if (s.animTimer > 0.16) {
         s.animTimer = 0;
-        s.animFrame = (s.animFrame + 1) % FRAMES;
+        s.animPhase = (s.animPhase + 1) % WALK_CYCLE.length;
       }
     } else {
-      s.animFrame = 0;
+      s.animPhase = 0;
     }
   }
 
-  s.char.texture = s.frames[s.dir][s.animFrame];
+  const set = s.facingBack ? s.frames.back : s.frames.front;
+  s.char.texture = set[WALK_CYCLE[s.animPhase]] ?? set[0];
   s.container.x = s.x;
   s.container.y = s.y;
   s.container.zIndex = s.y;
@@ -477,88 +477,4 @@ function drawBubble(s: FloorSprite, t: number) {
     g.rect(-1.5, -7, 3, 8).fill(0xffffff);
     g.rect(-1.5, 3, 3, 3).fill(0xffffff);
   }
-}
-
-// Prop crop rectangles within tiles/props.png (1024x1024 composite).
-const REACTOR_CROP = new Rectangle(8, 8, 496, 496);
-const CONTAIN_CROP = new Rectangle(262, 520, 512, 494);
-
-// Interior of tiles/floor.png (drop the outer gold frame) tiled across the grid.
-const FLOOR_CROP = new Rectangle(72, 72, 880, 880);
-const FLOOR_TILE_SCALE = 0.2;
-const FLOOR_ALPHA = 0.5;
-
-/** Build the lab from art: floor backdrop + arc-reactor + containment cell.
- *  Falls back to drawn shapes if the textures failed to load.
- *  Returns the reactor sprite (+ its base scale) so the ticker can pulse it. */
-function drawLab(
-  world: Container,
-  floorTex: Texture | null,
-  propsTex: Texture | null,
-): { reactor: Sprite | null; reactorBase: number } {
-  const W = GRID_W * TILE;
-  const H = GRID_H * TILE;
-
-  // --- Floor (tiled, not stretched) ---
-  if (floorTex) {
-    const tileTex = new Texture({ source: floorTex.source, frame: FLOOR_CROP });
-    const floor = new TilingSprite({ texture: tileTex, width: W, height: H });
-    floor.tileScale.set(FLOOR_TILE_SCALE);
-    floor.alpha = FLOOR_ALPHA;
-    world.addChild(floor);
-  } else {
-    const floor = new Graphics();
-    for (let y = 0; y < GRID_H; y++) {
-      for (let x = 0; x < GRID_W; x++) {
-        const alt = (x + y) % 2 === 0;
-        floor.rect(x * TILE, y * TILE, TILE, TILE).fill(alt ? COLORS.floor : COLORS.floorAlt);
-      }
-    }
-    floor.rect(0, 0, W, H).stroke({ width: 3, color: COLORS.reactorGlow, alpha: 0.6 });
-    world.addChild(floor);
-  }
-
-  let reactor: Sprite | null = null;
-  let reactorBase = 1;
-
-  if (propsTex) {
-    // --- Arc reactor ---
-    const reactorPx = 150;
-    reactor = new Sprite(
-      new Texture({ source: propsTex.source, frame: REACTOR_CROP }),
-    );
-    reactor.anchor.set(0.5);
-    reactor.x = 8 * TILE + TILE / 2;
-    reactor.y = 3 * TILE + TILE / 2;
-    reactorBase = reactorPx / REACTOR_CROP.width;
-    reactor.scale.set(reactorBase);
-    world.addChild(reactor);
-
-    // --- Containment cell (bottom-right) ---
-    const cellPx = 118;
-    const cell = new Sprite(
-      new Texture({ source: propsTex.source, frame: CONTAIN_CROP }),
-    );
-    cell.anchor.set(0.5);
-    cell.x = 14.5 * TILE;
-    cell.y = 10.5 * TILE;
-    cell.scale.set(cellPx / CONTAIN_CROP.width);
-    world.addChild(cell);
-
-    const label = new Text({
-      text: "CONTAINMENT",
-      style: new TextStyle({
-        fontFamily: "monospace",
-        fontSize: 9,
-        fill: 0xff8080,
-        letterSpacing: 1,
-      }),
-    });
-    label.anchor.set(0.5, 1);
-    label.x = cell.x;
-    label.y = cell.y - cellPx / 2 - 4;
-    world.addChild(label);
-  }
-
-  return { reactor, reactorBase };
 }

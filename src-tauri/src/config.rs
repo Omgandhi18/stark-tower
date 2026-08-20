@@ -15,8 +15,36 @@ fn yes() -> bool {
     true
 }
 fn cfg_version() -> u32 {
-    2
+    6
 }
+
+/// v4→v5: the floor became a full facility with a desk bullpen; seat the built-in
+/// roster at bullpen desks (id, home_x, home_y).
+const V5_DESKS: &[(&str, u32, u32)] = &[
+    ("jarvis", 2, 10), ("vision", 5, 10), ("friday", 8, 10),
+    ("edith", 11, 10), ("karen", 14, 10), ("veronica", 8, 13),
+];
+
+/// v3→v4: the old sprite-library ids map to procedural character presets.
+const V4_FIGURE_MAP: &[(&str, &str)] = &[
+    ("sentinel", "commander"),
+    ("oracle", "architect"),
+    ("mechanic", "engineer"),
+    ("scout", "recon"),
+    ("artisan", "specialist"),
+    ("warden", "operative"),
+];
+
+/// v2→v3: (built-in id, sprite id, home_x, home_y). Adopts the neutral tinted
+/// sprite library + the lab floor layout for the built-in roster.
+const V3_ROSTER: &[(&str, &str, u32, u32)] = &[
+    ("jarvis", "sentinel", 8, 6),
+    ("vision", "oracle", 12, 4),
+    ("friday", "mechanic", 3, 9),
+    ("edith", "scout", 6, 10),
+    ("karen", "artisan", 10, 9),
+    ("veronica", "warden", 13, 7),
+];
 
 /// Signature of the v1 default orchestrator personality (which hardcoded the
 /// team by name). The v1→v2 migration refreshes any prompt still carrying it to
@@ -303,6 +331,46 @@ pub fn load(path: &std::path::Path) -> AppConfig {
             }
         }
         cfg.version = 2;
+    }
+    // v2 → v3: legacy `figure` values (masc/fem/synth) aren't sprite ids. Adopt
+    // the neutral sprite library + the lab floor positions for the built-ins.
+    if cfg.version < 3 {
+        for &(id, sprite, hx, hy) in V3_ROSTER {
+            if let Some(a) = cfg.agents.iter_mut().find(|a| a.id == id) {
+                a.figure = sprite.to_string();
+                a.home_x = hx;
+                a.home_y = hy;
+            }
+        }
+        cfg.version = 3;
+    }
+    // v3 → v4: characters are now procedural recipes; map the old sprite ids to
+    // the matching character preset.
+    if cfg.version < 4 {
+        for a in cfg.agents.iter_mut() {
+            if let Some(&(_, preset)) = V4_FIGURE_MAP.iter().find(|(old, _)| *old == a.figure) {
+                a.figure = preset.to_string();
+            }
+        }
+        cfg.version = 4;
+    }
+    // v4 → v5: seat the built-in roster at the new bullpen desks.
+    if cfg.version < 5 {
+        for &(id, hx, hy) in V5_DESKS {
+            if let Some(a) = cfg.agents.iter_mut().find(|a| a.id == id) {
+                a.home_x = hx;
+                a.home_y = hy;
+            }
+        }
+        cfg.version = 5;
+    }
+    // v5 → v6: the orchestrator commands from the reactor bay (not a bullpen desk).
+    if cfg.version < 6 {
+        if let Some(a) = cfg.agents.iter_mut().find(|a| a.kind == AgentKind::Orchestrator) {
+            a.home_x = 4;
+            a.home_y = 5;
+        }
+        cfg.version = 6;
     }
     // Backfill personalities that were left empty.
     for a in cfg.agents.iter_mut() {

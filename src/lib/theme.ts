@@ -26,4 +26,4 @@ export const STATUS_META: Record<
   blocked: { label: "Contained", color: "#ff6b78", glyph: "!" },
 };
 
-export const TILE = 40; // px per floor tile
+export const TILE = 28; // px per floor tile (matches labArt LAB_TILE)
