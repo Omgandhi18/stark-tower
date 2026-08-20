@@ -3,9 +3,14 @@ use portable_pty::{native_pty_system, Child, MasterPty, PtySize};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{Emitter, Manager};
+
+/// Unique per-spawn epoch, so a killed process's still-draining reader thread
+/// can't mutate or tear down the same-id session that replaced it.
+static SESSION_GEN: AtomicU64 = AtomicU64::new(1);
 
 /// One live agent process: its pty master (for resize), a writer (for stdin),
 /// the child handle (for kill), plus bookkeeping for status + runaway detection.
@@ -17,6 +22,8 @@ pub struct Session {
     pub last_activity: Instant,
     pub out_window_count: u32,
     pub window_start: Instant,
+    /// This session's spawn epoch (see SESSION_GEN).
+    pub gen: u64,
 }
 
 /// Owns every running agent session, keyed by agent id.
@@ -87,6 +94,7 @@ pub fn spawn_session(
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
 
+    let gen = SESSION_GEN.fetch_add(1, Ordering::Relaxed);
     let session = Session {
         master: pair.master,
         writer,
@@ -95,6 +103,7 @@ pub fn spawn_session(
         last_activity: Instant::now(),
         out_window_count: 0,
         window_start: Instant::now(),
+        gen,
     };
 
     {
@@ -124,15 +133,21 @@ pub fn spawn_session(
                             data: buf[..n].to_vec(),
                         },
                     );
-                    on_activity(&app2, &id);
+                    on_activity(&app2, &id, gen);
                 }
                 Err(_) => break,
             }
         }
-        // Session ended — clean up and mark offline.
+        // Session ended — clean up and mark offline, but ONLY if we're still the
+        // current session for this id. A kill()+respawn reuses the id, and this
+        // (now-dead) thread must not remove or offline the replacement.
         let state = app2.state::<crate::AppState>();
-        state.pty.sessions.lock().unwrap().remove(&id);
-        emit_status(&app2, &id, AgentStatus::Offline);
+        let mut map = state.pty.sessions.lock().unwrap();
+        if map.get(&id).map(|s| s.gen) == Some(gen) {
+            map.remove(&id);
+            drop(map);
+            emit_status(&app2, &id, AgentStatus::Offline);
+        }
     });
 
     Ok(())
@@ -140,13 +155,16 @@ pub fn spawn_session(
 
 /// Called on each output chunk: refresh activity, flip Idle→Working, and run
 /// the runaway circuit breaker (Ultron containment).
-fn on_activity(app: &tauri::AppHandle, agent_id: &str) {
+fn on_activity(app: &tauri::AppHandle, agent_id: &str, gen: u64) {
     let state = app.state::<crate::AppState>();
     let mut became_working = false;
     let mut tripped = false;
     {
         let mut map = state.pty.sessions.lock().unwrap();
         if let Some(s) = map.get_mut(agent_id) {
+            if s.gen != gen {
+                return; // stale reader thread from a prior spawn — ignore.
+            }
             s.last_activity = Instant::now();
 
             if s.status != AgentStatus::Working && s.status != AgentStatus::Blocked {
