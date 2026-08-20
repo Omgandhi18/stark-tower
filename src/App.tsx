@@ -39,6 +39,7 @@ import ProjectsBar from "./components/ProjectsBar";
 import ReviewPanel from "./components/ReviewPanel";
 import TasksBoard from "./components/TasksBoard";
 import CostHud from "./components/CostHud";
+import UpdateBadge from "./components/UpdateBadge";
 import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
 
@@ -240,6 +241,7 @@ export default function App() {
           }}
         />
         <div className="top-sp" />
+        <UpdateBadge />
         <div className="telem">
           <div className="telem-u">
             <span className="telem-v">

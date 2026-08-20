@@ -91,6 +91,12 @@ async unblockAgent(agentId: string) : Promise<void> {
     await TAURI_INVOKE("unblock_agent", { agentId });
 },
 /**
+ * Notify-only check for a newer GitHub release (fail-loud; logs to updater.log).
+ */
+async checkUpdate() : Promise<void> {
+    await TAURI_INVOKE("check_update");
+},
+/**
  * JARVIS routing: pick a free worker for a task, spawning one if needed, and
  * deliver the prompt to its session (in the current project directory).
  */

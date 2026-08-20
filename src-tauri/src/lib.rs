@@ -11,6 +11,7 @@ mod proc;
 mod prompts;
 mod pty;
 mod secrets;
+mod update;
 
 use agents::{Agent, AgentKind, AgentStatus};
 use config::{AgentConfig, AppConfig, EngineConfig};
@@ -730,6 +731,13 @@ fn unblock_agent(app: tauri::AppHandle, agent_id: String) {
     pty::unblock(&app, &agent_id);
 }
 
+/// Notify-only check for a newer GitHub release (fail-loud; logs to updater.log).
+#[tauri::command]
+#[specta::specta]
+fn check_update(app: tauri::AppHandle) {
+    std::thread::spawn(move || update::check(&app));
+}
+
 #[derive(serde::Serialize, specta::Type)]
 pub struct DispatchResult {
     pub agent_id: String,
@@ -872,6 +880,7 @@ fn specta_builder() -> tauri_specta::Builder {
             pty_resize,
             kill_agent,
             unblock_agent,
+            check_update,
             dispatch_task,
             request_assist,
             chat_send,
@@ -981,6 +990,10 @@ pub fn run() {
             bridge::start_delegation_server(app.handle().clone(), sock_path);
             start_mission_scheduler(app.handle().clone());
             start_floor_router(app.handle().clone());
+            {
+                let h = app.handle().clone();
+                std::thread::spawn(move || update::check(&h));
+            }
             Ok(())
         })
         .invoke_handler(specta_builder.invoke_handler())

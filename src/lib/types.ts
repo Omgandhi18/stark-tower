@@ -47,6 +47,14 @@ export interface UsageUpdate {
   contextTokens: number;
 }
 
+/** Notify-only update check result (update://status). */
+export interface UpdateStatus {
+  available: boolean;
+  latest: string | null;
+  current: string;
+  error: string | null;
+}
+
 export type ChatEventKind =
   | "init"
   | "text"
