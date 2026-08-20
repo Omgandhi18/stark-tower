@@ -1,4 +1,5 @@
 mod agents;
+mod breaker;
 mod chat;
 mod config;
 mod engine;

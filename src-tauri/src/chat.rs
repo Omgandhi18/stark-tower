@@ -462,31 +462,6 @@ pub fn resolve_program(cmd: &str) -> Option<String> {
     None
 }
 
-/// How many identical tool calls in a row count as a runaway loop.
-const RUNAWAY_TOOL_REPEATS: u32 = 10;
-
-fn tool_repeat_tracker() -> &'static Mutex<HashMap<String, (String, u32)>> {
-    static T: OnceLock<Mutex<HashMap<String, (String, u32)>>> = OnceLock::new();
-    T.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Count consecutive identical tool calls for an agent; returns the run length.
-fn note_tool_call(agent_id: &str, sig: &str) -> u32 {
-    let mut m = tool_repeat_tracker().lock().unwrap();
-    let entry = m.entry(agent_id.to_string()).or_insert_with(|| (String::new(), 0));
-    if entry.0 == sig {
-        entry.1 += 1;
-    } else {
-        entry.0 = sig.to_string();
-        entry.1 = 1;
-    }
-    entry.1
-}
-
-fn reset_tool_tracker(agent_id: &str) {
-    tool_repeat_tracker().lock().unwrap().remove(agent_id);
-}
-
 /// A headless agent repeating the same tool call over and over is stuck in a
 /// loop (and quietly burning quota — the PTY breaker never sees this path). Mark
 /// it Blocked, surface + log it, and end a live persistent session to stop the
@@ -740,8 +715,10 @@ fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, re
                             // Runaway loop guard for the headless path: trip if the
                             // same tool call repeats too many times in a row.
                             let sig = format!("{name}|{detail}");
-                            if note_tool_call(agent_id, &sig) >= RUNAWAY_TOOL_REPEATS {
-                                reset_tool_tracker(agent_id);
+                            if crate::breaker::is_runaway(crate::breaker::note_tool_call(
+                                agent_id, &sig,
+                            )) {
+                                crate::breaker::reset(agent_id);
                                 trip_headless_breaker(app, agent_id, name, record_session);
                             }
                             emit(
@@ -775,7 +752,7 @@ fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, re
                     cwd: None,
                 },
             );
-            reset_tool_tracker(agent_id); // turn ended cleanly — clear the loop guard
+            crate::breaker::reset(agent_id); // turn ended cleanly — clear the loop guard
             crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
             // The orchestrator's turn just ended — if he dispatched workers this
             // turn, seal the batch so it flushes back once every worker finishes.
@@ -1536,18 +1513,6 @@ fn handle_approve(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_j
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn tool_repeats_count_consecutively_and_reset() {
-        let a = "test-agent-repeat";
-        reset_tool_tracker(a);
-        assert_eq!(note_tool_call(a, "Read|foo"), 1);
-        assert_eq!(note_tool_call(a, "Read|foo"), 2);
-        assert_eq!(note_tool_call(a, "Read|bar"), 1); // a different call resets the run
-        assert_eq!(note_tool_call(a, "Read|bar"), 2);
-        reset_tool_tracker(a);
-        assert_eq!(note_tool_call(a, "Read|bar"), 1);
-    }
 
     #[test]
     fn resolve_program_honors_absolute_paths_and_rejects_bogus() {
