@@ -881,6 +881,7 @@ pub fn run() {
             pty::start_idle_monitor(app.handle().clone());
             bridge::start_delegation_server(app.handle().clone(), sock_path);
             start_mission_scheduler(app.handle().clone());
+            start_floor_router(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -930,6 +931,41 @@ pub fn run() {
 fn cleanup_children(app: &tauri::AppHandle) {
     chat::kill_all(app);
     pty::kill_all(app);
+}
+
+/// The floor router: move outbox messages to inboxes (single mover), then drain
+/// each live+idle agent's inbox into its session. Delivering only when idle keeps
+/// a teammate's message from interleaving mid-turn.
+fn start_floor_router(app: tauri::AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(1500));
+        let Some(state) = app.try_state::<AppState>() else {
+            continue;
+        };
+        let floor_dir = state.floor_dir.clone();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        for m in floor::route_once(&floor_dir) {
+            floor::log_event(&floor_dir, now, &m.from, "message", &format!("→ {} ({})", m.to, m.kind));
+        }
+        let live_idle: Vec<String> = {
+            let sessions = state.chat.sessions.lock().unwrap();
+            let statuses = state.statuses.lock().unwrap();
+            sessions
+                .keys()
+                .filter(|id| matches!(statuses.get(*id), Some(AgentStatus::Idle)))
+                .cloned()
+                .collect()
+        };
+        for id in live_idle {
+            for m in floor::drain_inbox(&floor_dir, &id) {
+                floor::log_event(&floor_dir, now, &id, "message-in", &format!("from {} ({})", m.from, m.id));
+                delegation::deliver_message(&app, &id, &m.from, &m.body);
+            }
+        }
+    });
 }
 
 /// Background loop that fires the standup mission every `standup_minutes` (0 =

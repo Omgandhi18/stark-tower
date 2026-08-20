@@ -79,6 +79,10 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
             handle_roster(app, &mut writer, &req);
             return;
         }
+        Some("message") => {
+            handle_message(app, &mut writer, &req);
+            return;
+        }
         _ => {}
     }
 
@@ -132,6 +136,40 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
     let result = run_task_blocking(app, &agent, &task, &cwd)
         .unwrap_or_else(|e| format!("(delegation failed: {e})"));
     complete_delegation(app, &agent, &task, &result);
+}
+
+/// An agent messages a teammate: drop the message into the sender's outbox for
+/// the floor router to deliver. `from` is trusted from the socket's agentId and
+/// re-forced to the owning dir by the router; `to` must be a known enabled agent.
+fn handle_message(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_json::Value) {
+    let reply = |w: &mut UnixStream, v: serde_json::Value| {
+        let _ = w.write_all((v.to_string() + "\n").as_bytes());
+    };
+    let from = req.get("agentId").and_then(|s| s.as_str()).unwrap_or("").to_string();
+    let to = req.get("to").and_then(|s| s.as_str()).unwrap_or("").trim().to_string();
+    let body = req.get("body").and_then(|s| s.as_str()).unwrap_or("").trim().to_string();
+
+    let known = app
+        .try_state::<crate::AppState>()
+        .map(|s| {
+            let cfg = s.config.lock().unwrap();
+            cfg.agents.iter().any(|a| a.enabled && a.id == to)
+        })
+        .unwrap_or(false);
+    if from.is_empty() || !known || to == from || body.is_empty() {
+        reply(writer, serde_json::json!({"error": "unknown recipient or empty message"}));
+        return;
+    }
+
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        crate::floor::enqueue(&state.floor_dir, &from, &to, "message", &body);
+    }
+    reply(
+        writer,
+        serde_json::json!({
+            "result": format!("Message queued for {}. They'll receive it when they're free.", to.to_uppercase())
+        }),
+    );
 }
 
 /// Return the live team the orchestrator can delegate to, so the MCP server can

@@ -136,6 +136,19 @@ fn inject_user_turn(app: &tauri::AppHandle, agent_id: &str, text: &str) -> bool 
     }
 }
 
+/// Deliver a routed inbox message into a recipient's live session as a user turn
+/// and surface it on their tab. Returns false if the recipient has no session.
+pub(crate) fn deliver_message(app: &tauri::AppHandle, agent_id: &str, from: &str, body: &str) -> bool {
+    let text = format!("[MESSAGE from {}] {}", from.to_uppercase(), body);
+    if inject_user_turn(app, agent_id, &text) {
+        crate::chat::simple(app, agent_id, "system", Some(text.clone()));
+        crate::chat::persist(app, agent_id, "system", Some(&text), None, None);
+        true
+    } else {
+        false
+    }
+}
+
 /// Feed a message into the orchestrator's live session as a new user turn (used
 /// to deliver delegation results). Returns false if his session isn't running.
 fn inject_to_orchestrator(app: &tauri::AppHandle, text: &str) -> bool {

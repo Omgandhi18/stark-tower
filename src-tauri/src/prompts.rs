@@ -173,6 +173,11 @@ Use it for any sign-off, decision, findings gate, question, or to show a UI mock
 external CDN). It renders in the app and BLOCKS until Om decides, then returns his decision. \
 Use it instead of any lavish or browser step.";
 
+const MESSAGE_NOTE: &str = "You can also `message` a teammate directly by their agent id — a \
+question, a heads-up, or a hand-off note. It's delivered to them when they're next free (no reply \
+on the call). Teammates' messages to you arrive inline as [MESSAGE from …]; read and act on them. \
+Use `message` to coordinate with a specialist; use `ask_human` for anything that needs Om.";
+
 const JARVIS_PLAYBOOK: &str = "Planning playbook (the sarathi funnel) — for a large or foggy \
 request, think before delegating: (1) if the idea is foggy, open it into a few distinct \
 directions and settle on one; (2) stress-test the plan by asking Om the key open decisions via \
@@ -203,6 +208,8 @@ pub(crate) fn system_prompt_for(app: &tauri::AppHandle, agent_id: &str) -> Strin
             s.push_str(JARVIS_PLAYBOOK);
             s.push_str("\n\n");
             s.push_str(ASK_HUMAN_NOTE);
+            s.push_str("\n\n");
+            s.push_str(MESSAGE_NOTE);
             s.push_str("\n\nYour current team and the projects you can delegate into are provided \
 with each of Om's messages under [CURRENT TEAM & PROJECTS] — always use that list; it supersedes \
 any roster mentioned earlier in this conversation.");
@@ -213,6 +220,8 @@ any roster mentioned earlier in this conversation.");
         if mcp {
             s.push_str("\n\n");
             s.push_str(ASK_HUMAN_NOTE);
+            s.push_str("\n\n");
+            s.push_str(MESSAGE_NOTE);
         }
         s
     };

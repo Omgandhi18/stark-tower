@@ -175,8 +175,24 @@ async function getRoster() {
   return Array.isArray(res && res.workers) ? res.workers : [];
 }
 
+const MESSAGE_TOOL = {
+  name: "message",
+  description:
+    "Send a short message to a teammate by their agent id — a question, a heads-up, or a hand-off " +
+    "note. It's delivered to them when they're next free (you don't get a reply on this call). Use " +
+    "it to coordinate directly with another specialist; use `ask_human` for anything that needs Om.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      to: { type: "string", description: "The teammate's agent id." },
+      body: { type: "string", description: "The message text." },
+    },
+    required: ["to", "body"],
+  },
+};
+
 async function toolsList() {
-  const tools = [ASK_HUMAN_TOOL, APPROVE_TOOL];
+  const tools = [ASK_HUMAN_TOOL, MESSAGE_TOOL, APPROVE_TOOL];
   if (IS_ORCH) {
     const workers = await getRoster();
     tools.unshift(buildDelegateTool(workers));
@@ -243,6 +259,16 @@ rl.on("line", async (raw) => {
       });
       if (res.error) result(id, "ask_human failed: " + res.error, true);
       else result(id, res.result || "(no decision)");
+    } else if (name === "message") {
+      log("message ->", args.to);
+      const res = await bridge({
+        type: "message",
+        agentId: AGENT_ID,
+        to: args.to || "",
+        body: args.body || "",
+      });
+      if (res.error) result(id, "message failed: " + res.error, true);
+      else result(id, res.result || "(queued)");
     } else if (name === "approve") {
       const toolName = args.tool_name || args.toolName || "";
       const input = args.input || args.tool_input || {};
