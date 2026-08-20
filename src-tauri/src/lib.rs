@@ -3,6 +3,7 @@ mod breaker;
 mod chat;
 mod config;
 mod engine;
+mod floor;
 mod ledger;
 mod proc;
 mod pty;
@@ -55,6 +56,9 @@ pub struct AppState {
     pub oneshot_pids: Mutex<HashSet<u32>>,
     /// Directory holding each agent's durable `<id>.md` memory file.
     pub memory_dir: String,
+    /// The git-versioned floor: an append-only event log + per-agent mailboxes,
+    /// making the run observable and recoverable.
+    pub floor_dir: String,
 }
 
 impl AppState {
@@ -296,6 +300,11 @@ fn ensure_spawned(
         1,
     );
     let _ = app.emit("ledger://entry", e);
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    floor::log_event(&state.floor_dir, ts, &agent.id, "spawn", &short_path(workdir));
     Ok(true)
 }
 
@@ -449,6 +458,10 @@ fn commit_config(app: &tauri::AppHandle, state: &AppState) -> AppConfig {
     state.save_config();
     state.sync_roster();
     let cfg = state.config.lock().unwrap().clone();
+    // Reconcile the floor: make sure every agent has its mailbox dirs.
+    for a in &cfg.agents {
+        floor::ensure_agent_dirs(&state.floor_dir, &a.id);
+    }
     let _ = app.emit("config://changed", cfg.clone());
     cfg
 }
@@ -835,6 +848,12 @@ pub fn run() {
             std::fs::create_dir_all(&memory_dir).ok();
             let memory_dir = memory_dir.to_string_lossy().to_string();
 
+            // The git-versioned floor: seed it with the current roster's mailboxes.
+            let data_str = data_dir.to_string_lossy().to_string();
+            let agent_ids: Vec<String> = roster.iter().map(|a| a.id.clone()).collect();
+            let floor_dir = floor::init(&data_str, &agent_ids);
+            floor::start_committer(floor_dir.clone());
+
             app.manage(AppState {
                 pty: PtyManager::default(),
                 chat: chat::ChatManager::default(),
@@ -853,6 +872,7 @@ pub fn run() {
                 config_file,
                 oneshot_pids: Mutex::new(HashSet::new()),
                 memory_dir,
+                floor_dir,
             });
 
             pty::start_idle_monitor(app.handle().clone());

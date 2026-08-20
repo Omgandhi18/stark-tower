@@ -17,6 +17,17 @@ fn emit_tasks_changed(app: &tauri::AppHandle) {
     let _ = app.emit("tasks://changed", ());
 }
 
+/// Mirror a significant event onto the git-versioned floor log.
+fn floor_log(app: &tauri::AppHandle, agent_id: &str, kind: &str, detail: &str) {
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        crate::floor::log_event(&state.floor_dir, ts, agent_id, kind, detail);
+    }
+}
+
 /// A persistent headless Claude Code conversation for one agent, driven over
 /// stream-json. No pty — so no trust dialog and no terminal crash class.
 pub struct ChatSession {
@@ -979,6 +990,7 @@ pub fn run_task_blocking(
             .upsert_task(&task_id, &truncate(task, 80), agent_id, "doing", None);
     }
     emit_tasks_changed(app);
+    floor_log(app, agent_id, "task-doing", &truncate(task, 80));
     if let Some(state) = app.try_state::<crate::AppState>() {
         let e = state.ledger.record(
             "jarvis",
@@ -1067,6 +1079,8 @@ pub fn run_task_blocking(
             .set_task_status(&task_id, status, Some(&truncate(&result, 200)));
     }
     emit_tasks_changed(app);
+    let status = if result.trim().is_empty() { "task-blocked" } else { "task-done" };
+    floor_log(app, agent_id, status, &truncate(task, 80));
     crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
     Ok(result)
 }
@@ -1226,6 +1240,7 @@ new work Om didn't ask for.";
             let e = state.ledger.record(&oid, "standup", "floor check", 1);
             let _ = app.emit("ledger://entry", e);
         }
+        floor_log(app, &oid, "standup", "floor check");
     }
 }
 
