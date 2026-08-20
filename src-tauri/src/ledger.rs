@@ -34,6 +34,22 @@ pub struct StoredMessage {
     pub detail: Option<String>,
 }
 
+/// A durable task card on the board. Delegations create one (`doing`) and close
+/// it (`done` / `blocked`) so in-flight work is trackable across turns and
+/// survives the UI closing — the flow upgrade munder-difflin's tasks.json gives.
+#[derive(Debug, Clone, Serialize)]
+pub struct Task {
+    pub id: String,
+    pub ts: i64,
+    pub updated: i64,
+    pub title: String,
+    pub assignee: String,
+    /// todo | doing | blocked | done
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -85,9 +101,75 @@ impl Ledger {
             )",
             [],
         )?;
+        // The task board: durable cards for delegated work (todo/doing/blocked/done).
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS tasks (
+                id       TEXT    PRIMARY KEY,
+                ts       INTEGER NOT NULL,
+                updated  INTEGER NOT NULL,
+                title    TEXT    NOT NULL,
+                assignee TEXT    NOT NULL,
+                status   TEXT    NOT NULL,
+                detail   TEXT
+            )",
+            [],
+        )?;
         Ok(Ledger {
             conn: Mutex::new(conn),
         })
+    }
+
+    /// Create or update a task card (idempotent by id; preserves the original
+    /// created-at `ts` when updating).
+    pub fn upsert_task(&self, id: &str, title: &str, assignee: &str, status: &str, detail: Option<&str>) {
+        let ts = now_ms();
+        let conn = self.conn.lock().unwrap();
+        let _ = conn.execute(
+            "INSERT INTO tasks (id, ts, updated, title, assignee, status, detail) \
+             VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6) \
+             ON CONFLICT(id) DO UPDATE SET \
+               updated = excluded.updated, title = excluded.title, \
+               assignee = excluded.assignee, status = excluded.status, detail = excluded.detail",
+            rusqlite::params![id, ts, title, assignee, status, detail],
+        );
+    }
+
+    /// Move a task to a new status (no-op if the id is unknown).
+    pub fn set_task_status(&self, id: &str, status: &str, detail: Option<&str>) {
+        let ts = now_ms();
+        let conn = self.conn.lock().unwrap();
+        let _ = conn.execute(
+            "UPDATE tasks SET status = ?2, updated = ?3, \
+             detail = COALESCE(?4, detail) WHERE id = ?1",
+            rusqlite::params![id, status, ts, detail],
+        );
+    }
+
+    /// The most recent `limit` task cards, newest first.
+    pub fn tasks(&self, limit: i64) -> Vec<Task> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = match conn.prepare(
+            "SELECT id, ts, updated, title, assignee, status, detail FROM tasks \
+             ORDER BY updated DESC LIMIT ?1",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        let rows = stmt.query_map([limit], |r| {
+            Ok(Task {
+                id: r.get(0)?,
+                ts: r.get(1)?,
+                updated: r.get(2)?,
+                title: r.get(3)?,
+                assignee: r.get(4)?,
+                status: r.get(5)?,
+                detail: r.get(6)?,
+            })
+        });
+        match rows {
+            Ok(it) => it.filter_map(|x| x.ok()).collect(),
+            Err(_) => vec![],
+        }
     }
 
     /// Append one chat message to the durable transcript.
@@ -264,6 +346,24 @@ mod tests {
         l.clear_agent("a");
         assert!(l.messages("a", 10).is_empty());
         assert!(l.get_session("a", "/x").is_none());
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn task_lifecycle_upsert_then_status() {
+        let (l, p) = temp_db();
+        l.upsert_task("t1", "Review ats", "edith", "doing", None);
+        let ts = l.tasks(10);
+        assert_eq!(ts.len(), 1);
+        assert_eq!(ts[0].status, "doing");
+        assert_eq!(ts[0].assignee, "edith");
+        l.set_task_status("t1", "done", Some("looks good"));
+        let ts = l.tasks(10);
+        assert_eq!(ts[0].status, "done");
+        assert_eq!(ts[0].detail.as_deref(), Some("looks good"));
+        // upsert is idempotent by id — no duplicate card
+        l.upsert_task("t1", "Review ats", "edith", "blocked", None);
+        assert_eq!(l.tasks(10).len(), 1);
         std::fs::remove_file(&p).ok();
     }
 }

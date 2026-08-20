@@ -37,6 +37,7 @@ import Roster from "./components/Roster";
 import Chat from "./components/Chat";
 import ProjectsBar from "./components/ProjectsBar";
 import ReviewPanel from "./components/ReviewPanel";
+import TasksBoard from "./components/TasksBoard";
 import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
 
@@ -307,6 +308,7 @@ export default function App() {
               />
             )}
           </div>
+          <TasksBoard />
           <div className="floortag">
             <span className="d" />
             <span className="label">

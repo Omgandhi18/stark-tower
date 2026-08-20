@@ -10,6 +10,12 @@ use std::sync::{Mutex, OnceLock};
 use tauri::{Emitter, Manager};
 
 static REVIEW_SEQ: AtomicU64 = AtomicU64::new(1);
+static TASK_SEQ: AtomicU64 = AtomicU64::new(1);
+
+/// Nudge the UI to reload the task board.
+fn emit_tasks_changed(app: &tauri::AppHandle) {
+    let _ = app.emit("tasks://changed", ());
+}
 
 /// A persistent headless Claude Code conversation for one agent, driven over
 /// stream-json. No pty — so no trust dialog and no terminal crash class.
@@ -914,6 +920,14 @@ pub fn run_task_blocking(
     simple(app, agent_id, "system", Some(marker.clone()));
     persist(app, agent_id, "system", Some(&marker), None, None);
     persist(app, agent_id, "user", Some(task), None, None);
+    // Open a task card on the board so this delegation is trackable across turns.
+    let task_id = format!("task-{}", TASK_SEQ.fetch_add(1, Ordering::Relaxed));
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        state
+            .ledger
+            .upsert_task(&task_id, &truncate(task, 80), agent_id, "doing", None);
+    }
+    emit_tasks_changed(app);
     if let Some(state) = app.try_state::<crate::AppState>() {
         let e = state.ledger.record(
             "jarvis",
@@ -993,7 +1007,13 @@ pub fn run_task_blocking(
     let _ = child.wait();
     if let Some(state) = app.try_state::<crate::AppState>() {
         state.oneshot_pids.lock().unwrap().remove(&pid);
+        // Close out the task card. Empty result = the worker produced nothing.
+        let status = if result.trim().is_empty() { "blocked" } else { "done" };
+        state
+            .ledger
+            .set_task_status(&task_id, status, Some(&truncate(&result, 200)));
     }
+    emit_tasks_changed(app);
     crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
     Ok(result)
 }

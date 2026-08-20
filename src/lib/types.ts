@@ -40,6 +40,19 @@ export interface LedgerEntry {
   load: number;
 }
 
+export type TaskStatus = "todo" | "doing" | "blocked" | "done";
+
+/** A durable task card on the board (delegated work, tracked across turns). */
+export interface Task {
+  id: string;
+  ts: number;
+  updated: number;
+  title: string;
+  assignee: string;
+  status: TaskStatus;
+  detail?: string;
+}
+
 export interface DispatchResult {
   agent_id: string;
   name: string;

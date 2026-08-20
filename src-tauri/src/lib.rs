@@ -536,6 +536,12 @@ fn get_ledger(state: tauri::State<AppState>, limit: Option<i64>) -> Vec<LedgerEn
     state.ledger.recent(limit.unwrap_or(60))
 }
 
+/// The task board — durable cards for delegated work, newest first.
+#[tauri::command]
+fn get_tasks(state: tauri::State<AppState>, limit: Option<i64>) -> Vec<ledger::Task> {
+    state.ledger.tasks(limit.unwrap_or(50))
+}
+
 #[tauri::command]
 fn get_project(state: tauri::State<AppState>) -> String {
     current_project(&state)
@@ -830,6 +836,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_agents,
             get_ledger,
+            get_tasks,
             get_project,
             set_project,
             list_projects,

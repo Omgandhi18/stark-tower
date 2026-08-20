@@ -14,6 +14,7 @@ import type {
   ReviewRequest,
   StatusEvent,
   StoredMessage,
+  Task,
 } from "./types";
 
 // ---- Commands (Rust) --------------------------------------------------------
@@ -22,6 +23,12 @@ export const listAgents = () => invoke<Agent[]>("list_agents");
 
 export const getLedger = (limit = 60) =>
   invoke<LedgerEntry[]>("get_ledger", { limit });
+
+export const getTasks = (limit?: number) =>
+  invoke<Task[]>("get_tasks", { limit: limit ?? null });
+
+export const onTasksChanged = (cb: () => void): Promise<UnlistenFn> =>
+  listen("tasks://changed", () => cb());
 
 export const spawnAgent = (agentId: string, cols: number, rows: number) =>
   invoke<void>("spawn_agent", { agentId, cols, rows });
