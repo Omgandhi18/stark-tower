@@ -208,25 +208,70 @@ pub fn resolve_program(cmd: &str) -> Option<String> {
     None
 }
 
-/// A headless agent repeating the same tool call over and over is stuck in a
-/// loop (and quietly burning quota — the PTY breaker never sees this path). Mark
-/// it Blocked, surface + log it, and end a live persistent session to stop the
-/// burn. One-shot delegation workers are bounded, so they're only surfaced.
+/// Inject a steer message into an agent's live session (a new user turn).
+fn steer(app: &tauri::AppHandle, agent_id: &str, text: &str) {
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        if let Some(s) = state.chat.sessions.lock().unwrap().get_mut(agent_id) {
+            let msg = serde_json::json!({
+                "type": "user", "message": { "role": "user", "content": text }
+            });
+            let _ = s.stdin.write_all(format!("{}\n", msg).as_bytes());
+            let _ = s.stdin.flush();
+        }
+    }
+}
+
+/// A headless agent repeating the same tool call is looping (and burning quota —
+/// the PTY breaker never sees this path). Walk the containment ladder: STEER
+/// first (nudge it to change course), then CONSTRAIN (pause + surface), then STOP
+/// (end a live persistent session). One-shot workers are bounded so they cap at
+/// Constrained. A clean turn de-escalates via breaker::calm.
 fn trip_headless_breaker(app: &tauri::AppHandle, agent_id: &str, tool: &str, persistent: bool) {
-    crate::pty::emit_status(app, agent_id, AgentStatus::Blocked);
+    use crate::breaker::Level;
+    // Persistent sessions may be killed (hard_stop); one-shots can't, so cap them.
+    let level = crate::breaker::bump(agent_id, persistent);
     let _ = app.emit("breaker://trip", agent_id.to_string());
-    let note = format!("Runaway containment: repeated `{tool}` calls in a loop — agent paused.");
+
+    let (kind, note) = match level {
+        Level::Steering => (
+            "steer",
+            format!("Steering: repeated `{tool}` calls — nudging the agent to change course."),
+        ),
+        Level::Constrained => (
+            "containment",
+            format!("Contained: still looping on `{tool}` after a steer — paused."),
+        ),
+        Level::Stopped => (
+            "containment",
+            "Stopped: runaway loop persisted — session ended.".to_string(),
+        ),
+        Level::Healthy => return,
+    };
     simple(app, agent_id, "system", Some(note.clone()));
     persist(app, agent_id, "system", Some(&note), None, None);
     if let Some(state) = app.try_state::<crate::AppState>() {
-        let e = state.ledger.record(agent_id, "containment", &note, 9);
+        let e = state.ledger.record(agent_id, kind, &note, 9);
         let _ = app.emit("ledger://entry", e);
     }
-    if persistent {
-        if let Some(state) = app.try_state::<crate::AppState>() {
-            let removed = state.chat.sessions.lock().unwrap().remove(agent_id);
-            drop(removed); // Drop → group-kill, outside the sessions lock.
+
+    match level {
+        Level::Steering => steer(
+            app,
+            agent_id,
+            "[STEER] You've repeated the same action several times without progress. Stop, \
+reconsider your approach, and either take a genuinely different step or report what's blocking you.",
+        ),
+        Level::Constrained => crate::pty::emit_status(app, agent_id, AgentStatus::Blocked),
+        Level::Stopped => {
+            crate::pty::emit_status(app, agent_id, AgentStatus::Blocked);
+            if persistent {
+                if let Some(state) = app.try_state::<crate::AppState>() {
+                    let removed = state.chat.sessions.lock().unwrap().remove(agent_id);
+                    drop(removed); // Drop → group-kill, outside the sessions lock.
+                }
+            }
         }
+        Level::Healthy => {}
     }
 }
 
@@ -501,6 +546,7 @@ fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, re
                 },
             );
             crate::breaker::reset(agent_id); // turn ended cleanly — clear the loop guard
+            crate::breaker::step_down(agent_id); // de-escalate the ladder one rung
             crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
             // The orchestrator's turn just ended — if he dispatched workers this
             // turn, seal the batch so it flushes back once every worker finishes.
