@@ -174,6 +174,7 @@ export default function StarkFloor({
   // Init Pixi + load sprite sheets once.
   useEffect(() => {
     let disposed = false;
+    let bgTimer: number | undefined;
     const host = hostRef.current!;
     const app = new Application();
 
@@ -261,9 +262,18 @@ export default function StarkFloor({
         if (disposed) return;
         setReady(true);
 
-        app.ticker.add((ticker) => {
-          const dt = Math.min(0.05, ticker.deltaMS / 1000);
-          const t = performance.now() / 1000;
+        // Per-frame simulation + draw. Driven by the Pixi ticker (rAF) normally,
+        // but a webview throttles requestAnimationFrame when the window is
+        // unfocused/occluded — so a timer fallback keeps the office alive and
+        // renders manually whenever rAF stalls. dt is derived from wall-clock and
+        // clamped, so resuming from a pause never teleports anyone.
+        let lastTick = performance.now();
+        let lastRaf = performance.now();
+        const step = (render: boolean) => {
+          const now = performance.now();
+          const dt = Math.min(0.05, (now - lastTick) / 1000);
+          lastTick = now;
+          const t = now / 1000;
 
           // who is currently assisting whom
           const helperOf = new Map<string, string>();
@@ -299,11 +309,24 @@ export default function StarkFloor({
                 .fill({ color: 0x9be8ff, alpha: 0.9 });
             }
           }
+
+          if (render) app.render();
+        };
+
+        app.ticker.add(() => {
+          lastRaf = performance.now();
+          step(false); // Pixi auto-renders after ticker callbacks
         });
+        // Fallback: if rAF hasn't fired for >40ms, step + render ourselves.
+        bgTimer = window.setInterval(() => {
+          if (disposed) return;
+          if (performance.now() - lastRaf > 40) step(true);
+        }, 1000 / 30);
       });
 
     return () => {
       disposed = true;
+      if (bgTimer) clearInterval(bgTimer);
       const a = appRef.current;
       if (a) {
         a.destroy(true, { children: true });

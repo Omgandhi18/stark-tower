@@ -384,7 +384,14 @@ export default function App() {
               <span style={{ flex: 1 }} />
               <button
                 className="btn-danger"
-                onClick={() => getCurrentWindow().destroy()}
+                onClick={async () => {
+                  const w = getCurrentWindow();
+                  try {
+                    await w.destroy();
+                  } catch {
+                    await w.close().catch(() => {});
+                  }
+                }}
               >
                 Shut down &amp; quit
               </button>
