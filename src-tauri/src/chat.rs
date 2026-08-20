@@ -313,7 +313,7 @@ fn system_prompt_for(app: &tauri::AppHandle, agent_id: &str) -> String {
     let personality = personality_for(app, agent_id);
     let mcp = agent_engine(app, agent_id).supports_mcp;
 
-    if agent_is_orchestrator(app, agent_id) {
+    let mut s = if agent_is_orchestrator(app, agent_id) {
         // Identity comes from config (so a renamed orchestrator introduces itself
         // correctly). The team roster + project map are NOT baked in here — they
         // change while a session is live, so they'd go stale and (worse) bust the
@@ -339,7 +339,50 @@ any roster mentioned earlier in this conversation.");
             s.push_str(ASK_HUMAN_NOTE);
         }
         s
+    };
+
+    // Durable memory (all agents): the curation instruction + the current file.
+    let mem = memory_block(app, agent_id);
+    if !mem.is_empty() {
+        s.push_str("\n\n");
+        s.push_str(&mem);
     }
+    s
+}
+
+/// Absolute path to an agent's durable memory file.
+fn memory_file_path(app: &tauri::AppHandle, agent_id: &str) -> String {
+    app.try_state::<crate::AppState>()
+        .map(|s| {
+            std::path::Path::new(&s.memory_dir)
+                .join(format!("{agent_id}.md"))
+                .to_string_lossy()
+                .to_string()
+        })
+        .unwrap_or_default()
+}
+
+/// The memory section for a system prompt: a standing instruction to curate the
+/// file, plus its current contents so the agent recalls without a read.
+fn memory_block(app: &tauri::AppHandle, agent_id: &str) -> String {
+    let path = memory_file_path(app, agent_id);
+    if path.is_empty() {
+        return String::new();
+    }
+    let content = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut s = format!(
+        "You keep a durable MEMORY file at {path} (also in $STARK_MEMORY_FILE). It persists across \
+sessions. When you learn something durable — a project convention, a decision, a gotcha, where \
+something lives — append a tight bullet to it with your Write/Edit tools. Keep it concise and \
+prune stale lines; it is your long-term memory, not a log."
+    );
+    if content.trim().is_empty() {
+        s.push_str("\n\n[YOUR MEMORY] (empty so far)");
+    } else {
+        s.push_str("\n\n[YOUR MEMORY]\n");
+        s.push_str(content.trim());
+    }
+    s
 }
 
 /// The live team + project map, prepended to each of the orchestrator's user
@@ -493,6 +536,7 @@ fn build_headless(
     resume: Option<&str>,
     sock_path: &str,
     sock_token: &str,
+    memory_file: &str,
 ) -> Command {
     // Resolve to an absolute path so a Finder-launched app finds nvm/brew CLIs.
     let program = resolve_program(&engine.command).unwrap_or_else(|| engine.command.clone());
@@ -583,6 +627,10 @@ fn build_headless(
         if !v.trim().is_empty() {
             cmd.env(k, v);
         }
+    }
+    // The agent's durable memory file (all engines).
+    if !memory_file.is_empty() {
+        cmd.env("STARK_MEMORY_FILE", memory_file);
     }
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -777,6 +825,7 @@ pub fn start_session(
         .try_state::<crate::AppState>()
         .map(|s| s.sock_token.clone())
         .unwrap_or_default();
+    let memory_file = memory_file_path(app, agent_id);
     let mut child = build_headless(
         &engine,
         &model,
@@ -787,6 +836,7 @@ pub fn start_session(
         resume.as_deref(),
         sock_path,
         &token,
+        &memory_file,
     )
     .spawn()
     .map_err(|e| e.to_string())?;
@@ -976,6 +1026,7 @@ pub fn run_task_blocking(
     }
     let model = agent_model(app, agent_id, &engine);
     let is_orch = agent_is_orchestrator(app, agent_id);
+    let memory_file = memory_file_path(app, agent_id);
     let mut child = build_headless(
         &engine,
         &model,
@@ -986,6 +1037,7 @@ pub fn run_task_blocking(
         None,
         &sock,
         &token,
+        &memory_file,
     )
     .spawn()
     .map_err(|e| e.to_string())?;

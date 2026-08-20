@@ -30,6 +30,10 @@ export const getTasks = (limit?: number) =>
 export const onTasksChanged = (cb: () => void): Promise<UnlistenFn> =>
   listen("tasks://changed", () => cb());
 
+/** An agent's durable memory markdown (what it curates across sessions). */
+export const getMemory = (agentId: string) =>
+  invoke<string>("get_memory", { agentId });
+
 export const spawnAgent = (agentId: string, cols: number, rows: number) =>
   invoke<void>("spawn_agent", { agentId, cols, rows });
 

@@ -52,6 +52,8 @@ pub struct AppState {
     /// PIDs of in-flight one-shot delegation workers, so app-quit can kill their
     /// process groups instead of orphaning them (they live outside `chat`).
     pub oneshot_pids: Mutex<HashSet<u32>>,
+    /// Directory holding each agent's durable `<id>.md` memory file.
+    pub memory_dir: String,
 }
 
 impl AppState {
@@ -542,6 +544,13 @@ fn get_tasks(state: tauri::State<AppState>, limit: Option<i64>) -> Vec<ledger::T
     state.ledger.tasks(limit.unwrap_or(50))
 }
 
+/// An agent's durable memory (the markdown it curates across sessions).
+#[tauri::command]
+fn get_memory(state: tauri::State<AppState>, agent_id: String) -> String {
+    let path = std::path::Path::new(&state.memory_dir).join(format!("{agent_id}.md"));
+    std::fs::read_to_string(path).unwrap_or_default()
+}
+
 #[tauri::command]
 fn get_project(state: tauri::State<AppState>) -> String {
     current_project(&state)
@@ -810,6 +819,10 @@ pub fn run() {
             let cfg = config::load(std::path::Path::new(&config_file));
             let roster = cfg.roster();
 
+            let memory_dir = data_dir.join("memory");
+            std::fs::create_dir_all(&memory_dir).ok();
+            let memory_dir = memory_dir.to_string_lossy().to_string();
+
             app.manage(AppState {
                 pty: PtyManager::default(),
                 chat: chat::ChatManager::default(),
@@ -827,6 +840,7 @@ pub fn run() {
                 config: Mutex::new(cfg),
                 config_file,
                 oneshot_pids: Mutex::new(HashSet::new()),
+                memory_dir,
             });
 
             pty::start_idle_monitor(app.handle().clone());
@@ -837,6 +851,7 @@ pub fn run() {
             list_agents,
             get_ledger,
             get_tasks,
+            get_memory,
             get_project,
             set_project,
             list_projects,
