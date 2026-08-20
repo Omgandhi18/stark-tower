@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Settings as SettingsIcon } from "lucide-react";
 import "./App.css";
 import type {
   Agent,
+  AppConfig,
   AssistLink,
   ProjectInfo,
   ReviewRequest,
 } from "./lib/types";
 import {
+  getConfig,
   listAgents,
   listProjects,
   onAgentStatus,
   onAssistLink,
+  onConfigChanged,
   onReviewRequest,
   reviewRespond,
 } from "./lib/api";
@@ -20,6 +23,8 @@ import Roster from "./components/Roster";
 import Chat from "./components/Chat";
 import ProjectsBar from "./components/ProjectsBar";
 import ReviewPanel from "./components/ReviewPanel";
+import Settings from "./components/Settings";
+import Onboarding from "./components/Onboarding";
 
 export default function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -32,6 +37,14 @@ export default function App() {
   const [rosterOpen, setRosterOpen] = useState(false);
   const [reviews, setReviews] = useState<ReviewRequest[]>([]);
   const [questions, setQuestions] = useState<Record<string, ReviewRequest>>({});
+  const [config, setConfig] = useState<AppConfig | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Apply a new config: keep it, and refresh the derived roster/floor.
+  const applyConfig = useCallback((c: AppConfig) => {
+    setConfig(c);
+    listAgents().then(setAgents).catch(() => {});
+  }, []);
 
   const openAgent = useCallback((id: string) => {
     setSelectedId(id);
@@ -59,6 +72,7 @@ export default function App() {
 
   useEffect(() => {
     listAgents().then(setAgents).catch(() => {});
+    getConfig().then(setConfig).catch(() => {});
     listProjects()
       .then((s) => {
         setProjects(s.projects);
@@ -66,6 +80,14 @@ export default function App() {
       })
       .catch(() => {});
   }, []);
+
+  // Live config updates (e.g. from another window) refresh the roster.
+  useEffect(() => {
+    const unsub = onConfigChanged(applyConfig);
+    return () => {
+      unsub.then((f) => f());
+    };
+  }, [applyConfig]);
 
   // Live status → sprites + roster.
   useEffect(() => {
@@ -159,6 +181,13 @@ export default function App() {
             <span className="telem-k">reactor</span>
           </div>
         </div>
+        <button
+          className="gear"
+          onClick={() => setSettingsOpen(true)}
+          title="Configuration"
+        >
+          <SettingsIcon size={16} strokeWidth={2} />
+        </button>
       </header>
 
       <div className="main">
@@ -230,6 +259,18 @@ export default function App() {
           })}
         </aside>
       </div>
+
+      {settingsOpen && config && (
+        <Settings
+          config={config}
+          onConfig={applyConfig}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+
+      {config && !config.onboarded && (
+        <Onboarding config={config} onDone={applyConfig} />
+      )}
     </div>
   );
 }

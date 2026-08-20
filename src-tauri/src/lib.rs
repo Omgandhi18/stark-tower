@@ -1,10 +1,12 @@
 mod agents;
 mod chat;
+mod config;
 mod engine;
 mod ledger;
 mod pty;
 
 use agents::{Agent, AgentKind, AgentStatus};
+use config::{AgentConfig, AppConfig, EngineConfig};
 use ledger::{Ledger, LedgerEntry, StoredMessage};
 use pty::PtyManager;
 use std::collections::HashMap;
@@ -36,6 +38,24 @@ pub struct AppState {
     /// The current batch of background delegations JARVIS is waiting on, so their
     /// results can be synthesized back to him in one follow-up when all finish.
     pub delegations: Mutex<chat::DelegationState>,
+    /// User-editable engines + roster (names, personalities, sprites, models).
+    /// The single source of truth; `roster` above is a derived cache.
+    pub config: Mutex<AppConfig>,
+    /// Where the config is persisted.
+    pub config_file: String,
+}
+
+impl AppState {
+    /// Rebuild the derived roster cache from the config (call after edits).
+    fn sync_roster(&self) {
+        let roster = self.config.lock().unwrap().roster();
+        *self.roster.lock().unwrap() = roster;
+    }
+    /// Persist the config to disk.
+    fn save_config(&self) {
+        let cfg = self.config.lock().unwrap();
+        config::save(std::path::Path::new(&self.config_file), &cfg);
+    }
 }
 
 fn default_workdir() -> String {
@@ -389,6 +409,91 @@ fn review_respond(state: tauri::State<AppState>, id: String, decision: String) {
     }
 }
 
+// ---- configuration (engines + roster) --------------------------------------
+
+/// Persist config, refresh the derived roster, and notify the UI.
+fn commit_config(app: &tauri::AppHandle, state: &AppState) -> AppConfig {
+    state.save_config();
+    state.sync_roster();
+    let cfg = state.config.lock().unwrap().clone();
+    let _ = app.emit("config://changed", cfg.clone());
+    cfg
+}
+
+#[tauri::command]
+fn get_config(state: tauri::State<AppState>) -> AppConfig {
+    state.config.lock().unwrap().clone()
+}
+
+/// Upsert an agent (edit an existing one by id, or add a new one).
+#[tauri::command]
+fn update_agent(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    agent: AgentConfig,
+) -> AppConfig {
+    {
+        let mut cfg = state.config.lock().unwrap();
+        match cfg.agents.iter_mut().find(|a| a.id == agent.id) {
+            Some(existing) => *existing = agent,
+            None => cfg.agents.push(agent),
+        }
+    }
+    commit_config(&app, &state)
+}
+
+#[tauri::command]
+fn remove_agent(app: tauri::AppHandle, state: tauri::State<AppState>, id: String) -> AppConfig {
+    {
+        let mut cfg = state.config.lock().unwrap();
+        cfg.agents.retain(|a| a.id != id);
+    }
+    commit_config(&app, &state)
+}
+
+/// Upsert an engine (edit by id, or add a new backend).
+#[tauri::command]
+fn update_engine(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    engine: EngineConfig,
+) -> AppConfig {
+    {
+        let mut cfg = state.config.lock().unwrap();
+        match cfg.engines.iter_mut().find(|e| e.id == engine.id) {
+            Some(existing) => *existing = engine,
+            None => cfg.engines.push(engine),
+        }
+    }
+    commit_config(&app, &state)
+}
+
+#[tauri::command]
+fn remove_engine(app: tauri::AppHandle, state: tauri::State<AppState>, id: String) -> AppConfig {
+    {
+        let mut cfg = state.config.lock().unwrap();
+        // Never orphan agents: block removing an engine still in use.
+        let in_use = cfg.agents.iter().any(|a| a.engine == id);
+        if !in_use {
+            cfg.engines.retain(|e| e.id != id);
+        }
+    }
+    commit_config(&app, &state)
+}
+
+#[tauri::command]
+fn set_onboarded(app: tauri::AppHandle, state: tauri::State<AppState>, value: bool) -> AppConfig {
+    state.config.lock().unwrap().onboarded = value;
+    commit_config(&app, &state)
+}
+
+/// Restore the built-in engines + roster (wipes customizations).
+#[tauri::command]
+fn reset_config(app: tauri::AppHandle, state: tauri::State<AppState>) -> AppConfig {
+    *state.config.lock().unwrap() = config::default_config();
+    commit_config(&app, &state)
+}
+
 #[tauri::command]
 fn get_ledger(state: tauri::State<AppState>, limit: Option<i64>) -> Vec<LedgerEntry> {
     state.ledger.recent(limit.unwrap_or(60))
@@ -636,11 +741,15 @@ pub fn run() {
             let projects_file = data_dir.join("projects.json").to_string_lossy().to_string();
             let (projects, active) = load_projects(&projects_file);
 
+            let config_file = data_dir.join("config.json").to_string_lossy().to_string();
+            let cfg = config::load(std::path::Path::new(&config_file));
+            let roster = cfg.roster();
+
             app.manage(AppState {
                 pty: PtyManager::default(),
                 chat: chat::ChatManager::default(),
                 ledger,
-                roster: Mutex::new(agents::default_roster()),
+                roster: Mutex::new(roster),
                 project: Mutex::new(active),
                 projects: Mutex::new(projects),
                 projects_file,
@@ -649,6 +758,8 @@ pub fn run() {
                 sock_path: sock_path.clone(),
                 reviews: Mutex::new(HashMap::new()),
                 delegations: Mutex::new(chat::DelegationState::default()),
+                config: Mutex::new(cfg),
+                config_file,
             });
 
             pty::start_idle_monitor(app.handle().clone());
@@ -673,7 +784,14 @@ pub fn run() {
             chat_stop,
             get_chat,
             list_files,
-            review_respond
+            review_respond,
+            get_config,
+            update_agent,
+            remove_agent,
+            update_engine,
+            remove_engine,
+            set_onboarded,
+            reset_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running Stark Tower");

@@ -1,4 +1,5 @@
-use crate::agents::AgentStatus;
+use crate::agents::{AgentKind, AgentStatus};
+use crate::config::EngineConfig;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -55,21 +56,16 @@ pub struct ChatEvent {
     pub cwd: Option<String>,
 }
 
-const JARVIS_PROMPT: &str = "You are JARVIS, the orchestrator of the Stark Tower agent lab. \
-Your team of worker agents: FRIDAY (full-stack), EDITH (recon & research), KAREN (frontend & UI), \
-VERONICA (ops & infra), VISION (architecture & strategy). \
-How to operate: answer questions and do small/quick tasks yourself, directly. \
-Delegate larger or specialized work to the right agent with the `delegate` tool. \
-To parallelize, emit multiple `delegate` calls in the SAME turn (e.g. frontend to KAREN and \
-backend to FRIDAY at once, or the same kind of task across two different directories) — they run \
-concurrently. Don't delegate trivial things you can do faster yourself, and don't spin up an agent \
-until you actually need its help. Each delegated task must be complete and self-contained — the \
-worker does not see this conversation. \
-IMPORTANT — delegation is non-blocking: the `delegate` tool returns IMMEDIATELY with just an \
-acknowledgement, NOT the worker's output. So after delegating, briefly tell Om what you dispatched \
-and to whom, then END YOUR TURN — do not wait or claim you have results yet. When the workers \
-finish, you'll automatically receive their outputs as a `[DELEGATION RESULTS]` message; THAT is \
-when you synthesize everything into one clear reply for Om.";
+/// App-level delegation mechanics, appended to JARVIS's (editable) personality
+/// only when his engine supports the MCP bridge. Kept in code — not user-editable
+/// — because it describes how *this app* wires delegation, not JARVIS's character.
+const JARVIS_MECHANICS: &str = "How delegation works here: to parallelize, emit multiple \
+`delegate` calls in the SAME turn (e.g. KAREN on the frontend and FRIDAY on the backend at once, \
+or the same task across two directories) — they run concurrently. Delegation is NON-BLOCKING: the \
+`delegate` tool returns IMMEDIATELY with just an acknowledgement, NOT the worker's output. So after \
+delegating, briefly tell Om what you dispatched and to whom, then END YOUR TURN — do not wait or \
+claim you have results yet. When the workers finish you'll automatically receive their outputs as a \
+`[DELEGATION RESULTS]` message; THAT is when you synthesize everything into one clear reply for Om.";
 
 fn emit(app: &tauri::AppHandle, ev: ChatEvent) {
     let _ = app.emit("chat://event", ev);
@@ -122,16 +118,16 @@ fn base_name(p: &str) -> String {
         .unwrap_or_else(|| p.to_string())
 }
 
-/// JARVIS's full system prompt = base guidance + the current project map so he
-/// can delegate to the right directory when the user names a repo.
-fn orchestrator_prompt(app: &tauri::AppHandle) -> String {
-    let mut s = String::from(JARVIS_PROMPT);
+/// The current project map, so JARVIS can delegate to the right directory when
+/// the user names a repo. Empty when no projects are configured.
+fn project_map(app: &tauri::AppHandle) -> String {
+    let mut s = String::new();
     if let Some(state) = app.try_state::<crate::AppState>() {
         let projects = state.projects.lock().unwrap().clone();
         let active = state.project.lock().unwrap().clone();
         if !projects.is_empty() {
             s.push_str(
-                "\n\nKnown projects you can delegate into (pass the absolute path as the `directory` argument):\n",
+                "Known projects you can delegate into (pass the absolute path as the `directory` argument):\n",
             );
             for p in &projects {
                 s.push_str(&format!("- {} → {}\n", base_name(p), p));
@@ -142,6 +138,109 @@ fn orchestrator_prompt(app: &tauri::AppHandle) -> String {
         }
     }
     s
+}
+
+/// The agent's editable personality (falls back to the built-in default).
+fn personality_for(app: &tauri::AppHandle, agent_id: &str) -> String {
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        let cfg = state.config.lock().unwrap();
+        if let Some(a) = cfg.agent(agent_id) {
+            if !a.personality.trim().is_empty() {
+                return a.personality.clone();
+            }
+        }
+    }
+    crate::config::default_personality(agent_id).to_string()
+}
+
+/// The engine an agent runs on (falls back to the built-in Claude Code engine).
+fn agent_engine(app: &tauri::AppHandle, agent_id: &str) -> EngineConfig {
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        let cfg = state.config.lock().unwrap();
+        if let Some(e) = cfg.engine_for(agent_id) {
+            return e.clone();
+        }
+    }
+    crate::config::claude_default()
+}
+
+/// The model to run (agent override → engine default → "" for the engine's own).
+fn agent_model(app: &tauri::AppHandle, agent_id: &str, engine: &EngineConfig) -> String {
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        let cfg = state.config.lock().unwrap();
+        if let Some(a) = cfg.agent(agent_id) {
+            if !a.model.trim().is_empty() {
+                return a.model.clone();
+            }
+        }
+    }
+    engine.model.clone()
+}
+
+/// Is this agent the lab's orchestrator (the one that can delegate)?
+fn agent_is_orchestrator(app: &tauri::AppHandle, agent_id: &str) -> bool {
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        let cfg = state.config.lock().unwrap();
+        if let Some(a) = cfg.agent(agent_id) {
+            return a.kind == AgentKind::Orchestrator;
+        }
+    }
+    agent_id == "jarvis"
+}
+
+/// The agent's current display name (falls back to its id).
+fn agent_name(app: &tauri::AppHandle, agent_id: &str) -> String {
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        let cfg = state.config.lock().unwrap();
+        if let Some(a) = cfg.agent(agent_id) {
+            return a.name.clone();
+        }
+    }
+    agent_id.to_string()
+}
+
+/// The live team the orchestrator can delegate to, built from the current config
+/// so renamed and newly-added specialists show up automatically.
+fn team_block(app: &tauri::AppHandle, self_id: &str) -> String {
+    let mut lines = Vec::new();
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        let cfg = state.config.lock().unwrap();
+        for a in &cfg.agents {
+            if a.enabled && a.id != self_id && a.kind == AgentKind::Worker {
+                lines.push(format!("- `{}`: {} ({})", a.id, a.name, a.role));
+            }
+        }
+    }
+    if lines.is_empty() {
+        return String::new();
+    }
+    format!(
+        "Your team (delegate a task to a specialist by passing their id to the `delegate` tool):\n{}",
+        lines.join("\n")
+    )
+}
+
+/// Resolve a delegate target (given by id or display name) to a canonical worker
+/// id, or "" if it isn't an enabled worker.
+fn resolve_worker_id(app: &tauri::AppHandle, input: &str) -> String {
+    let q = input.trim().to_lowercase();
+    if q.is_empty() {
+        return String::new();
+    }
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        let cfg = state.config.lock().unwrap();
+        for a in &cfg.agents {
+            if a.enabled && a.kind == AgentKind::Worker && a.id.to_lowercase() == q {
+                return a.id.clone();
+            }
+        }
+        for a in &cfg.agents {
+            if a.enabled && a.kind == AgentKind::Worker && a.name.to_lowercase() == q {
+                return a.id.clone();
+            }
+        }
+    }
+    String::new()
 }
 
 const ASK_HUMAN_NOTE: &str = "You have the `ask_human` tool — your review surface with Om. \
@@ -158,114 +257,135 @@ VERTICAL slices — each shippable on its own, no forward dependencies — and g
 ask_human; (4) delegate one slice at a time to the right specialist. Skip all this for small, \
 clear tasks. Route every human checkpoint through ask_human, never a browser.";
 
-/// Per-worker skill kit — the sarathi methods each specialist should apply,
-/// with human touchpoints routed through ask_human.
-fn agent_skill_kit(agent_id: &str) -> &'static str {
-    match agent_id {
-        "friday" => "You are FRIDAY, Stark Tower's full-stack engineer. Build features across the \
-stack to a high standard, in vertical slices (touch every layer the slice needs; keep it \
-shippable on its own). After writing code, self-review it for spec-match and real bugs, classify \
-any findings by severity, and if there are non-trivial ones present them to Om via ask_human \
-(kind: \"findings\", choices: [\"Fix\",\"Defer\",\"Decline\"]) before finalizing. For a change \
-worth explicit sign-off, show the diff via ask_human (kind: \"diff\").",
-        "edith" => "You are EDITH, Stark Tower's recon & research specialist. Investigate against \
-PRIMARY sources (official docs, source code, specs — not blog summaries or memory), cite each \
-claim with its source, and return a tight, well-cited findings writeup. You work autonomously and \
-rarely need to ask Om anything — just deliver accurate, sourced findings.",
-        "karen" => "You are KAREN, Stark Tower's frontend & UI specialist. When you design a \
-screen, present it to Om as a RENDERED mockup via ask_human (kind: \"mockup\") — a complete \
-self-contained HTML document (inline CSS, no external CDN) in the product's own visual style. For \
-any UI you build or review, run two audits and include their scored tables: the Laws of UX (route \
-the applicable laws, score /100, pass bar 80) and visual craft (focal clarity, spacing rhythm, \
-alignment, type hierarchy, state craft, motion intent — score /100, pass bar 80). If either is \
-under 80, rework before delivering.",
-        "veronica" => "You are VERONICA, Stark Tower's ops & infra specialist — deploys, CI, \
-infrastructure and tooling. Before a deploy or a risky infra change, review the production→HEAD \
-diff for spec violations and real bugs, classify findings by severity, and present them to Om via \
-ask_human (kind: \"findings\", choices: [\"Fix\",\"Defer\",\"Decline\"]). Keep changes reversible \
-and flag anything hard to undo.",
-        "vision" => "You are VISION, Stark Tower's architecture & strategy specialist. Own the \
-domain model and system design. Maintain the ubiquitous language — challenge fuzzy terms, keep a \
-glossary in CONTEXT.md (no implementation detail), and record genuine architectural decisions as \
-ADRs (docs/adr/NNNN-*.md) only when a decision is hard to reverse, surprising, and a real \
-trade-off. For a significant decision, get Om's call via ask_human before committing.",
-        _ => "You are a Stark Tower specialist agent.",
-    }
-}
-
-/// The full system prompt for an agent's session: orchestrator charter + playbook
-/// for JARVIS, or the specialist's skill kit for a worker — plus the ask_human note.
+/// Assemble an agent's full system prompt: its editable personality, plus the
+/// app mechanics its engine can actually use. JARVIS also gets the live project
+/// map and, on an MCP engine, the delegation mechanics + planning playbook. The
+/// ask_human note is appended only when the engine speaks our MCP bridge.
 fn system_prompt_for(app: &tauri::AppHandle, agent_id: &str) -> String {
-    if agent_id == "jarvis" {
-        format!(
-            "{}\n\n{}\n\n{}",
-            orchestrator_prompt(app),
-            JARVIS_PLAYBOOK,
-            ASK_HUMAN_NOTE
-        )
+    let personality = personality_for(app, agent_id);
+    let mcp = agent_engine(app, agent_id).supports_mcp;
+
+    if agent_is_orchestrator(app, agent_id) {
+        // Identity comes from config (so a renamed orchestrator introduces itself
+        // correctly), and the team roster is injected live.
+        let name = agent_name(app, agent_id);
+        let mut s = format!("You are {name}, the orchestrator of this agent lab. {personality}");
+        let team = team_block(app, agent_id);
+        if !team.is_empty() {
+            s.push_str("\n\n");
+            s.push_str(&team);
+        }
+        let map = project_map(app);
+        if !map.is_empty() {
+            s.push_str("\n\n");
+            s.push_str(&map);
+        }
+        if mcp {
+            s.push_str("\n\n");
+            s.push_str(JARVIS_MECHANICS);
+            s.push_str("\n\n");
+            s.push_str(JARVIS_PLAYBOOK);
+            s.push_str("\n\n");
+            s.push_str(ASK_HUMAN_NOTE);
+        }
+        s
     } else {
-        format!("{}\n\n{}", agent_skill_kit(agent_id), ASK_HUMAN_NOTE)
+        let mut s = personality;
+        if mcp {
+            s.push_str("\n\n");
+            s.push_str(ASK_HUMAN_NOTE);
+        }
+        s
     }
 }
 
+/// Build the headless command for an agent's session on a given engine.
+///
+/// The Claude Code adapter (`kind == "claude-code"`) drives our full protocol:
+/// stream-json in/out, the MCP bridge (delegate / ask_human / approve gate), and
+/// session resume. Other engine kinds only speak stream-json today if they
+/// happen to; their dedicated adapters (Codex, OpenCode, …) land in later slices,
+/// so for now non-Claude kinds spawn `command + extra_args` best-effort. The
+/// model flag and any auth env vars are applied for every kind.
 fn build_headless(
+    engine: &EngineConfig,
+    model: &str,
     cwd: &str,
     agent_id: Option<&str>,
+    is_orchestrator: bool,
     system_prompt: Option<&str>,
     resume: Option<&str>,
     sock_path: &str,
 ) -> Command {
-    let mut cmd = Command::new("claude");
-    let mut args: Vec<String> = [
-        "-p",
-        "--input-format",
-        "stream-json",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--permission-mode",
-        "acceptEdits",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
+    let mut cmd = Command::new(&engine.command);
+    let mut args: Vec<String> = Vec::new();
 
-    // Resume the stored session so the conversation continues with full context.
-    // The prior session already carries the system prompt, so don't re-append it.
-    if let Some(sid) = resume {
-        args.push("--resume".into());
-        args.push(sid.to_string());
-    } else if let Some(prompt) = system_prompt {
-        args.push("--append-system-prompt".into());
-        args.push(prompt.to_string());
-    }
+    if engine.kind == "claude-code" {
+        args.extend(
+            [
+                "-p",
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--permission-mode",
+                "acceptEdits",
+            ]
+            .iter()
+            .map(|s| s.to_string()),
+        );
 
-    // Sessions with the Stark bridge MCP get ask_human (everyone) + delegate
-    // (JARVIS only). agent_id = None means no bridge (rare).
-    if let Some(aid) = agent_id {
-        let tools = if aid == "jarvis" {
-            "mcp__stark__ask_human,mcp__stark__delegate"
-        } else {
-            "mcp__stark__ask_human"
-        };
-        args.push("--allowedTools".into());
-        args.push(tools.into());
-        args.push("--mcp-config".into());
-        let mjs = format!("{}/mcp/delegate-mcp.mjs", env!("CARGO_MANIFEST_DIR"));
-        let cfg = serde_json::json!({
-            "mcpServers": {
-                "stark": {
-                    "command": "node",
-                    "args": [mjs],
-                    "env": { "STARK_DELEGATE_SOCK": sock_path, "STARK_AGENT_ID": aid }
-                }
+        // Resume the stored session so the conversation continues with full
+        // context; the prior session already carries the system prompt.
+        if let Some(sid) = resume {
+            args.push("--resume".into());
+            args.push(sid.to_string());
+        } else if let Some(prompt) = system_prompt {
+            args.push("--append-system-prompt".into());
+            args.push(prompt.to_string());
+        }
+
+        if !model.trim().is_empty() {
+            args.push("--model".into());
+            args.push(model.to_string());
+        }
+
+        // The Stark bridge MCP: ask_human (everyone) + delegate (JARVIS only),
+        // plus the permission gate. Only when the engine supports MCP.
+        if engine.supports_mcp {
+            if let Some(aid) = agent_id {
+                let tools = if is_orchestrator {
+                    "mcp__stark__ask_human,mcp__stark__delegate"
+                } else {
+                    "mcp__stark__ask_human"
+                };
+                args.push("--allowedTools".into());
+                args.push(tools.into());
+                args.push("--mcp-config".into());
+                let mjs = format!("{}/mcp/delegate-mcp.mjs", env!("CARGO_MANIFEST_DIR"));
+                let role = if is_orchestrator { "orchestrator" } else { "worker" };
+                let bridge = serde_json::json!({
+                    "mcpServers": {
+                        "stark": {
+                            "command": "node",
+                            "args": [mjs],
+                            "env": {
+                                "STARK_DELEGATE_SOCK": sock_path,
+                                "STARK_AGENT_ID": aid,
+                                "STARK_ROLE": role
+                            }
+                        }
+                    }
+                });
+                args.push(bridge.to_string());
+                args.push("--permission-prompt-tool".into());
+                args.push("mcp__stark__approve".into());
             }
-        });
-        args.push(cfg.to_string());
-        // Route command permission decisions through our gate (auto-run safe
-        // dev commands, ask Om for risky ones).
-        args.push("--permission-prompt-tool".into());
-        args.push("mcp__stark__approve".into());
+        }
+    } else {
+        // Best-effort for not-yet-adapted engines; a real adapter replaces this.
+        args.extend(engine.extra_args.iter().cloned());
     }
 
     cmd.args(&args);
@@ -278,6 +398,12 @@ fn build_headless(
         Err(_) => extra,
     };
     cmd.env("PATH", path);
+    // Inject the engine's auth env (API keys etc.) so users can bring their own.
+    for (k, v) in &engine.auth.env {
+        if !v.trim().is_empty() {
+            cmd.env(k, v);
+        }
+    }
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -437,14 +563,26 @@ pub fn start_session(
     sock_path: &str,
 ) -> Result<(), String> {
     let prompt = system_prompt_for(app, agent_id);
+    let engine = agent_engine(app, agent_id);
+    let model = agent_model(app, agent_id, &engine);
+    let is_orch = agent_is_orchestrator(app, agent_id);
     // If we've talked to this agent in this directory before, resume that
-    // Claude Code session so the conversation continues with full context.
+    // session so the conversation continues with full context.
     let resume = app
         .try_state::<crate::AppState>()
         .and_then(|s| s.ledger.get_session(agent_id, cwd));
-    let mut child = build_headless(cwd, Some(agent_id), Some(&prompt), resume.as_deref(), sock_path)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    let mut child = build_headless(
+        &engine,
+        &model,
+        cwd,
+        Some(agent_id),
+        is_orch,
+        Some(&prompt),
+        resume.as_deref(),
+        sock_path,
+    )
+    .spawn()
+    .map_err(|e| e.to_string())?;
     let stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     if let Some(stderr) = child.stderr.take() {
@@ -575,9 +713,21 @@ pub fn run_task_blocking(
         .map(|s| s.sock_path.clone())
         .unwrap_or_default();
     let prompt = system_prompt_for(app, agent_id);
-    let mut child = build_headless(cwd, Some(agent_id), Some(&prompt), None, &sock)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    let engine = agent_engine(app, agent_id);
+    let model = agent_model(app, agent_id, &engine);
+    let is_orch = agent_is_orchestrator(app, agent_id);
+    let mut child = build_headless(
+        &engine,
+        &model,
+        cwd,
+        Some(agent_id),
+        is_orch,
+        Some(&prompt),
+        None,
+        &sock,
+    )
+    .spawn()
+    .map_err(|e| e.to_string())?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     if let Some(stderr) = child.stderr.take() {
@@ -741,10 +891,14 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
             handle_approve(app, &mut writer, &req);
             return;
         }
+        Some("roster") => {
+            handle_roster(app, &mut writer, &req);
+            return;
+        }
         _ => {}
     }
 
-    let agent = req.get("agent").and_then(|a| a.as_str()).unwrap_or("").to_string();
+    let agent_in = req.get("agent").and_then(|a| a.as_str()).unwrap_or("");
     let task = req.get("task").and_then(|a| a.as_str()).unwrap_or("").to_string();
     let dir = req
         .get("directory")
@@ -752,11 +906,13 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
         .filter(|s| !s.trim().is_empty())
         .map(|s| s.to_string());
 
-    let valid = ["friday", "edith", "karen", "veronica", "vision"].contains(&agent.as_str());
-    if !valid || task.trim().is_empty() {
+    // Resolve the target against the live roster (by id or name), so renamed and
+    // newly-added specialists are delegatable.
+    let agent = resolve_worker_id(app, agent_in);
+    if agent.is_empty() || task.trim().is_empty() {
         reply(
             &mut writer,
-            serde_json::json!({"error": "invalid agent or empty task"}),
+            serde_json::json!({"error": "unknown agent or empty task"}),
         );
         return;
     }
@@ -792,6 +948,26 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
     let result = run_task_blocking(app, &agent, &task, &cwd)
         .unwrap_or_else(|e| format!("(delegation failed: {e})"));
     complete_delegation(app, &agent, &task, &result);
+}
+
+/// Return the live team the orchestrator can delegate to, so the MCP server can
+/// build a `delegate` tool whose agent list matches the current roster.
+fn handle_roster(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_json::Value) {
+    let self_id = req.get("agentId").and_then(|s| s.as_str()).unwrap_or("");
+    let mut workers = Vec::new();
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        let cfg = state.config.lock().unwrap();
+        for a in &cfg.agents {
+            if a.enabled && a.id != self_id && a.kind == AgentKind::Worker {
+                workers.push(serde_json::json!({
+                    "id": a.id, "name": a.name, "role": a.role
+                }));
+            }
+        }
+    }
+    let _ = writer.write_all(
+        (serde_json::json!({ "workers": workers }).to_string() + "\n").as_bytes(),
+    );
 }
 
 /// The lavish alternative: render a review in the app and BLOCK until the human

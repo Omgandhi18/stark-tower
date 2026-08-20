@@ -10,6 +10,11 @@ import readline from "node:readline";
 
 const SOCK = process.env.STARK_DELEGATE_SOCK;
 const AGENT_ID = process.env.STARK_AGENT_ID || "jarvis";
+// Only the orchestrator gets the delegate tool. STARK_ROLE is set by the app;
+// fall back to the legacy id check if it's somehow missing.
+const IS_ORCH =
+  process.env.STARK_ROLE === "orchestrator" ||
+  (!process.env.STARK_ROLE && AGENT_ID === "jarvis");
 
 function send(msg) {
   process.stdout.write(JSON.stringify(msg) + "\n");
@@ -18,29 +23,35 @@ function log(...a) {
   process.stderr.write("[stark-mcp] " + a.join(" ") + "\n");
 }
 
-const DELEGATE_TOOL = {
-  name: "delegate",
-  description:
-    "Dispatch a task to a Stark Tower worker agent. NON-BLOCKING: this returns immediately with " +
-    "an acknowledgement, NOT the worker's output — the worker runs in the background and its " +
-    "result is delivered to you later as a [DELEGATION RESULTS] message. " +
-    "Agents: friday (full-stack), edith (recon & research), karen (frontend & UI), " +
-    "veronica (ops & infra), vision (architecture & strategy). " +
-    "To run agents in parallel, emit multiple delegate tool calls in the SAME turn. " +
-    "Provide a complete, self-contained task — the worker does not see this conversation.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      agent: {
-        type: "string",
-        enum: ["friday", "edith", "karen", "veronica", "vision"],
+/** Build the delegate tool from the live roster, so renamed and newly-added
+ *  specialists are delegatable and the tool lists the current agents. */
+function buildDelegateTool(workers) {
+  const ids = workers.map((w) => w.id);
+  const listing = workers
+    .map((w) => `${w.id} (${w.name}, ${w.role})`)
+    .join("; ");
+  return {
+    name: "delegate",
+    description:
+      "Dispatch a task to a worker agent by its id. NON-BLOCKING: this returns immediately with " +
+      "an acknowledgement, NOT the worker's output; the result is delivered later as a " +
+      "[DELEGATION RESULTS] message. To run agents in parallel, emit multiple delegate tool calls " +
+      "in the SAME turn. Provide a complete, self-contained task (the worker does not see this " +
+      "conversation)." +
+      (listing ? " Available agents: " + listing + "." : ""),
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent: ids.length
+          ? { type: "string", enum: ids, description: "The worker's id." }
+          : { type: "string", description: "The worker's id." },
+        task: { type: "string", description: "Full self-contained instructions." },
+        directory: { type: "string", description: "Absolute project dir (optional)." },
       },
-      task: { type: "string", description: "Full self-contained instructions." },
-      directory: { type: "string", description: "Absolute project dir (optional)." },
+      required: ["agent", "task"],
     },
-    required: ["agent", "task"],
-  },
-};
+  };
+}
 
 const ASK_HUMAN_TOOL = {
   name: "ask_human",
@@ -153,9 +164,18 @@ function bridge(payload) {
   });
 }
 
-function toolsList() {
+/** Fetch the current delegatable roster from the app over the socket. */
+async function getRoster() {
+  const res = await bridge({ type: "roster", agentId: AGENT_ID });
+  return Array.isArray(res && res.workers) ? res.workers : [];
+}
+
+async function toolsList() {
   const tools = [ASK_HUMAN_TOOL, APPROVE_TOOL];
-  if (AGENT_ID === "jarvis") tools.unshift(DELEGATE_TOOL);
+  if (IS_ORCH) {
+    const workers = await getRoster();
+    tools.unshift(buildDelegateTool(workers));
+  }
   return tools;
 }
 
@@ -192,7 +212,7 @@ rl.on("line", async (raw) => {
   } else if (method === "notifications/initialized") {
     // no reply
   } else if (method === "tools/list") {
-    send({ jsonrpc: "2.0", id, result: { tools: toolsList() } });
+    send({ jsonrpc: "2.0", id, result: { tools: await toolsList() } });
   } else if (method === "tools/call") {
     const name = params && params.name;
     const args = (params && params.arguments) || {};

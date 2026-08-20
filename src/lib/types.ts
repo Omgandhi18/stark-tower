@@ -75,6 +75,49 @@ export interface ChatEvent {
   cwd?: string;
 }
 
+/** How an engine authenticates: cli-login | api-key-env | none. */
+export interface AuthConfig {
+  method: string;
+  env: Record<string, string>;
+}
+
+/** A backend agents can run on (Claude Code, Codex, OpenCode, custom CLI). */
+export interface EngineConfig {
+  id: string;
+  label: string;
+  kind: string;
+  command: string;
+  extra_args: string[];
+  model: string;
+  auth: AuthConfig;
+  supports_mcp: boolean;
+  enabled: boolean;
+}
+
+/** An editable roster member (name, role, sprite, personality, engine, model). */
+export interface AgentConfig {
+  id: string;
+  name: string;
+  role: string;
+  kind: AgentKind;
+  accent: string;
+  figure: string;
+  engine: string;
+  model: string;
+  personality: string;
+  home_x: number;
+  home_y: number;
+  enabled: boolean;
+}
+
+/** The whole persisted configuration: engines + roster. */
+export interface AppConfig {
+  version: number;
+  onboarded: boolean;
+  engines: EngineConfig[];
+  agents: AgentConfig[];
+}
+
 /** A file or folder under a project dir, for the chat's @ picker. */
 export interface PathEntry {
   path: string;

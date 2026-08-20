@@ -2,8 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   Agent,
+  AgentConfig,
+  AppConfig,
   ChatEvent,
   DispatchResult,
+  EngineConfig,
   LedgerEntry,
   ProjectsState,
   PtyData,
@@ -76,6 +79,30 @@ export const addProject = (path: string) =>
 
 export const removeProject = (path: string) =>
   invoke<ProjectsState>("remove_project", { path });
+
+// ---- configuration (engines + roster) ----
+
+export const getConfig = () => invoke<AppConfig>("get_config");
+
+export const updateAgent = (agent: AgentConfig) =>
+  invoke<AppConfig>("update_agent", { agent });
+
+export const removeAgent = (id: string) =>
+  invoke<AppConfig>("remove_agent", { id });
+
+export const updateEngine = (engine: EngineConfig) =>
+  invoke<AppConfig>("update_engine", { engine });
+
+export const removeEngine = (id: string) =>
+  invoke<AppConfig>("remove_engine", { id });
+
+export const setOnboarded = (value: boolean) =>
+  invoke<AppConfig>("set_onboarded", { value });
+
+export const resetConfig = () => invoke<AppConfig>("reset_config");
+
+export const onConfigChanged = (cb: (c: AppConfig) => void): Promise<UnlistenFn> =>
+  listen<AppConfig>("config://changed", (evt) => cb(evt.payload));
 
 export const requestAssist = (
   from: string,
