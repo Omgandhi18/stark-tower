@@ -15,6 +15,16 @@ fn emit_tasks_changed(app: &tauri::AppHandle) {
     let _ = app.emit("tasks://changed", ());
 }
 
+/// The agent's engine with its `auth.env` secrets hydrated from the secret store
+/// (config only ever holds sentinels), ready to spawn.
+fn engine_for_spawn(app: &tauri::AppHandle, agent_id: &str) -> EngineConfig {
+    let mut e = crate::prompts::agent_engine(app, agent_id);
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        crate::secrets::hydrate(&state.secrets.lock().unwrap(), &mut e);
+    }
+    e
+}
+
 /// Mirror a significant event onto the git-versioned floor log.
 pub(crate) fn floor_log(app: &tauri::AppHandle, agent_id: &str, kind: &str, detail: &str) {
     if let Some(state) = app.try_state::<crate::AppState>() {
@@ -334,8 +344,10 @@ fn build_headless(
     };
     cmd.env("PATH", path);
     // Inject the engine's auth env (API keys etc.) so users can bring their own.
+    // Values are hydrated from the secret store before we get here; skip any
+    // still-sentinel (no stored secret) or empty entry.
     for (k, v) in &engine.auth.env {
-        if !v.trim().is_empty() {
+        if !v.trim().is_empty() && v != crate::secrets::SENTINEL {
             cmd.env(k, v);
         }
     }
@@ -522,7 +534,7 @@ pub fn start_session(
     sock_path: &str,
 ) -> Result<(), String> {
     let prompt = crate::prompts::system_prompt_for(app, agent_id);
-    let engine = crate::prompts::agent_engine(app, agent_id);
+    let engine = engine_for_spawn(app, agent_id);
     if resolve_program(&engine.command).is_none() {
         return Err(missing_engine_error(&engine));
     }
@@ -734,7 +746,7 @@ pub fn run_task_blocking(
         .map(|s| (s.sock_path.clone(), s.sock_token.clone()))
         .unwrap_or_default();
     let prompt = crate::prompts::system_prompt_for(app, agent_id);
-    let engine = crate::prompts::agent_engine(app, agent_id);
+    let engine = engine_for_spawn(app, agent_id);
     if resolve_program(&engine.command).is_none() {
         return Err(missing_engine_error(&engine));
     }

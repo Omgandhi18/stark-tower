@@ -10,6 +10,7 @@ mod ledger;
 mod proc;
 mod prompts;
 mod pty;
+mod secrets;
 
 use agents::{Agent, AgentKind, AgentStatus};
 use config::{AgentConfig, AppConfig, EngineConfig};
@@ -62,6 +63,10 @@ pub struct AppState {
     /// The git-versioned floor: an append-only event log + per-agent mailboxes,
     /// making the run observable and recoverable.
     pub floor_dir: String,
+    /// Engine secrets (api-key-env values), kept out of config.json and off IPC.
+    pub secrets: Mutex<secrets::SecretStore>,
+    /// Where the secret store is persisted (0600).
+    pub secrets_file: String,
 }
 
 impl AppState {
@@ -505,8 +510,15 @@ fn remove_agent(app: tauri::AppHandle, state: tauri::State<AppState>, id: String
 fn update_engine(
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
-    engine: EngineConfig,
+    mut engine: EngineConfig,
 ) -> AppConfig {
+    {
+        // Move any new/changed secret into the store, preserve unchanged ones
+        // (SENTINEL), and clear removed ones — so the config never holds plaintext.
+        let mut store = state.secrets.lock().unwrap();
+        secrets::reconcile(&mut store, &mut engine);
+        secrets::save(std::path::Path::new(&state.secrets_file), &store);
+    }
     {
         let mut cfg = state.config.lock().unwrap();
         match cfg.engines.iter_mut().find(|e| e.id == engine.id) {
@@ -844,7 +856,21 @@ pub fn run() {
             let (projects, active) = load_projects(&projects_file);
 
             let config_file = data_dir.join("config.json").to_string_lossy().to_string();
-            let cfg = config::load(std::path::Path::new(&config_file));
+            let mut cfg = config::load(std::path::Path::new(&config_file));
+
+            // Secrets live outside config.json. Migrate any plaintext api-key-env
+            // values from an existing config into the 0600 secret store, leaving a
+            // sentinel behind, then re-save the (now secret-free) config.
+            let secrets_file = data_dir.join("secrets.json").to_string_lossy().to_string();
+            let mut secret_store = secrets::load(std::path::Path::new(&secrets_file));
+            let before = format!("{:?}", cfg.engines);
+            for e in cfg.engines.iter_mut() {
+                secrets::reconcile(&mut secret_store, e);
+            }
+            if format!("{:?}", cfg.engines) != before {
+                secrets::save(std::path::Path::new(&secrets_file), &secret_store);
+                config::save(std::path::Path::new(&config_file), &cfg);
+            }
             let roster = cfg.roster();
 
             let memory_dir = data_dir.join("memory");
@@ -876,6 +902,8 @@ pub fn run() {
                 oneshot_pids: Mutex::new(HashSet::new()),
                 memory_dir,
                 floor_dir,
+                secrets: Mutex::new(secret_store),
+                secrets_file,
             });
 
             pty::start_idle_monitor(app.handle().clone());
