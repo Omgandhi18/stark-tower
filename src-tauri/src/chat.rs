@@ -285,19 +285,11 @@ fn system_prompt_for(app: &tauri::AppHandle, agent_id: &str) -> String {
 
     if agent_is_orchestrator(app, agent_id) {
         // Identity comes from config (so a renamed orchestrator introduces itself
-        // correctly), and the team roster is injected live.
+        // correctly). The team roster + project map are NOT baked in here — they
+        // change while a session is live, so they'd go stale and (worse) bust the
+        // prompt cache. They ride each user turn instead (orchestrator_turn_context).
         let name = agent_name(app, agent_id);
         let mut s = format!("You are {name}, the orchestrator of this agent lab. {personality}");
-        let team = team_block(app, agent_id);
-        if !team.is_empty() {
-            s.push_str("\n\n");
-            s.push_str(&team);
-        }
-        let map = project_map(app);
-        if !map.is_empty() {
-            s.push_str("\n\n");
-            s.push_str(&map);
-        }
         if mcp {
             s.push_str("\n\n");
             s.push_str(JARVIS_MECHANICS);
@@ -305,6 +297,9 @@ fn system_prompt_for(app: &tauri::AppHandle, agent_id: &str) -> String {
             s.push_str(JARVIS_PLAYBOOK);
             s.push_str("\n\n");
             s.push_str(ASK_HUMAN_NOTE);
+            s.push_str("\n\nYour current team and the projects you can delegate into are provided \
+with each of Om's messages under [CURRENT TEAM & PROJECTS] — always use that list; it supersedes \
+any roster mentioned earlier in this conversation.");
         }
         s
     } else {
@@ -315,6 +310,26 @@ fn system_prompt_for(app: &tauri::AppHandle, agent_id: &str) -> String {
         }
         s
     }
+}
+
+/// The live team + project map, prepended to each of the orchestrator's user
+/// turns so routing always reflects the current roster/projects — without baking
+/// volatile state into the (cache-stable) system prompt.
+fn orchestrator_turn_context(app: &tauri::AppHandle, agent_id: &str) -> String {
+    let team = team_block(app, agent_id);
+    let map = project_map(app);
+    if team.is_empty() && map.is_empty() {
+        return String::new();
+    }
+    let mut s = String::from("[CURRENT TEAM & PROJECTS] (this list supersedes any earlier one)\n");
+    if !team.is_empty() {
+        s.push_str(&team);
+    }
+    if !map.is_empty() {
+        s.push_str("\n\n");
+        s.push_str(&map);
+    }
+    s
 }
 
 fn program_cache() -> &'static Mutex<HashMap<String, String>> {
@@ -841,9 +856,21 @@ pub fn send(
         start_session(app, agent_id, cwd, sock_path)?;
     }
 
+    // The orchestrator gets the current team + project map prepended to each turn,
+    // so a renamed/added agent or project is reflected immediately (see §01.8).
+    let content = if agent_is_orchestrator(app, agent_id) {
+        let ctx = orchestrator_turn_context(app, agent_id);
+        if ctx.is_empty() {
+            text.to_string()
+        } else {
+            format!("{ctx}\n\n{text}")
+        }
+    } else {
+        text.to_string()
+    };
     let msg = serde_json::json!({
         "type": "user",
-        "message": { "role": "user", "content": text }
+        "message": { "role": "user", "content": content }
     });
     let line = format!("{}\n", msg);
 
