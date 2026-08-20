@@ -374,6 +374,53 @@ pub fn resolve_program(cmd: &str) -> Option<String> {
     None
 }
 
+/// How many identical tool calls in a row count as a runaway loop.
+const RUNAWAY_TOOL_REPEATS: u32 = 10;
+
+fn tool_repeat_tracker() -> &'static Mutex<HashMap<String, (String, u32)>> {
+    static T: OnceLock<Mutex<HashMap<String, (String, u32)>>> = OnceLock::new();
+    T.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Count consecutive identical tool calls for an agent; returns the run length.
+fn note_tool_call(agent_id: &str, sig: &str) -> u32 {
+    let mut m = tool_repeat_tracker().lock().unwrap();
+    let entry = m.entry(agent_id.to_string()).or_insert_with(|| (String::new(), 0));
+    if entry.0 == sig {
+        entry.1 += 1;
+    } else {
+        entry.0 = sig.to_string();
+        entry.1 = 1;
+    }
+    entry.1
+}
+
+fn reset_tool_tracker(agent_id: &str) {
+    tool_repeat_tracker().lock().unwrap().remove(agent_id);
+}
+
+/// A headless agent repeating the same tool call over and over is stuck in a
+/// loop (and quietly burning quota — the PTY breaker never sees this path). Mark
+/// it Blocked, surface + log it, and end a live persistent session to stop the
+/// burn. One-shot delegation workers are bounded, so they're only surfaced.
+fn trip_headless_breaker(app: &tauri::AppHandle, agent_id: &str, tool: &str, persistent: bool) {
+    crate::pty::emit_status(app, agent_id, AgentStatus::Blocked);
+    let _ = app.emit("breaker://trip", agent_id.to_string());
+    let note = format!("Runaway containment: repeated `{tool}` calls in a loop — agent paused.");
+    simple(app, agent_id, "system", Some(note.clone()));
+    persist(app, agent_id, "system", Some(&note), None, None);
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        let e = state.ledger.record(agent_id, "containment", &note, 9);
+        let _ = app.emit("ledger://entry", e);
+    }
+    if persistent {
+        if let Some(state) = app.try_state::<crate::AppState>() {
+            let removed = state.chat.sessions.lock().unwrap().remove(agent_id);
+            drop(removed); // Drop → group-kill, outside the sessions lock.
+        }
+    }
+}
+
 /// A friendly error when an engine's CLI isn't installed / on PATH.
 fn missing_engine_error(engine: &EngineConfig) -> String {
     format!(
@@ -596,6 +643,13 @@ fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, re
                                 .map(|i| summarize_tool(name, i))
                                 .unwrap_or_default();
                             persist(app, agent_id, "tool", None, Some(name), Some(&detail));
+                            // Runaway loop guard for the headless path: trip if the
+                            // same tool call repeats too many times in a row.
+                            let sig = format!("{name}|{detail}");
+                            if note_tool_call(agent_id, &sig) >= RUNAWAY_TOOL_REPEATS {
+                                reset_tool_tracker(agent_id);
+                                trip_headless_breaker(app, agent_id, name, record_session);
+                            }
                             emit(
                                 app,
                                 ChatEvent {
@@ -627,6 +681,7 @@ fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, re
                     cwd: None,
                 },
             );
+            reset_tool_tracker(agent_id); // turn ended cleanly — clear the loop guard
             crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
             // The orchestrator's turn just ended — if he dispatched workers this
             // turn, seal the batch so it flushes back once every worker finishes.
