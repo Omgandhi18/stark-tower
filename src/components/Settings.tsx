@@ -217,7 +217,7 @@ function AgentsTab({ config, onConfig }: { config: AppConfig; onConfig: (c: AppC
                 {PALETTE.map((c) => (
                   <button
                     key={c}
-                    className={`swatch ${draft.accent.toLowerCase() === c.toLowerCase() ? "on" : ""}`}
+                    className={`swatch ${(draft.accent ?? "").toLowerCase() === c.toLowerCase() ? "on" : ""}`}
                     style={{ background: c }}
                     onClick={() => set("accent", c)}
                     title={c}
@@ -319,7 +319,7 @@ function EnginesTab({ config, onConfig }: { config: AppConfig; onConfig: (c: App
     setDraft((d) => (d ? { ...d, [k]: v } : d));
 
   const apiKeyName = draft?.kind === "codex" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
-  const apiKey = draft?.auth.env[apiKeyName] ?? "";
+  const apiKey = draft?.auth?.env?.[apiKeyName] ?? "";
   const dirty = draft && current && JSON.stringify(draft) !== JSON.stringify(current);
   const inUse = draft ? config.agents.some((a) => a.engine === draft.id) : false;
 
@@ -361,8 +361,13 @@ function EnginesTab({ config, onConfig }: { config: AppConfig; onConfig: (c: App
             <label className="field">
               <span className="field-l">Auth</span>
               <select
-                value={draft.auth.method}
-                onChange={(e) => set("auth", { ...draft.auth, method: e.target.value })}
+                value={draft.auth?.method ?? ""}
+                onChange={(e) =>
+                  set("auth", {
+                    ...(draft.auth ?? { method: "", env: {} }),
+                    method: e.target.value,
+                  })
+                }
               >
                 {AUTH_METHODS.map((m) => (
                   <option key={m.id} value={m.id}>{m.label}</option>
@@ -379,7 +384,7 @@ function EnginesTab({ config, onConfig }: { config: AppConfig; onConfig: (c: App
             </label>
           </div>
 
-          {draft.auth.method === "api-key-env" && (
+          {draft.auth?.method === "api-key-env" && (
             <label className="field">
               <span className="field-l">{apiKeyName} <span className="field-hint">stored locally</span></span>
               <input
@@ -387,7 +392,12 @@ function EnginesTab({ config, onConfig }: { config: AppConfig; onConfig: (c: App
                 value={apiKey}
                 placeholder="sk-…"
                 spellCheck={false}
-                onChange={(e) => set("auth", { ...draft.auth, env: { ...draft.auth.env, [apiKeyName]: e.target.value } })}
+                onChange={(e) =>
+                  set("auth", {
+                    ...(draft.auth ?? { method: "api-key-env", env: {} }),
+                    env: { ...(draft.auth?.env ?? {}), [apiKeyName]: e.target.value },
+                  })
+                }
               />
             </label>
           )}

@@ -118,13 +118,13 @@ fn default_project() -> String {
     }
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, specta::Type)]
 struct ProjectInfo {
     path: String,
     name: String,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, specta::Type)]
 struct ProjectsState {
     projects: Vec<ProjectInfo>,
     active: String,
@@ -331,6 +331,7 @@ fn deliver(app: &tauri::AppHandle, agent_id: &str, line: String, just_spawned: b
 }
 
 #[tauri::command]
+#[specta::specta]
 fn list_agents(state: tauri::State<AppState>) -> Vec<Agent> {
     let mut roster = state.roster.lock().unwrap().clone();
     let statuses = state.statuses.lock().unwrap();
@@ -343,6 +344,7 @@ fn list_agents(state: tauri::State<AppState>) -> Vec<Agent> {
 /// Chat with an agent (headless Claude Code). Starts a session in `dir` (or the
 /// agent's recorded workdir / current project) on first message.
 #[tauri::command]
+#[specta::specta]
 fn chat_send(
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
@@ -380,11 +382,12 @@ fn chat_send(
 
 /// The persisted transcript for an agent, oldest first (for rehydrating the UI).
 #[tauri::command]
+#[specta::specta]
 fn get_chat(state: tauri::State<AppState>, agent_id: String, limit: Option<i64>) -> Vec<StoredMessage> {
     state.ledger.messages(&agent_id, limit.unwrap_or(500))
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, specta::Type)]
 struct PathEntry {
     path: String,
     dir: bool,
@@ -394,6 +397,7 @@ struct PathEntry {
 /// subfolder) for the chat's `@` picker. Respects .gitignore and skips heavy
 /// noise dirs, so it mirrors what Claude Code would see.
 #[tauri::command]
+#[specta::specta]
 fn list_files(dir: String, limit: Option<usize>) -> Vec<PathEntry> {
     let root = shellexpand_home(dir.trim());
     if root.is_empty() || !std::path::Path::new(&root).is_dir() {
@@ -446,6 +450,7 @@ fn list_files(dir: String, limit: Option<usize>) -> Vec<PathEntry> {
 /// Reset button: end the live session AND wipe this agent's saved transcript +
 /// resume pointer, so the next message starts a genuinely fresh conversation.
 #[tauri::command]
+#[specta::specta]
 fn chat_stop(app: tauri::AppHandle, state: tauri::State<AppState>, agent_id: String) {
     chat::stop(&app, &agent_id);
     state.ledger.clear_agent(&agent_id);
@@ -453,6 +458,7 @@ fn chat_stop(app: tauri::AppHandle, state: tauri::State<AppState>, agent_id: Str
 
 /// Deliver the human's decision back to a blocked `ask_human` review.
 #[tauri::command]
+#[specta::specta]
 fn review_respond(state: tauri::State<AppState>, id: String, decision: String) {
     if let Some(tx) = state.reviews.lock().unwrap().remove(&id) {
         let _ = tx.send(decision);
@@ -475,12 +481,14 @@ fn commit_config(app: &tauri::AppHandle, state: &AppState) -> AppConfig {
 }
 
 #[tauri::command]
+#[specta::specta]
 fn get_config(state: tauri::State<AppState>) -> AppConfig {
     state.config.lock().unwrap().clone()
 }
 
 /// Upsert an agent (edit an existing one by id, or add a new one).
 #[tauri::command]
+#[specta::specta]
 fn update_agent(
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
@@ -497,6 +505,7 @@ fn update_agent(
 }
 
 #[tauri::command]
+#[specta::specta]
 fn remove_agent(app: tauri::AppHandle, state: tauri::State<AppState>, id: String) -> AppConfig {
     {
         let mut cfg = state.config.lock().unwrap();
@@ -507,6 +516,7 @@ fn remove_agent(app: tauri::AppHandle, state: tauri::State<AppState>, id: String
 
 /// Upsert an engine (edit by id, or add a new backend).
 #[tauri::command]
+#[specta::specta]
 fn update_engine(
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
@@ -530,6 +540,7 @@ fn update_engine(
 }
 
 #[tauri::command]
+#[specta::specta]
 fn remove_engine(app: tauri::AppHandle, state: tauri::State<AppState>, id: String) -> AppConfig {
     {
         let mut cfg = state.config.lock().unwrap();
@@ -543,6 +554,7 @@ fn remove_engine(app: tauri::AppHandle, state: tauri::State<AppState>, id: Strin
 }
 
 #[tauri::command]
+#[specta::specta]
 fn set_onboarded(app: tauri::AppHandle, state: tauri::State<AppState>, value: bool) -> AppConfig {
     state.config.lock().unwrap().onboarded = value;
     commit_config(&app, &state)
@@ -550,6 +562,7 @@ fn set_onboarded(app: tauri::AppHandle, state: tauri::State<AppState>, value: bo
 
 /// Set the floor lighting mode ("auto" | "system" | morning/day/evening/night).
 #[tauri::command]
+#[specta::specta]
 fn set_lighting(app: tauri::AppHandle, state: tauri::State<AppState>, mode: String) -> AppConfig {
     state.config.lock().unwrap().lighting = mode;
     commit_config(&app, &state)
@@ -557,6 +570,7 @@ fn set_lighting(app: tauri::AppHandle, state: tauri::State<AppState>, mode: Stri
 
 /// Set the standup mission cadence in minutes (0 = off).
 #[tauri::command]
+#[specta::specta]
 fn set_standup_minutes(
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
@@ -568,41 +582,48 @@ fn set_standup_minutes(
 
 /// Restore the built-in engines + roster (wipes customizations).
 #[tauri::command]
+#[specta::specta]
 fn reset_config(app: tauri::AppHandle, state: tauri::State<AppState>) -> AppConfig {
     *state.config.lock().unwrap() = config::default_config();
     commit_config(&app, &state)
 }
 
 #[tauri::command]
+#[specta::specta]
 fn get_ledger(state: tauri::State<AppState>, limit: Option<i64>) -> Vec<LedgerEntry> {
     state.ledger.recent(limit.unwrap_or(60))
 }
 
 /// The task board — durable cards for delegated work, newest first.
 #[tauri::command]
+#[specta::specta]
 fn get_tasks(state: tauri::State<AppState>, limit: Option<i64>) -> Vec<ledger::Task> {
     state.ledger.tasks(limit.unwrap_or(50))
 }
 
 /// An agent's durable memory (the markdown it curates across sessions).
 #[tauri::command]
+#[specta::specta]
 fn get_memory(state: tauri::State<AppState>, agent_id: String) -> String {
     let path = std::path::Path::new(&state.memory_dir).join(format!("{agent_id}.md"));
     std::fs::read_to_string(path).unwrap_or_default()
 }
 
 #[tauri::command]
+#[specta::specta]
 fn get_project(state: tauri::State<AppState>) -> String {
     current_project(&state)
 }
 
 #[tauri::command]
+#[specta::specta]
 fn list_projects(state: tauri::State<AppState>) -> ProjectsState {
     projects_state(&state)
 }
 
 /// Set the active/default project (adds it to the managed list if new).
 #[tauri::command]
+#[specta::specta]
 fn set_project(state: tauri::State<AppState>, path: String) -> Result<ProjectsState, String> {
     let p = if path.trim().is_empty() {
         default_project()
@@ -624,6 +645,7 @@ fn set_project(state: tauri::State<AppState>, path: String) -> Result<ProjectsSt
 }
 
 #[tauri::command]
+#[specta::specta]
 fn add_project(state: tauri::State<AppState>, path: String) -> Result<ProjectsState, String> {
     let p = shellexpand_home(path.trim());
     if p.is_empty() || !std::path::Path::new(&p).is_dir() {
@@ -640,6 +662,7 @@ fn add_project(state: tauri::State<AppState>, path: String) -> Result<ProjectsSt
 }
 
 #[tauri::command]
+#[specta::specta]
 fn remove_project(state: tauri::State<AppState>, path: String) -> ProjectsState {
     {
         let mut list = state.projects.lock().unwrap();
@@ -668,6 +691,7 @@ fn shellexpand_home(p: &str) -> String {
 }
 
 #[tauri::command]
+#[specta::specta]
 fn spawn_agent(
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
@@ -682,27 +706,31 @@ fn spawn_agent(
 }
 
 #[tauri::command]
+#[specta::specta]
 fn pty_write(app: tauri::AppHandle, agent_id: String, data: String) -> Result<(), String> {
     pty::write_bytes(&app, &agent_id, data.as_bytes())
 }
 
 #[tauri::command]
+#[specta::specta]
 fn pty_resize(app: tauri::AppHandle, agent_id: String, cols: u16, rows: u16) -> Result<(), String> {
     pty::resize(&app, &agent_id, cols, rows)
 }
 
 #[tauri::command]
+#[specta::specta]
 fn kill_agent(app: tauri::AppHandle, agent_id: String) -> Result<(), String> {
     pty::kill(&app, &agent_id)
 }
 
 /// Release Ultron containment for a Blocked agent (the "release" action).
 #[tauri::command]
+#[specta::specta]
 fn unblock_agent(app: tauri::AppHandle, agent_id: String) {
     pty::unblock(&app, &agent_id);
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, specta::Type)]
 pub struct DispatchResult {
     pub agent_id: String,
     pub name: String,
@@ -712,6 +740,7 @@ pub struct DispatchResult {
 /// JARVIS routing: pick a free worker for a task, spawning one if needed, and
 /// deliver the prompt to its session (in the current project directory).
 #[tauri::command]
+#[specta::specta]
 fn dispatch_task(
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
@@ -767,6 +796,7 @@ fn dispatch_task(
 /// Agent-to-agent help: `from` pulls `to` into the same project to assist.
 /// The helper spawns in the requester's working directory and receives context.
 #[tauri::command]
+#[specta::specta]
 fn request_assist(
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
@@ -823,7 +853,48 @@ fn request_assist(
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// The tauri-specta builder: the single registry of commands, used both to serve
+/// them at runtime and to generate the typed TS bindings (see the export test).
+fn specta_builder() -> tauri_specta::Builder {
+    tauri_specta::Builder::<tauri::Wry>::new().commands(
+        tauri_specta::collect_commands![
+            list_agents,
+            get_ledger,
+            get_tasks,
+            get_memory,
+            get_project,
+            set_project,
+            list_projects,
+            add_project,
+            remove_project,
+            spawn_agent,
+            pty_write,
+            pty_resize,
+            kill_agent,
+            unblock_agent,
+            dispatch_task,
+            request_assist,
+            chat_send,
+            chat_stop,
+            get_chat,
+            list_files,
+            review_respond,
+            get_config,
+            update_agent,
+            remove_agent,
+            update_engine,
+            remove_engine,
+            set_onboarded,
+            set_lighting,
+            set_standup_minutes,
+            reset_config
+        ],
+    )
+}
+
 pub fn run() {
+    let specta_builder = specta_builder();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -912,38 +983,7 @@ pub fn run() {
             start_floor_router(app.handle().clone());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            list_agents,
-            get_ledger,
-            get_tasks,
-            get_memory,
-            get_project,
-            set_project,
-            list_projects,
-            add_project,
-            remove_project,
-            spawn_agent,
-            pty_write,
-            pty_resize,
-            kill_agent,
-            unblock_agent,
-            dispatch_task,
-            request_assist,
-            chat_send,
-            chat_stop,
-            get_chat,
-            list_files,
-            review_respond,
-            get_config,
-            update_agent,
-            remove_agent,
-            update_engine,
-            remove_engine,
-            set_onboarded,
-            set_lighting,
-            set_standup_minutes,
-            reset_config
-        ])
+        .invoke_handler(specta_builder.invoke_handler())
         .build(tauri::generate_context!())
         .expect("error while building Stark Tower")
         .run(|app_handle, event| {
@@ -1040,5 +1080,20 @@ mod tests {
         assert_eq!(truncate("hello", 10), "hello");
         assert_eq!(truncate("hello world", 5).chars().count(), 6); // 5 chars + ellipsis
         assert_eq!(short_path("/a/b/c"), "c");
+    }
+
+    /// Regenerates the typed TS bindings from the Rust commands + types, so
+    /// src/lib/bindings.ts can never drift. Run via `cargo test`.
+    #[test]
+    fn export_typescript_bindings() {
+        // i64/u64 (ledger ids, timestamps) serialize to JSON as plain numbers, so
+        // map them to TS `number` rather than the default bigint-forbidden error.
+        let ts = specta_typescript::Typescript::default()
+            .bigint(specta_typescript::BigIntExportBehavior::Number)
+            // Generated + trusted; skip tsc's unused-locals/strict checks on it.
+            .header("// @ts-nocheck\n");
+        super::specta_builder()
+            .export(ts, "../src/lib/bindings.ts")
+            .expect("failed to export typescript bindings");
     }
 }

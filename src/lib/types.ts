@@ -1,19 +1,26 @@
-export type AgentStatus = "offline" | "idle" | "thinking" | "working" | "blocked";
+// Domain types are GENERATED from Rust by tauri-specta (see bindings.ts, produced
+// by the `export_typescript_bindings` test). Re-exported here so the rest of the
+// app keeps importing from `./types` while the shapes can never drift from Rust.
+export type {
+  Agent,
+  AgentKind,
+  AgentStatus,
+  AgentConfig,
+  AppConfig,
+  AuthConfig,
+  EngineConfig,
+  LedgerEntry,
+  StoredMessage,
+  Task,
+  DispatchResult,
+  ProjectInfo,
+  ProjectsState,
+  PathEntry,
+} from "./bindings";
 
-export type AgentKind = "orchestrator" | "worker";
+import type { AgentStatus } from "./bindings";
 
-export interface Agent {
-  id: string;
-  name: string;
-  role: string;
-  kind: AgentKind;
-  engine: string;
-  accent: string;
-  figure: string;
-  home_x: number;
-  home_y: number;
-  status: AgentStatus;
-}
+// ---- UI / event-payload types (not command types, so not generated) ----
 
 export interface AssistLink {
   from: string;
@@ -21,43 +28,7 @@ export interface AssistLink {
   id: number;
 }
 
-export interface ProjectInfo {
-  path: string;
-  name: string;
-}
-
-export interface ProjectsState {
-  projects: ProjectInfo[];
-  active: string;
-}
-
-export interface LedgerEntry {
-  id: number;
-  ts: number;
-  agent_id: string;
-  kind: string;
-  detail: string;
-  load: number;
-}
-
 export type TaskStatus = "todo" | "doing" | "blocked" | "done";
-
-/** A durable task card on the board (delegated work, tracked across turns). */
-export interface Task {
-  id: string;
-  ts: number;
-  updated: number;
-  title: string;
-  assignee: string;
-  status: TaskStatus;
-  detail?: string;
-}
-
-export interface DispatchResult {
-  agent_id: string;
-  name: string;
-  spawned: boolean;
-}
 
 export interface PtyData {
   agentId: string;
@@ -69,8 +40,6 @@ export interface StatusEvent {
   status: AgentStatus;
 }
 
-// Mirrors the `kind` values emitted by the Rust `ChatEvent` (chat.rs). Keep in
-// sync until these types are generated from Rust (see roadmap §03.3).
 export type ChatEventKind =
   | "init"
   | "text"
@@ -90,69 +59,8 @@ export interface ChatEvent {
   cwd?: string;
 }
 
-/** How an engine authenticates: cli-login | api-key-env | none. */
-export interface AuthConfig {
-  method: string;
-  env: Record<string, string>;
-}
-
-/** A backend agents can run on (Claude Code, Codex, OpenCode, custom CLI). */
-export interface EngineConfig {
-  id: string;
-  label: string;
-  kind: string;
-  command: string;
-  extra_args: string[];
-  model: string;
-  auth: AuthConfig;
-  supports_mcp: boolean;
-  enabled: boolean;
-}
-
-/** An editable roster member (name, role, sprite, personality, engine, model). */
-export interface AgentConfig {
-  id: string;
-  name: string;
-  role: string;
-  kind: AgentKind;
-  accent: string;
-  figure: string;
-  engine: string;
-  model: string;
-  personality: string;
-  home_x: number;
-  home_y: number;
-  enabled: boolean;
-}
-
-/** The whole persisted configuration: engines + roster. */
-export interface AppConfig {
-  version: number;
-  onboarded: boolean;
-  lighting: string; // "auto" | "system" | "morning" | "day" | "evening" | "night"
-  standup_minutes: number; // 0 = off
-  engines: EngineConfig[];
-  agents: AgentConfig[];
-}
-
 /** Resolved floor lighting phase (what StarkFloor actually renders). */
 export type LightPhase = "morning" | "day" | "evening" | "night";
-
-/** A file or folder under a project dir, for the chat's @ picker. */
-export interface PathEntry {
-  path: string;
-  dir: boolean;
-}
-
-/** A persisted chat turn, returned by get_chat to rehydrate the transcript. */
-export interface StoredMessage {
-  id: number;
-  ts: number;
-  role: "user" | "agent" | "tool" | "thinking" | "error" | "system";
-  text?: string;
-  tool?: string;
-  detail?: string;
-}
 
 export type ReviewKind =
   | "plan"

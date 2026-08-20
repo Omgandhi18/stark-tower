@@ -33,8 +33,8 @@ export default function TasksBoard() {
   }, []);
 
   useEffect(() => {
-    getConfig().then((c) => setStandup(c.standup_minutes)).catch(() => {});
-    const unsub = onConfigChanged((c) => setStandup(c.standup_minutes));
+    getConfig().then((c) => setStandup(c.standup_minutes ?? 0)).catch(() => {});
+    const unsub = onConfigChanged((c) => setStandup(c.standup_minutes ?? 0));
     return () => {
       unsub.then((f) => f());
     };

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Live status of an agent, drives the pixel sprite animation on the floor.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentStatus {
     Offline,
@@ -11,7 +11,7 @@ pub enum AgentStatus {
     Blocked,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentKind {
     Orchestrator,
@@ -21,7 +21,7 @@ pub enum AgentKind {
 /// A member of the Stark Tower roster. `home_x`/`home_y` are tile coordinates
 /// of the agent's desk on the pixel lab floor. `figure` selects the sprite
 /// silhouette ("masc" | "fem" | "synth").
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Agent {
     pub id: String,
     pub name: String,

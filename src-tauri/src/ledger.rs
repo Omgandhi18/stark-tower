@@ -10,7 +10,7 @@ pub struct Ledger {
     conn: Mutex<Connection>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct LedgerEntry {
     pub id: i64,
     pub ts: i64,
@@ -21,7 +21,7 @@ pub struct LedgerEntry {
 }
 
 /// One persisted chat turn — enough to rebuild the transcript UI on reopen.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct StoredMessage {
     pub id: i64,
     pub ts: i64,
@@ -37,7 +37,7 @@ pub struct StoredMessage {
 /// A durable task card on the board. Delegations create one (`doing`) and close
 /// it (`done` / `blocked`) so in-flight work is trackable across turns and
 /// survives the UI closing — the flow upgrade munder-difflin's tasks.json gives.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct Task {
     pub id: String,
     pub ts: i64,

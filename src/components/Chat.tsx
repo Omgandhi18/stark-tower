@@ -178,10 +178,10 @@ export default function Chat({
         if (!rows.length) return;
         const restored: Message[] = rows.map((r) => ({
           id: nextId(),
-          role: r.role,
-          text: r.text,
-          tool: r.tool,
-          detail: r.detail,
+          role: r.role as Role,
+          text: r.text ?? undefined,
+          tool: r.tool ?? undefined,
+          detail: r.detail ?? undefined,
         }));
         setMessages((prev) => [...restored, ...prev]);
       })

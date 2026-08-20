@@ -90,7 +90,7 @@ export default function Onboarding({ config, onDone }: Props) {
         cfg = await updateEngine({
           ...eng,
           enabled: true,
-          auth: { method: "api-key-env", env: { ...eng.auth.env, [keyName]: apiKey.trim() } },
+          auth: { method: "api-key-env", env: { ...(eng.auth?.env ?? {}), [keyName]: apiKey.trim() } },
         });
       } else if (eng && !eng.enabled) {
         cfg = await updateEngine({ ...eng, enabled: true });

@@ -21,6 +21,9 @@ serde_json = { version = "1", features = ["preserve_order"] }
 portable-pty = "0.8"
 rusqlite = { version = "0.32", features = ["bundled"] }
 ignore = "0.4"
+specta = "=2.0.0-rc.22"
+specta-typescript = "0.0.9"
+tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

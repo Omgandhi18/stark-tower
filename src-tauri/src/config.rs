@@ -54,7 +54,7 @@ const LEGACY_ROSTER_SIGNATURE: &str = "Your team of worker agents:";
 /// How an engine authenticates. `cli-login` = whatever the CLI is already logged
 /// into on this machine; `api-key-env` = inject `env` vars (e.g. an API key) into
 /// the spawned process; `none` = no auth needed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AuthConfig {
     #[serde(default = "default_auth_method")]
     pub method: String,
@@ -76,7 +76,7 @@ impl Default for AuthConfig {
 
 /// A backend an agent can run on. `kind` selects the adapter (how we build the
 /// command and parse its output); `command`/`extra_args` are the concrete CLI.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct EngineConfig {
     pub id: String,
     pub label: String,
@@ -101,7 +101,7 @@ pub struct EngineConfig {
 
 /// One roster member. `personality` is the editable system-prompt character;
 /// app mechanics (delegation rules, the ask_human note) are appended in code.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AgentConfig {
     pub id: String,
     pub name: String,
@@ -152,7 +152,7 @@ fn default_lighting() -> String {
     "auto".into()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AppConfig {
     #[serde(default = "cfg_version")]
     pub version: u32,
