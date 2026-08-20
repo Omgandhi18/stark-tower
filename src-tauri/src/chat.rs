@@ -21,7 +21,22 @@ pub struct ChatSession {
 
 impl Drop for ChatSession {
     fn drop(&mut self) {
+        crate::proc::kill_tree(self.child.id());
         let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// SIGKILL the process group of every live session — persistent chat sessions
+/// plus in-flight one-shot delegation workers — used on app quit.
+pub fn kill_all(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        for pid in state.oneshot_pids.lock().unwrap().iter() {
+            crate::proc::kill_tree(*pid);
+        }
+        for s in state.chat.sessions.lock().unwrap().values() {
+            crate::proc::kill_tree(s.child.id());
+        }
     }
 }
 
@@ -476,6 +491,16 @@ fn build_headless(
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // Put the agent in its own session/process group so we can later kill the
+    // whole tree (it + any Bash/MCP children) instead of orphaning them.
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
     cmd
 }
 
@@ -833,6 +858,12 @@ pub fn run_task_blocking(
     )
     .spawn()
     .map_err(|e| e.to_string())?;
+    // Track this one-shot worker so app-quit can kill its group (it lives outside
+    // the `chat` session map).
+    let pid = child.id();
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        state.oneshot_pids.lock().unwrap().insert(pid);
+    }
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     if let Some(stderr) = child.stderr.take() {
@@ -867,6 +898,9 @@ pub fn run_task_blocking(
         }
     }
     let _ = child.wait();
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        state.oneshot_pids.lock().unwrap().remove(&pid);
+    }
     crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
     Ok(result)
 }

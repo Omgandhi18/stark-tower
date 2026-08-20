@@ -3,13 +3,14 @@ mod chat;
 mod config;
 mod engine;
 mod ledger;
+mod proc;
 mod pty;
 
 use agents::{Agent, AgentKind, AgentStatus};
 use config::{AgentConfig, AppConfig, EngineConfig};
 use ledger::{Ledger, LedgerEntry, StoredMessage};
 use pty::PtyManager;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{Emitter, Manager};
@@ -48,6 +49,9 @@ pub struct AppState {
     pub config: Mutex<AppConfig>,
     /// Where the config is persisted.
     pub config_file: String,
+    /// PIDs of in-flight one-shot delegation workers, so app-quit can kill their
+    /// process groups instead of orphaning them (they live outside `chat`).
+    pub oneshot_pids: Mutex<HashSet<u32>>,
 }
 
 impl AppState {
@@ -816,6 +820,7 @@ pub fn run() {
                 delegations: Mutex::new(chat::DelegationState::default()),
                 config: Mutex::new(cfg),
                 config_file,
+                oneshot_pids: Mutex::new(HashSet::new()),
             });
 
             pty::start_idle_monitor(app.handle().clone());
@@ -851,6 +856,19 @@ pub fn run() {
             set_lighting,
             reset_config
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Stark Tower");
+        .build(tauri::generate_context!())
+        .expect("error while building Stark Tower")
+        .run(|app_handle, event| {
+            if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+                cleanup_children(app_handle);
+            }
+        });
+}
+
+/// On quit, SIGKILL the process group of every live agent — persistent chat
+/// sessions, one-shot delegation workers, and interactive PTYs — so no `claude`
+/// (or the tools it spawned) is left orphaned.
+fn cleanup_children(app: &tauri::AppHandle) {
+    chat::kill_all(app);
+    pty::kill_all(app);
 }

@@ -3476,6 +3476,7 @@ name = "stark-tower"
 version = "0.1.0"
 dependencies = [
  "ignore",
+ "libc",
  "portable-pty",
  "rusqlite",
  "serde",

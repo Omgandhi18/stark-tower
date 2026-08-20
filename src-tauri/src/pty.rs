@@ -212,10 +212,25 @@ pub fn kill(app: &tauri::AppHandle, agent_id: &str) -> Result<(), String> {
     let state = app.state::<crate::AppState>();
     let removed = { state.pty.sessions.lock().unwrap().remove(agent_id) };
     if let Some(mut s) = removed {
+        if let Some(pid) = s.child.process_id() {
+            crate::proc::kill_tree(pid);
+        }
         let _ = s.child.kill();
     }
     emit_status(app, agent_id, AgentStatus::Offline);
     Ok(())
+}
+
+/// SIGKILL every interactive PTY's process group (app quit), so no shell or tool
+/// an agent spawned is left orphaned.
+pub fn kill_all(app: &tauri::AppHandle) {
+    let state = app.state::<crate::AppState>();
+    let map = state.pty.sessions.lock().unwrap();
+    for s in map.values() {
+        if let Some(pid) = s.child.process_id() {
+            crate::proc::kill_tree(pid);
+        }
+    }
 }
 
 /// Manually release Ultron containment (the UI's "release" action): reset the
