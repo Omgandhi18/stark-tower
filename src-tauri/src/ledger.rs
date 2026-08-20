@@ -219,3 +219,51 @@ impl Ledger {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    fn temp_db() -> (Ledger, std::path::PathBuf) {
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let p = std::env::temp_dir().join(format!("stark-led-{}-{n}.db", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        (Ledger::open(&p).unwrap(), p)
+    }
+
+    #[test]
+    fn messages_roundtrip_in_chronological_order() {
+        let (l, p) = temp_db();
+        l.add_message("a", "user", Some("hi"), None, None);
+        l.add_message("a", "agent", Some("yo"), None, None);
+        let msgs = l.messages("a", 10);
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].text.as_deref(), Some("hi"));
+        assert_eq!(msgs[1].text.as_deref(), Some("yo"));
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn session_set_get_forget() {
+        let (l, p) = temp_db();
+        assert!(l.get_session("a", "/x").is_none());
+        l.set_session("a", "/x", "sid-1");
+        assert_eq!(l.get_session("a", "/x").as_deref(), Some("sid-1"));
+        l.forget_session("a", "/x");
+        assert!(l.get_session("a", "/x").is_none());
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn clear_agent_wipes_messages_and_sessions() {
+        let (l, p) = temp_db();
+        l.add_message("a", "user", Some("hi"), None, None);
+        l.set_session("a", "/x", "sid");
+        l.clear_agent("a");
+        assert!(l.messages("a", 10).is_empty());
+        assert!(l.get_session("a", "/x").is_none());
+        std::fs::remove_file(&p).ok();
+    }
+}

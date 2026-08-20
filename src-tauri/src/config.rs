@@ -458,3 +458,61 @@ pub fn save(path: &std::path::Path, cfg: &AppConfig) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp_dir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("stark-cfg-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn default_config_has_claude_and_an_orchestrator() {
+        let c = default_config();
+        assert!(c.engine("claude-code").is_some());
+        assert!(c.agents.iter().any(|a| a.kind == AgentKind::Orchestrator));
+        assert_eq!(c.roster().len(), c.agents.iter().filter(|a| a.enabled).count());
+    }
+
+    #[test]
+    fn save_then_load_roundtrips() {
+        let dir = tmp_dir("rt");
+        let path = dir.join("config.json");
+        let mut c = default_config();
+        c.onboarded = true;
+        save(&path, &c);
+        let loaded = load(&path);
+        assert!(loaded.onboarded);
+        assert_eq!(loaded.version, cfg_version());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn corrupt_config_is_backed_up_not_wiped() {
+        let dir = tmp_dir("bad");
+        let path = dir.join("config.json");
+        std::fs::write(&path, "{ not valid json ").unwrap();
+        let loaded = load(&path);
+        assert!(loaded.engine("claude-code").is_some());
+        assert!(dir.join("config.corrupt-0.json").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn empty_personality_is_backfilled_on_load() {
+        let dir = tmp_dir("pers");
+        let path = dir.join("config.json");
+        let mut c = default_config();
+        if let Some(j) = c.agents.iter_mut().find(|a| a.id == "jarvis") {
+            j.personality = String::new();
+        }
+        save(&path, &c);
+        let loaded = load(&path);
+        assert!(!loaded.agent("jarvis").unwrap().personality.trim().is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

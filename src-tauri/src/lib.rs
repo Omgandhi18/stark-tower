@@ -872,3 +872,30 @@ fn cleanup_children(app: &tauri::AppHandle) {
     chat::kill_all(app);
     pty::kill_all(app);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tilde_expands_to_home() {
+        let home = default_workdir();
+        assert_eq!(shellexpand_home("~"), home);
+        assert_eq!(shellexpand_home("~/foo"), format!("{home}/foo"));
+        assert_eq!(shellexpand_home("/abs/path"), "/abs/path");
+    }
+
+    #[test]
+    fn token_is_32_hex_chars() {
+        let t = gen_token();
+        assert_eq!(t.len(), 32);
+        assert!(t.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn truncate_and_short_path() {
+        assert_eq!(truncate("hello", 10), "hello");
+        assert_eq!(truncate("hello world", 5).chars().count(), 6); // 5 chars + ellipsis
+        assert_eq!(short_path("/a/b/c"), "c");
+    }
+}

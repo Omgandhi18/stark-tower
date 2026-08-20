@@ -452,6 +452,7 @@ fn missing_engine_error(engine: &EngineConfig) -> String {
 /// happen to; their dedicated adapters (Codex, OpenCode, …) land in later slices,
 /// so for now non-Claude kinds spawn `command + extra_args` best-effort. The
 /// model flag and any auth env vars are applied for every kind.
+#[allow(clippy::too_many_arguments)]
 fn build_headless(
     engine: &EngineConfig,
     model: &str,
@@ -1406,4 +1407,28 @@ fn handle_approve(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_j
     let _ = writer.write_all(
         (serde_json::json!({ "approved": approved }).to_string() + "\n").as_bytes(),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_repeats_count_consecutively_and_reset() {
+        let a = "test-agent-repeat";
+        reset_tool_tracker(a);
+        assert_eq!(note_tool_call(a, "Read|foo"), 1);
+        assert_eq!(note_tool_call(a, "Read|foo"), 2);
+        assert_eq!(note_tool_call(a, "Read|bar"), 1); // a different call resets the run
+        assert_eq!(note_tool_call(a, "Read|bar"), 2);
+        reset_tool_tracker(a);
+        assert_eq!(note_tool_call(a, "Read|bar"), 1);
+    }
+
+    #[test]
+    fn resolve_program_honors_absolute_paths_and_rejects_bogus() {
+        assert_eq!(resolve_program("/bin/sh").as_deref(), Some("/bin/sh"));
+        assert!(resolve_program("/nonexistent/xyzzy-bin").is_none());
+        assert!(resolve_program("definitely-not-a-real-cli-xyzzy").is_none());
+    }
 }
