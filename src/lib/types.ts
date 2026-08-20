@@ -40,6 +40,13 @@ export interface StatusEvent {
   status: AgentStatus;
 }
 
+/** Per-turn usage, emitted on each agent `result` (usage://update). */
+export interface UsageUpdate {
+  agentId: string;
+  costUsd: number;
+  contextTokens: number;
+}
+
 export type ChatEventKind =
   | "init"
   | "text"

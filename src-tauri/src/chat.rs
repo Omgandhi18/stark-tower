@@ -545,6 +545,26 @@ fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, re
                     cwd: None,
                 },
             );
+            // Cost / context HUD: this turn's cost + the context-window fill from
+            // the usage block (input + cache + output ≈ conversation size sent).
+            let u = |k: &str| {
+                v.pointer("/usage")
+                    .and_then(|x| x.get(k))
+                    .and_then(|n| n.as_u64())
+                    .unwrap_or(0)
+            };
+            let context_tokens = u("input_tokens")
+                + u("cache_read_input_tokens")
+                + u("cache_creation_input_tokens")
+                + u("output_tokens");
+            let _ = app.emit(
+                "usage://update",
+                serde_json::json!({
+                    "agentId": agent_id,
+                    "costUsd": cost.unwrap_or(0.0),
+                    "contextTokens": context_tokens,
+                }),
+            );
             crate::breaker::reset(agent_id); // turn ended cleanly — clear the loop guard
             crate::breaker::step_down(agent_id); // de-escalate the ladder one rung
             crate::pty::emit_status(app, agent_id, AgentStatus::Idle);

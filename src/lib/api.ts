@@ -6,6 +6,7 @@ import type {
   PtyData,
   ReviewRequest,
   StatusEvent,
+  UsageUpdate,
 } from "./types";
 
 // Commands are the tauri-specta-generated, typed wrappers (bindings.ts). Fallible
@@ -134,6 +135,9 @@ export const onPtyData = (cb: (e: PtyData) => void): Promise<UnlistenFn> =>
 
 export const onAgentStatus = (cb: (e: StatusEvent) => void): Promise<UnlistenFn> =>
   listen<StatusEvent>("agent://status", (evt) => cb(evt.payload));
+
+export const onUsageUpdate = (cb: (u: UsageUpdate) => void): Promise<UnlistenFn> =>
+  listen<UsageUpdate>("usage://update", (evt) => cb(evt.payload));
 
 export const onLedgerEntry = (cb: (e: LedgerEntry) => void): Promise<UnlistenFn> =>
   listen<LedgerEntry>("ledger://entry", (evt) => cb(evt.payload));
