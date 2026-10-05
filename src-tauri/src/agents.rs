@@ -122,7 +122,7 @@ pub fn default_roster() -> Vec<Agent> {
             kind: AgentKind::Maintenance,
             engine: "claude-code".into(),
             accent: "#9AA7B2".into(),
-            figure: "operative".into(),
+            figure: "helperbot".into(),
             home_x: 1,
             home_y: 13,
             status: AgentStatus::Offline,

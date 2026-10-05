@@ -14,6 +14,8 @@ export default defineConfig({
     baseURL: `http://localhost:${PORT}`,
     viewport: VIEWPORT,
     colorScheme: "dark",
+    // The room holds still under reduced motion, so clicking an agent never chases them across it.
+    reducedMotion: "reduce",
     // The scenario's clock is Indian Standard Time; schedules read the same on any machine.
     timezoneId: "Asia/Kolkata",
     trace: "retain-on-failure",

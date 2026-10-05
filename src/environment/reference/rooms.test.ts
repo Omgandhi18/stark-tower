@@ -31,16 +31,12 @@ describe("every theme's room", () => {
     const room = roomFor(id);
     const scene = room.scene;
     const slots = new Set(scene.slots.map((s) => s.id));
-    // A slot's character is a painted station, or a seat whose character can get up (R&D's build bay).
-    for (const slot of slots) expect(room.cutouts[scene.stations[slot]?.cutout ?? scene.actors?.[slot]?.seatCutout ?? ""], slot).toBeDefined();
+    // Every slot's character is a painted station.
+    for (const slot of slots) expect(room.cutouts[scene.stations[slot]?.cutout ?? ""], slot).toBeDefined();
     for (const slot of Object.keys(scene.stations)) expect(slots.has(slot), slot).toBe(true);
     for (const part of scene.helpers.flatMap((h) => h.parts)) expect(room.cutouts[part], part).toBeDefined();
     for (const [slot, light] of Object.entries(scene.lights)) if (typeof light !== "string") expect(slots.has(slot), slot).toBe(true);
     for (const slot of Object.keys(scene.tags ?? {})) expect(slots.has(slot), slot).toBe(true);
-    for (const [slot, actor] of Object.entries(scene.actors ?? {})) {
-      expect(slots.has(slot), slot).toBe(true);
-      expect(room.cutouts[actor.seatCutout], actor.seatCutout).toBeDefined();
-    }
     for (const slot of [scene.card.slot, scene.orchestratorSlot, scene.helperSlot]) if (slot) expect(slots.has(slot), slot).toBe(true);
   });
 

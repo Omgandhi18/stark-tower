@@ -206,7 +206,7 @@ const config: AppConfig = {
       role: "Maintenance",
       kind: "maintenance",
       accent: "#9aa7b2",
-      figure: "operative",
+      figure: "helperbot",
       personality: "",
       home_x: 1,
       home_y: 13,

@@ -1,0 +1,41 @@
+{
+  "$comment": "How Studio Office's team lives in the room; same rules as rnd-life.json. JARVIS works inside the glass office and KAREN at the whiteboard: colleagues check in from outside.",
+  "nodes": {
+    "jarvis": [548, 346], "glassFront": [640, 472],
+    "shelfW": [330, 470], "sofa": [430, 520], "floorW": [470, 472], "floorM": [580, 474], "board": [720, 466],
+    "floorC": [860, 442], "floorE": [955, 442], "island": [1180, 432], "window": [1320, 405],
+    "aisle": [955, 560], "aisle2": [955, 640], "aisleS": [955, 700], "lounge": [985, 705], "vision": [1050, 690],
+    "floorMid": [880, 740], "friday": [765, 735], "veronica": [860, 748],
+    "karen": [833, 612], "edith": [1468, 703]
+  },
+  "edges": [
+    ["shelfW", "floorW"], ["sofa", "floorW"], ["floorW", "floorM"], ["floorM", "glassFront"], ["glassFront", "board"],
+    ["board", "floorC"], ["floorC", "floorE"], ["floorE", "island"], ["island", "window"], ["floorE", "aisle"],
+    ["aisle", "aisle2"], ["aisle2", "aisleS"], ["aisleS", "lounge"], ["lounge", "vision"], ["aisleS", "floorMid"],
+    ["floorMid", "friday"], ["floorMid", "veronica"]
+  ],
+  "cast": {
+    "glassOffice": { "node": "jarvis", "face": "SE", "seated": true, "rise": [530, 336], "visit": "glassFront", "parts": { "head": [25, 2, 75, 62], "hands": [[55, 80, 75, 96], [75, 80, 95, 96]] } },
+    "researchDesk": { "node": "friday", "face": "SE", "seated": true, "rise": [735, 690], "visit": "floorMid", "parts": { "head": [25, 18, 75, 72], "hands": [[50, 92, 70, 108], [68, 92, 85, 108]] } },
+    "whiteboard": { "node": "karen", "face": "SW", "visit": "aisle2", "parts": { "head": [25, 2, 70, 55], "hands": [[5, 62, 30, 82]] } },
+    "armchair": { "node": "vision", "face": "SE", "seated": true, "rise": [1040, 655], "visit": "lounge", "parts": { "head": [25, 0, 75, 58], "hands": [[60, 88, 85, 104]] } },
+    "serverRack": { "node": "edith", "face": "NE", "parts": { "head": [28, 45, 65, 95], "hands": [[60, 103, 80, 122], [78, 103, 98, 122]] } },
+    "meetingTable": { "node": "veronica", "face": "SE", "seated": true, "rise": [850, 768], "visit": "floorMid", "parts": { "head": [20, 0, 85, 70], "hands": [[45, 115, 65, 135], [63, 115, 82, 135]] } }
+  },
+  "spots": [
+    { "id": "coffee", "node": "island", "face": "NW", "poses": ["coffee", "coffee"], "kind": "errand", "dwell": [8, 14] },
+    { "id": "window", "node": "window", "face": "NE", "poses": ["coffee", "stretch", "stand"], "kind": "errand", "dwell": [7, 12] },
+    { "id": "books", "node": "shelfW", "face": "NW", "poses": ["read", "think"], "kind": "errand", "dwell": [7, 13] },
+    { "id": "cat", "node": "sofa", "face": "SW", "poses": ["listen", "coffee"], "kind": "errand", "dwell": [6, 10] },
+    { "id": "jarvisDesk", "node": "jarvis", "face": "SE", "poses": ["stretch", "coffee", "think"], "kind": "local", "dwell": [6, 10], "for": "glassOffice" },
+    { "id": "karenBoard", "node": "karen", "face": "SW", "poses": ["present", "think", "talk"], "kind": "local", "dwell": [6, 10], "for": "whiteboard" },
+    { "id": "edithRack", "node": "edith", "face": "NE", "poses": ["reach", "think"], "kind": "local", "dwell": [6, 10], "for": "serverRack" },
+    { "id": "reportTable", "node": "floorMid", "face": "SE", "poses": ["reach", "folder"], "kind": "review", "dwell": [3, 4] }
+  ],
+  "meets": [["floorC", "floorE"], ["floorMid", "aisleS"], ["floorW", "floorM"]],
+  "occluders": [
+    { "id": "jarvisDesk", "baseY": 405, "poly": [[430, 318], [545, 300], [560, 288], [612, 288], [660, 279], [700, 282], [713, 300], [713, 402], [525, 438], [430, 383]] },
+    { "id": "whiteboard", "baseY": 575, "poly": [[615, 425], [838, 418], [841, 548], [680, 578], [615, 573]] },
+    { "id": "deskRight", "baseY": 640, "poly": [[760, 562], [842, 546], [952, 560], [952, 612], [905, 642], [760, 642]] }
+  ]
+}

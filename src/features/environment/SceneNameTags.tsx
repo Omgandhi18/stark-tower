@@ -12,6 +12,8 @@ export interface NameTagPlace {
 interface SceneNameTagsProps {
   places: readonly NameTagPlace[];
   seats: ReadonlyMap<string, Agent>;
+  /** Stations whose agent is up and about: their tag waits for them to come back. */
+  away: Readonly<Record<string, unknown>>;
   /** Agents with a question, approval or review waiting on the developer. */
   waitingOnYou: ReadonlySet<string>;
   camera: Camera;
@@ -19,10 +21,10 @@ interface SceneNameTagsProps {
 }
 
 /** Each seated agent's name, role and state beside them, as the cafe's mockup labels its team. */
-export default function SceneNameTags({ places, seats, waitingOnYou, camera, view }: SceneNameTagsProps) {
+export default function SceneNameTags({ places, seats, away, waitingOnYou, camera, view }: SceneNameTagsProps) {
   return places.map(({ slotId, at }) => {
     const agent = seats.get(slotId);
-    if (!agent) return null;
+    if (!agent || slotId in away) return null;
     const position = worldToScreen(at, camera, view);
     const tone = waitingOnYou.has(agent.id) ? "attention" : AGENT_STATUS[agent.status].tone;
     // The hotspot under each character already names them to assistive tech.

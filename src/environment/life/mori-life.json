@@ -1,0 +1,41 @@
+{
+  "$comment": "How Mori Cafe's team lives in the room; same rules as rnd-life.json. JARVIS keeps the counter behind the board, and VISION has the terrace to himself across the stream.",
+  "nodes": {
+    "jarvis": [400, 362],
+    "edith": [268, 745], "floorW": [325, 728], "teaCart": [420, 750], "stepsBot": [405, 690], "stepsTop": [465, 612],
+    "boardFront": [560, 596], "karen": [632, 618], "windowStep": [770, 575], "friday": [805, 540],
+    "rugW": [470, 800], "cat": [540, 812], "tableSouth": [700, 826], "planks": [905, 800], "bridge": [985, 752],
+    "bridgeEnd": [1080, 818], "review": [1150, 878], "deckE": [1330, 896], "loungeFront": [1420, 815], "veronica": [1440, 772],
+    "vision": [1257, 564], "terraceW": [1140, 525], "terraceDesk": [1265, 505]
+  },
+  "edges": [
+    ["edith", "floorW"], ["floorW", "teaCart"], ["floorW", "stepsBot"], ["stepsBot", "stepsTop"], ["stepsTop", "boardFront"],
+    ["boardFront", "karen"], ["karen", "windowStep"], ["windowStep", "friday"], ["floorW", "rugW"], ["teaCart", "rugW"],
+    ["rugW", "cat"], ["cat", "tableSouth"], ["tableSouth", "planks"], ["planks", "bridge"], ["bridge", "bridgeEnd"],
+    ["bridgeEnd", "review"], ["review", "deckE"], ["deckE", "loungeFront"], ["loungeFront", "veronica"],
+    ["vision", "terraceW"], ["vision", "terraceDesk"]
+  ],
+  "cast": {
+    "counter": { "node": "jarvis", "face": "SE", "parts": { "head": [25, 5, 75, 65], "hands": [[0, 92, 30, 110], [60, 92, 95, 110]] } },
+    "windowTable": { "node": "friday", "face": "SE", "seated": true, "rise": [792, 518], "visit": "windowStep", "parts": { "head": [20, 5, 80, 62], "hands": [[55, 92, 75, 110], [72, 92, 90, 110]] } },
+    "longTable": { "node": "karen", "face": "SE", "seated": true, "rise": [660, 640], "visit": "boardFront", "parts": { "head": [35, 5, 85, 60], "hands": [[40, 95, 60, 112], [60, 95, 82, 112]] } },
+    "terrace": { "node": "vision", "face": "SE", "parts": { "head": [35, 5, 75, 62], "hands": [[62, 95, 80, 110]] } },
+    "rack": { "node": "edith", "face": "SW", "visit": "floorW", "parts": { "head": [20, 10, 70, 70], "hands": [[30, 85, 55, 108]] } },
+    "lounge": { "node": "veronica", "face": "SE", "seated": true, "rise": [1452, 748], "visit": "loungeFront", "parts": { "head": [30, 10, 75, 60], "hands": [[35, 82, 55, 100]] } }
+  },
+  "spots": [
+    { "id": "tea", "node": "teaCart", "face": "NW", "poses": ["coffee", "coffee"], "kind": "errand", "dwell": [8, 14] },
+    { "id": "cat", "node": "cat", "face": "NE", "poses": ["listen", "stand"], "kind": "errand", "dwell": [6, 10] },
+    { "id": "board", "node": "boardFront", "face": "NW", "poses": ["think", "read", "reach"], "kind": "think", "dwell": [7, 12] },
+    { "id": "stream", "node": "bridge", "face": "NE", "poses": ["coffee", "stand", "stretch"], "kind": "errand", "dwell": [7, 12] },
+    { "id": "rain", "node": "terraceW", "face": "NW", "poses": ["coffee", "think"], "kind": "local", "dwell": [7, 12], "for": "terrace" },
+    { "id": "screens", "node": "terraceDesk", "face": "NE", "poses": ["reach", "think"], "kind": "local", "dwell": [6, 10], "for": "terrace" },
+    { "id": "counterTea", "node": "jarvis", "face": "SE", "poses": ["coffee", "think", "stretch"], "kind": "local", "dwell": [6, 10], "for": "counter" },
+    { "id": "reviewBox", "node": "review", "face": "NE", "poses": ["reach", "folder"], "kind": "review", "dwell": [3, 4] }
+  ],
+  "meets": [["floorW", "teaCart"], ["planks", "bridge"], ["boardFront", "stepsTop"]],
+  "occluders": [
+    { "id": "counter", "baseY": 410, "poly": [[300, 336], [400, 322], [470, 318], [478, 340], [590, 338], [590, 556], [397, 556], [397, 400], [300, 404]] },
+    { "id": "longTable", "baseY": 645, "poly": [[480, 640], [600, 606], [760, 578], [915, 622], [915, 700], [760, 760], [600, 792], [480, 722]] }
+  ]
+}

@@ -15,10 +15,10 @@ export interface Slot {
   added: boolean;
 }
 
-/** A room's stations in its own (world) px; a character's bounds default to their station's (or seat's) cut-out. */
+/** A room's stations in its own (world) px; a character's bounds default to their station's cut-out. */
 export function slotsOf(room: Room): readonly Slot[] {
   return room.scene.slots.map((s) => {
-    const cutout = room.scene.stations[s.id]?.cutout ?? room.scene.actors?.[s.id]?.seatCutout;
+    const cutout = room.scene.stations[s.id]?.cutout;
     const bounds = s.hit ?? (cutout ? room.cutouts[cutout]?.rect : undefined);
     if (!bounds) throw new Error(`The ${room.id} room's ${s.id} station has no character to click.`);
     const hit = relativeTo(bounds as unknown as Rect, room.rect);
