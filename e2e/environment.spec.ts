@@ -41,3 +41,28 @@ test.describe("environment", () => {
     await expect(page.getByRole("status").filter({ hasText: "KAREN" })).toBeVisible();
   });
 });
+
+test.describe("environment in motion", () => {
+  // The rest of the suite runs under reduced motion, where the room holds still.
+  test.use({ reducedMotion: "no-preference" });
+
+  test("an idle agent gets up, and can be talked to wherever they are", async ({ page }) => {
+    const scenario = defaultScenario();
+    const statuses = Object.fromEntries(Object.keys(scenario.statuses).map((id) => [id, id === "edith" ? "idle" : "working"])) as typeof scenario.statuses;
+    await openApp(page, { ...scenario, reviews: [], notifications: [], statuses });
+    await goTo(page, "Environment");
+    await expect(page.locator(".env-canvas canvas")).toBeVisible();
+    const edith = page.getByRole("button", { name: "Talk to EDITH, Recon & Research" });
+    const seat = await edith.boundingBox();
+    // Dev builds: ⌥W sends someone idle on a break.
+    await page.keyboard.press("Alt+KeyW");
+    await expect
+      .poll(async () => {
+        const now = await edith.boundingBox();
+        return now && seat ? Math.hypot(now.x - seat.x, now.y - seat.y) : 0;
+      })
+      .toBeGreaterThan(20);
+    await edith.click();
+    await expect(page.getByRole("complementary", { name: "Conversation with EDITH" })).toBeVisible();
+  });
+});

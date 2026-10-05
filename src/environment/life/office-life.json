@@ -27,6 +27,7 @@
     { "id": "window", "node": "window", "face": "NE", "poses": ["coffee", "stretch", "stand"], "kind": "errand", "dwell": [7, 12] },
     { "id": "books", "node": "shelfW", "face": "NW", "poses": ["read", "think"], "kind": "errand", "dwell": [7, 13] },
     { "id": "cat", "node": "sofa", "face": "SW", "poses": ["listen", "coffee"], "kind": "errand", "dwell": [6, 10] },
+    { "id": "systemReview", "node": "aisle", "face": "NE", "poses": ["think", "reach", "listen"], "kind": "think", "dwell": [7, 12] },
     { "id": "jarvisDesk", "node": "jarvis", "face": "SE", "poses": ["stretch", "coffee", "think"], "kind": "local", "dwell": [6, 10], "for": "glassOffice" },
     { "id": "karenBoard", "node": "karen", "face": "SW", "poses": ["present", "think", "talk"], "kind": "local", "dwell": [6, 10], "for": "whiteboard" },
     { "id": "edithRack", "node": "edith", "face": "NE", "poses": ["reach", "think"], "kind": "local", "dwell": [6, 10], "for": "serverRack" },
