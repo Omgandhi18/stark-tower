@@ -131,6 +131,13 @@ describe("the director", () => {
     for (const slot of Object.keys(life.cast)) expect(director.view(slot)?.kind, slot).toBe("station");
   });
 
+  it("never sends a working agent on a break", () => {
+    const director = new Director(life, motionsFor(life), 7);
+    director.setCast(castOf(life, "working"));
+    director.update(FRAME);
+    expect(director.liven()).toBe(false);
+  });
+
   it("sends an agent waiting on you straight back to their desk", () => {
     const director = new Director(life, motionsFor(life), 4);
     director.setCast(castOf(life, (slot) => (slot === "buildBay" ? "idle" : "working")));

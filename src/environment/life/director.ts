@@ -164,9 +164,9 @@ export class Director {
     return out;
   }
 
-  /** Dev: send someone idle on a pastime right now; false when nobody can go. */
+  /** Dev: send someone idle on a pastime right now; false when nobody can go. Working agents stay at it. */
   liven(): boolean {
-    const free = [...this.actors.values()].filter((a) => this.available(a));
+    const free = [...this.actors.values()].filter((a) => this.available(a) && (a.activity === "idle" || a.activity === "offline"));
     for (const actor of free.sort(() => this.rng() - 0.5)) {
       if (this.planPastime(actor, true)) return true;
     }

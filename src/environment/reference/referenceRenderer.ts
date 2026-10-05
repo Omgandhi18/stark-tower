@@ -319,12 +319,20 @@ export async function createReferenceRenderer(host: HTMLElement, initialView: Si
     return frame;
   };
 
+  /** Set a sprite property, noting whether the picture changed (frames that change nothing aren't drawn). */
+  let changed = false;
+  const assign = <T extends object, K extends keyof T>(target: T, key: K, value: T[K]) => {
+    if (target[key] === value) return;
+    target[key] = value;
+    changed = true;
+  };
+
   const showPeople = () => {
     const moving = live();
     for (const person of people) {
       if (!isOccupied(person.slotId)) {
-        person.sprite.visible = false;
-        person.walker.visible = false;
+        assign(person.sprite, "visible", false);
+        assign(person.walker, "visible", false);
         report(person, null);
         continue;
       }
@@ -333,19 +341,21 @@ export async function createReferenceRenderer(host: HTMLElement, initialView: Si
         const json = person.art.json;
         const { name, mirror } = frameFor(json, v.pose, v.dir, v.breath, v.frame);
         const [, , w, h, ax, ay] = json.frames[name];
-        person.walker.texture = walkerFrame(person, name);
-        person.walker.anchor.set(ax / w, ay / h);
-        person.walker.scale.x = mirror ? -1 : 1;
-        person.walker.position.set(Math.round(v.x - origin.x), Math.round(v.y - origin.y));
-        person.walker.zIndex = v.y - origin.y;
-        person.walker.visible = true;
-        person.sprite.visible = false;
+        const walker = person.walker;
+        assign(walker, "texture", walkerFrame(person, name));
+        walker.anchor.set(ax / w, ay / h);
+        assign(walker.scale, "x", mirror ? -1 : 1);
+        assign(walker, "x", Math.round(v.x - origin.x));
+        assign(walker, "y", Math.round(v.y - origin.y));
+        walker.zIndex = v.y - origin.y;
+        assign(walker, "visible", true);
+        assign(person.sprite, "visible", false);
         report(person, { x: v.x - origin.x, y: v.y - origin.y - json.height });
       } else {
         const station = v?.kind === "station" ? v : null;
-        if (person.frames) person.sprite.texture = adopt(person.frames.texture(station?.head ?? "rest", station?.hand ?? -1));
-        person.sprite.visible = true;
-        person.walker.visible = false;
+        if (person.frames) assign(person.sprite, "texture", adopt(person.frames.texture(station?.head ?? "rest", station?.hand ?? -1)));
+        assign(person.sprite, "visible", true);
+        assign(person.walker, "visible", false);
         report(person, null);
       }
     }
@@ -354,7 +364,7 @@ export async function createReferenceRenderer(host: HTMLElement, initialView: Si
   const hover = () => {
     const lift = live();
     hovering.forEach(({ sprite, y }, i) => {
-      sprite.y = lift ? y + Math.round(Math.sin(clock * 2.4 + i * 1.3) * 1.2) : y;
+      if (sprite.visible) assign(sprite, "y", lift ? y + Math.round(Math.sin(clock * 2.4 + i * 1.3) * 1.2) : y);
     });
   };
 
@@ -362,9 +372,11 @@ export async function createReferenceRenderer(host: HTMLElement, initialView: Si
     const dt = Math.min(MAX_STEP_SECONDS, app.ticker.deltaMS * SECONDS_PER_MS);
     clock += dt;
     if (live()) director.update(dt);
+    changed = false;
     showPeople();
     hover();
-    draw();
+    // Most frames at a desk change nothing (a keystroke is a few times a second): skip drawing those.
+    if (changed) draw();
     if (!live() || !shown) app.ticker.stop();
   };
   app.ticker.add(tick);
