@@ -1,13 +1,14 @@
 import { memo, type ReactNode } from "react";
-import { ArrowDown, Brain, CircleAlert } from "lucide-react";
+import { ArrowDown, Brain, CircleAlert, Share2, Sparkles } from "lucide-react";
 import { Button, Markdown, Portrait, ICON_SIZE, ICON_STROKE } from "../../design";
+import { AttachmentGallery } from "../attachments/AttachmentView";
 import { presentTool } from "../../lib/tools";
 import type { Agent } from "../../lib/types";
 import type { ChatMessage, MessageRole } from "../../stores/chats";
 import { useStickToBottom } from "./useStickToBottom";
 
 /** Messages that come from the agent's side of the conversation. */
-const AGENT_SIDE: readonly MessageRole[] = ["agent", "tool", "thinking"];
+const AGENT_SIDE: readonly MessageRole[] = ["agent", "tool", "thinking", "artifact"];
 
 const startsAgentRun = (messages: readonly ChatMessage[], index: number) =>
   AGENT_SIDE.includes(messages[index].role) && (index === 0 || !AGENT_SIDE.includes(messages[index - 1].role));
@@ -17,9 +18,25 @@ const MessageRow = memo(function MessageRow({ message }: { message: ChatMessage 
     case "user":
       return (
         <div className="msg msg-user">
-          <p className="msg-bubble selectable">{message.text}</p>
+          {message.text && <p className="msg-bubble selectable">{message.text}</p>}
+          {message.attachments && <AttachmentGallery files={message.attachments} compact />}
         </div>
       );
+    case "artifact": {
+      // What the agent made this turn, or shared on purpose.
+      const shared = message.detail === "shared";
+      const Icon = shared ? Share2 : Sparkles;
+      return (
+        <div className="msg msg-artifact">
+          <span className="msg-artifact-label">
+            <Icon aria-hidden size={ICON_SIZE.sm} strokeWidth={ICON_STROKE} />
+            {shared ? "Shared" : "Made in this turn"}
+          </span>
+          {message.text && <Markdown text={message.text} className="msg-artifact-caption" />}
+          <AttachmentGallery files={message.attachments ?? []} />
+        </div>
+      );
+    }
     case "agent":
       return <Markdown text={message.text ?? ""} className="msg msg-agent" />;
     case "tool": {

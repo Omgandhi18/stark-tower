@@ -1,8 +1,10 @@
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { AtSign, SendHorizontal, Square } from "lucide-react";
 import { Button, IconButton, cx } from "../../design";
-import type { PathEntry } from "../../lib/types";
+import type { Attachment, PathEntry } from "../../lib/types";
 import { selectThread, useChats } from "../../stores/chats";
+import { AttachButton, AttachmentTray } from "../attachments/AttachmentTray";
+import type { AttachmentDraft } from "../attachments/useAttachmentDraft";
 import FilePicker from "./FilePicker";
 import { detectMention, insertMention, optionId, rankPaths, type MentionQuery } from "./fileMentions";
 import { useFolderFiles } from "./useFolderFiles";
@@ -17,12 +19,14 @@ interface ChatComposerProps {
   pending: boolean;
   /** A question is waiting: the next message answers it. */
   answering: boolean;
-  onSend: (text: string) => void;
+  /** Files attached to the message being written (the panel around it takes dropped ones too). */
+  attachments: AttachmentDraft;
+  onSend: (text: string, files: Attachment[]) => void;
   onStop: () => void;
 }
 
-/** Message box with an @ file picker. Enter sends, Shift+Enter adds a line. */
-export default function ChatComposer({ agentId, agentName, folder, pending, answering, onSend, onStop }: ChatComposerProps) {
+/** Message box with an @ file picker and attachments (picked, pasted or dropped). Enter sends, Shift+Enter adds a line. */
+export default function ChatComposer({ agentId, agentName, folder, pending, answering, attachments, onSend, onStop }: ChatComposerProps) {
   const draft = useChats((s) => selectThread(agentId)(s).draft);
   const setDraft = useChats((s) => s.setDraft);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -74,12 +78,17 @@ export default function ChatComposer({ agentId, agentName, folder, pending, answ
     placeCaret(caret + insert.length);
   };
 
+  // An answer is words only: files go with the next message.
+  const sending = answering ? [] : attachments.files;
+  const canSend = Boolean(draft.trim() || sending.length) && attachments.adding === 0;
+
   const submit = () => {
     const text = draft.trim();
-    if (!text) return;
+    if (!canSend) return;
     setDraft(agentId, "");
     setMention(null);
-    onSend(text);
+    if (sending.length) attachments.sent();
+    onSend(text, [...sending]);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -115,6 +124,7 @@ export default function ChatComposer({ agentId, agentName, folder, pending, answ
 
   return (
     <div className={cx("chat-composer", answering && "is-answering")}>
+      {!answering && <AttachmentTray draft={attachments} />}
       {picking && (
         <FilePicker
           id={listId}
@@ -147,16 +157,23 @@ export default function ChatComposer({ agentId, agentName, folder, pending, answ
         }}
         onBlur={() => setMention(null)}
         onKeyDown={onKeyDown}
+        onPaste={(e) => {
+          const pasted = Array.from(e.clipboardData.files);
+          if (!pasted.length || answering) return;
+          e.preventDefault();
+          attachments.addBlobs(pasted);
+        }}
       />
       <div className="chat-composer-bar">
-        <IconButton icon={AtSign} label="Add a file or folder" size="sm" disabled={!folder} onClick={startMention} />
+        <AttachButton draft={attachments} disabled={answering} title={answering ? "Answer the question first, then attach files" : undefined} />
+        <IconButton icon={AtSign} label="Mention a project file or folder" size="sm" disabled={!folder} onClick={startMention} />
         <span className="chat-composer-hint">Enter to send, Shift+Enter for a new line</span>
         {pending && (
           <Button size="sm" variant="secondary" icon={Square} onClick={onStop}>
             Stop
           </Button>
         )}
-        <Button size="sm" variant="primary" icon={SendHorizontal} disabled={!draft.trim()} onClick={submit}>
+        <Button size="sm" variant="primary" icon={SendHorizontal} disabled={!canSend} onClick={submit}>
           {answering ? "Answer" : "Send"}
         </Button>
       </div>

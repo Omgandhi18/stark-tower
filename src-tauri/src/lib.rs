@@ -1,4 +1,5 @@
 mod agents;
+mod attachments;
 mod automations;
 mod breaker;
 mod bridge;
@@ -14,6 +15,7 @@ mod ledger;
 mod lifecycle;
 mod notify;
 mod opencode;
+mod outputs;
 mod proc;
 mod prompts;
 mod power;
@@ -150,6 +152,9 @@ fn gen_token() -> String {
     }
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
+
+/// How long a copy attached to a message that was never sent is kept.
+const UNSENT_ATTACHMENT_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Default project the tower opens in: ~/Documents (falling back to HOME).
 fn default_project() -> String {
@@ -395,7 +400,9 @@ fn chat_send(
     agent_id: String,
     text: String,
     dir: Option<String>,
+    attachments: Vec<attachments::Attachment>,
 ) -> Result<Option<i64>, String> {
+    let files = attachments::checked(&attachments::root(&app), &attachments)?;
     let cwd = dir
         .filter(|d| !d.trim().is_empty())
         .map(|d| shellexpand_home(d.trim()))
@@ -411,7 +418,37 @@ fn chat_send(
     // A follow-up in a task's conversation picks that task back up.
     tasks::developer_message(&app, &agent_id);
     // The stored id goes back to the UI, which already shows the message, to avoid a repeat.
-    chat::send_user_turn(&app, &agent_id, &text, &cwd)
+    chat::send_user_turn(&app, &agent_id, &text, &files, &cwd)
+}
+
+/// Keep copies of files the developer picked or dropped, to send with a message.
+#[tauri::command]
+#[specta::specta]
+fn attach_files(app: tauri::AppHandle, paths: Vec<String>) -> Result<Vec<attachments::Attachment>, String> {
+    let root = attachments::root(&app);
+    paths.iter().map(|p| attachments::store_copy(&root, std::path::Path::new(&shellexpand_home(p.trim())))).collect()
+}
+
+/// Keep a file the developer pasted (a screenshot, say), sent as base64.
+#[tauri::command]
+#[specta::specta]
+fn attach_data(app: tauri::AppHandle, name: String, data: String) -> Result<attachments::Attachment, String> {
+    attachments::store_data(&attachments::root(&app), &name, &data)
+}
+
+/// Forget files attached to a message that was never sent (their chip was removed).
+#[tauri::command]
+#[specta::specta]
+fn discard_attachments(app: tauri::AppHandle, state: tauri::State<AppState>, attachments: Vec<attachments::Attachment>) {
+    let unused: Vec<attachments::Attachment> = attachments.into_iter().filter(|a| !state.ledger.attachment_in_use(&a.path)).collect();
+    attachments::remove(&attachments::root(&app), &unused);
+}
+
+/// The start of a chat's text or HTML file, for its preview.
+#[tauri::command]
+#[specta::specta]
+fn read_attachment_text(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    attachments::preview_text(&attachments::root(&app), std::path::Path::new(&path))
 }
 
 /// Pick an interrupted task back up where it left off, in its own conversation.
@@ -455,8 +492,10 @@ fn start_task(
     agent_id: String,
     prompt: String,
     dir: Option<String>,
+    attachments: Vec<attachments::Attachment>,
 ) -> Result<ledger::Task, String> {
-    tasks::start(&app, &agent_id, &prompt, dir.map(|d| shellexpand_home(d.trim())))
+    let files = attachments::checked(&attachments::root(&app), &attachments)?;
+    tasks::start(&app, &agent_id, &prompt, dir.map(|d| shellexpand_home(d.trim())), &files)
 }
 
 /// The Notification Centre's record, newest first.
@@ -663,9 +702,11 @@ fn delete_conversation(app: tauri::AppHandle, state: tauri::State<AppState>, con
         }
         stop_by_developer(&app, &agent);
     }
+    let files = state.ledger.conversation_attachments(conversation_id);
     if !state.ledger.delete_conversation(conversation_id) {
         return Err("The chat couldn't be deleted.".into());
     }
+    attachments::remove(&attachments::root(&app), &files);
     if was_open {
         let fresh = state.ledger.new_conversation(&agent, &chat.cwd);
         emit_chat_switched(&app, &agent, fresh);
@@ -1372,6 +1413,10 @@ fn specta_builder() -> tauri_specta::Builder {
             close_task,
             review_task,
             delete_conversation,
+            attach_files,
+            attach_data,
+            discard_attachments,
+            read_attachment_text,
             default_tone,
             start_task,
             resume_task,
@@ -1539,6 +1584,8 @@ pub fn run() {
                 let enabled = state.config.lock().unwrap().keep_awake;
                 state.power.set_enabled(enabled);
             }
+            // Agents are given read access to the attachments folder, so it always exists.
+            std::fs::create_dir_all(attachments::root(app.handle())).ok();
             // Only now is there anything for the page to talk to.
             lifecycle::create_main(app)?;
             start_power_monitor(app.handle().clone());
@@ -1556,6 +1603,15 @@ pub fn run() {
             }
             // Recovery first, then the automation scheduler.
             automations::start(app.handle().clone());
+            // Copies of files attached to messages that were never sent go after a day.
+            {
+                let h = app.handle().clone();
+                std::thread::spawn(move || {
+                    if let Some(state) = h.try_state::<AppState>() {
+                        attachments::sweep_unused(&attachments::root(&h), |p| state.ledger.attachment_in_use(p), UNSENT_ATTACHMENT_AGE);
+                    }
+                });
+            }
             {
                 let h = app.handle().clone();
                 std::thread::spawn(move || update::check(&h));

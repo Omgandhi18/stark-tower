@@ -1,7 +1,7 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { commands, type AutomationInput, type PowerState, type Result } from "./bindings";
-import type { ChatEvent, ChatSwitch, TaskEvent, LedgerEntry, PtyData, ReviewRequest, StatusEvent, UsageUpdate, UpdateStatus } from "./types";
+import type { Attachment, ChatEvent, ChatSwitch, TaskEvent, LedgerEntry, PtyData, ReviewRequest, StatusEvent, UsageUpdate, UpdateStatus } from "./types";
 
 // Commands are the tauri-specta-generated, typed wrappers (bindings.ts). Fallible
 // Rust commands (Result<T, String>) return a Result here; `ok()` unwraps it back
@@ -41,7 +41,8 @@ export const loginItemEnabled = () => commands.loginItemEnabled();
 export const setLoginItem = (enabled: boolean) => ok(commands.setLoginItem(enabled));
 
 /** Hand work to an agent: it starts in its own conversation, or waits its turn. */
-export const startTask = (agentId: string, prompt: string, dir?: string) => ok(commands.startTask(agentId, prompt, dir ?? null));
+export const startTask = (agentId: string, prompt: string, dir?: string, attachments: Attachment[] = []) =>
+  ok(commands.startTask(agentId, prompt, dir ?? null, attachments));
 
 /** The task screen's data; null if the task no longer exists. */
 export const getTaskDetail = (id: string) => commands.getTaskDetail(id);
@@ -121,7 +122,22 @@ export const dispatchTask = (prompt: string, cols: number, rows: number) => ok(c
 
 // ---- Chat (headless Claude Code) ----
 
-export const chatSend = (agentId: string, text: string, dir?: string) => ok(commands.chatSend(agentId, text, dir ?? null));
+export const chatSend = (agentId: string, text: string, dir?: string, attachments: Attachment[] = []) =>
+  ok(commands.chatSend(agentId, text, dir ?? null, attachments));
+
+// ---- attachments ----
+
+/** Keep copies of files the developer picked or dropped, to send with a message. */
+export const attachFiles = (paths: string[]) => ok(commands.attachFiles(paths));
+
+/** Keep a pasted file (base64 contents). */
+export const attachData = (name: string, data: string) => ok(commands.attachData(name, data));
+
+/** Forget files attached to a message that was never sent. */
+export const discardAttachments = (attachments: Attachment[]) => commands.discardAttachments(attachments);
+
+/** The start of a chat's text or HTML file, for its preview. */
+export const readAttachmentText = (path: string) => ok(commands.readAttachmentText(path));
 
 export const chatStop = (agentId: string) => commands.chatStop(agentId);
 
@@ -252,4 +268,11 @@ export const onPowerState = (cb: (s: PowerState) => void): Promise<UnlistenFn> =
 export async function pickFolder(title: string): Promise<string | null> {
   const chosen = await openDialog({ directory: true, multiple: false, title });
   return typeof chosen === "string" ? chosen : null;
+}
+
+/** Ask for files to attach with the macOS picker; none if the developer cancels. */
+export async function pickFiles(title: string): Promise<string[]> {
+  const chosen = await openDialog({ multiple: true, directory: false, title });
+  if (Array.isArray(chosen)) return chosen;
+  return typeof chosen === "string" ? [chosen] : [];
 }

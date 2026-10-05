@@ -1,5 +1,6 @@
 // Captures every screen for visual review: `npx playwright test e2e/capture.spec.ts`.
 // Images land in e2e/screenshots (ignored by git).
+import { fakeEmit } from "./fakeBackend";
 import { expect, goTo, openApp, test } from "./fixtures";
 import { defaultScenario } from "./scenario";
 
@@ -42,6 +43,25 @@ test("capture every screen", async ({ page }) => {
   await page.getByRole("button", { name: "Talk to FRIDAY" }).click();
   await expect(page.locator("pre code")).toBeVisible();
   await page.screenshot(shot("02-conversation"));
+  await page.getByRole("log", { name: "Conversation with FRIDAY" }).getByText("Made in this turn").scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  await page.screenshot(shot("02b-conversation-outputs"));
+  await page.getByRole("region", { name: "Question from FRIDAY" }).getByRole("button", { name: "Everything" }).click();
+  await page.getByRole("button", { name: "Attach files" }).click();
+  await expect(page.getByRole("list", { name: "Attached files" }).getByRole("listitem")).toHaveCount(2);
+  await page.screenshot(shot("02c-conversation-attaching"));
+  const area = await page.locator(".message-area").boundingBox();
+  if (area) {
+    await fakeEmit(page, "tauri://drag-enter", {
+      paths: ["/Users/dev/Desktop/flow.png"],
+      position: { x: area.x + area.width / 2, y: area.y + area.height / 2 },
+    });
+    await expect(page.getByText("Drop files to attach them to your message to FRIDAY")).toBeVisible();
+    await page.screenshot(shot("02d-conversation-dropping"));
+    await fakeEmit(page, "tauri://drag-leave", null);
+  }
+  await page.getByRole("button", { name: "Remove mockup.png" }).click();
+  await page.getByRole("button", { name: "Remove brief.md" }).click();
 
   await goTo(page, "Environment");
   await expect(page.locator(".env-canvas canvas")).toBeVisible();

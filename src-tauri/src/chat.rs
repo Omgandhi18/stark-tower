@@ -1,4 +1,5 @@
 use crate::agents::AgentStatus;
+use crate::attachments::{self, Attachment};
 use crate::config::EngineConfig;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -57,8 +58,44 @@ pub struct ChatSession {
     gen: u64,
 }
 
+/// What the developer sends in one turn: words, and the files attached to them.
+#[derive(Debug, Clone, Default)]
+pub struct UserTurn {
+    pub text: String,
+    pub attachments: Vec<Attachment>,
+}
+
+impl UserTurn {
+    /// A turn of words alone (a teammate's message, a nudge, a delegation).
+    pub fn plain(text: &str) -> UserTurn {
+        UserTurn { text: text.to_string(), attachments: Vec::new() }
+    }
+
+    /// The words, then a line naming each attached file so the agent's tools can open it.
+    pub fn text_with_files(&self) -> String {
+        format!("{}{}", self.text, attachments::note_for_agent(&self.attachments))
+    }
+}
+
+/// Claude Code's message content: the words (naming the files), then images and PDFs
+/// inline so it sees them at once. Words alone stay a plain string.
+fn claude_content(turn: &UserTurn) -> serde_json::Value {
+    if turn.attachments.is_empty() {
+        return serde_json::Value::String(turn.text.clone());
+    }
+    let mut blocks = vec![serde_json::json!({ "type": "text", "text": turn.text_with_files() })];
+    for a in &turn.attachments {
+        if let Some((mime, data)) = attachments::image_data(a) {
+            blocks.push(serde_json::json!({ "type": "image", "source": { "type": "base64", "media_type": mime, "data": data } }));
+        } else if let Some(data) = attachments::pdf_data(a) {
+            blocks.push(serde_json::json!({ "type": "document", "source": { "type": "base64", "media_type": "application/pdf", "data": data } }));
+        }
+    }
+    serde_json::Value::Array(blocks)
+}
+
 /// An adapter's way to hand its provider a new user turn.
-pub(crate) type TurnSender = Box<dyn Fn(&str) -> Result<(), String> + Send>;
+pub(crate) type TurnSender = Box<dyn Fn(&UserTurn) -> Result<(), String> + Send>;
 
 /// How a session takes the developer's next message.
 pub(crate) enum Input {
@@ -70,14 +107,14 @@ pub(crate) enum Input {
 
 impl ChatSession {
     /// Hand the agent a new user turn.
-    pub(crate) fn send_turn(&mut self, text: &str) -> Result<(), String> {
+    pub(crate) fn send_turn(&mut self, turn: &UserTurn) -> Result<(), String> {
         match &mut self.input {
             Input::StreamJson(stdin) => {
-                let msg = serde_json::json!({ "type": "user", "message": { "role": "user", "content": text } });
+                let msg = serde_json::json!({ "type": "user", "message": { "role": "user", "content": claude_content(turn) } });
                 stdin.write_all(format!("{msg}\n").as_bytes()).map_err(|e| e.to_string())?;
                 stdin.flush().map_err(|e| e.to_string())
             }
-            Input::Turns(start) => start(text),
+            Input::Turns(start) => start(turn),
         }
     }
 }
@@ -144,6 +181,9 @@ pub struct ChatEvent {
     /// The task this belongs to, if the agent is working on one.
     #[serde(rename = "taskId", skip_serializing_if = "Option::is_none")]
     pub task_id: Option<String>,
+    /// Files with the message (an "artifact": what the agent made or shared).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
 }
 
 /// Where a session's output belongs.
@@ -198,9 +238,25 @@ pub(crate) fn record_in(
     tool: Option<&str>,
     detail: Option<&str>,
 ) {
+    record_files_in(app, sink, agent_id, kind, role, text, tool, detail, &[]);
+}
+
+/// [`record_in`], with files.
+#[allow(clippy::too_many_arguments)]
+fn record_files_in(
+    app: &tauri::AppHandle,
+    sink: &Sink,
+    agent_id: &str,
+    kind: &str,
+    role: &str,
+    text: Option<&str>,
+    tool: Option<&str>,
+    detail: Option<&str>,
+    files: &[Attachment],
+) {
     let conversation = sink.conversation_for(app, agent_id);
     let message_id = match (app.try_state::<crate::AppState>(), conversation) {
-        (Some(state), Some(conv)) => state.ledger.add_message_to(conv, agent_id, role, text, tool, detail),
+        (Some(state), Some(conv)) => state.ledger.add_message_with(conv, agent_id, role, text, tool, detail, files),
         _ => None,
     };
     emit(
@@ -215,8 +271,31 @@ pub(crate) fn record_in(
             message_id,
             conversation_id: conversation,
             task_id: sink.task_for(app, agent_id),
+            attachments: files.to_vec(),
         },
     );
+}
+
+/// What an agent made ("made", noticed when its turn ended) or shared on purpose
+/// ("shared"), posted in its chat as files to preview.
+pub(crate) fn post_files(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, how: &str, caption: Option<&str>, files: &[Attachment]) {
+    if !files.is_empty() {
+        record_files_in(app, sink, agent_id, "artifact", "artifact", caption, None, Some(how), files);
+    }
+}
+
+/// Keep copies of files an agent made, for its chat. Files that can't be kept are named in `missed`.
+pub(crate) fn keep_copies(app: &tauri::AppHandle, paths: &[std::path::PathBuf]) -> (Vec<Attachment>, Vec<String>) {
+    let root = attachments::root(app);
+    let mut kept = Vec::new();
+    let mut missed = Vec::new();
+    for path in paths {
+        match attachments::store_copy(&root, path) {
+            Ok(a) => kept.push(a),
+            Err(why) => missed.push(why),
+        }
+    }
+    (kept, missed)
 }
 
 /// A system line in the agent's chat: saved and shown.
@@ -245,6 +324,7 @@ pub(crate) fn simple_in(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, kin
                 app.try_state::<crate::AppState>().and_then(|s| s.ledger.current_conversation(agent_id))
             }),
             task_id: sink.task_for(app, agent_id),
+            attachments: Vec::new(),
         },
     );
 }
@@ -253,17 +333,18 @@ pub(crate) fn simple(app: &tauri::AppHandle, agent_id: &str, kind: &str, text: O
     simple_in(app, &Sink::chat(), agent_id, kind, text);
 }
 
-/// Save a developer message in the agent's active conversation and send it,
-/// starting the session in `cwd` if needed. Returns the stored message's id.
-pub fn send_user_turn(app: &tauri::AppHandle, agent_id: &str, text: &str, cwd: &str) -> Result<Option<i64>, String> {
+/// Save a developer message (and its files) in the agent's active conversation and
+/// send it, starting the session in `cwd` if needed. Returns the stored message's id.
+pub fn send_user_turn(app: &tauri::AppHandle, agent_id: &str, text: &str, files: &[Attachment], cwd: &str) -> Result<Option<i64>, String> {
     let state = app.state::<crate::AppState>();
     state.workdirs.lock().unwrap().insert(agent_id.to_string(), cwd.to_string());
     let e = state.ledger.record(agent_id, "chat", &truncate(text, 80), 1);
     let _ = app.emit("ledger://entry", e);
-    let message_id = state.ledger.add_message(agent_id, "user", Some(text), None, None);
+    let conversation = state.ledger.active_conversation(agent_id);
+    let message_id = state.ledger.add_message_with(conversation, agent_id, "user", Some(text), None, None, files);
     let _ = app.emit("conversations://changed", ()); // a title/order may have changed
     let sock = state.sock_path.clone();
-    send(app, agent_id, text, cwd, &sock)?;
+    send(app, agent_id, &UserTurn { text: text.to_string(), attachments: files.to_vec() }, cwd, &sock)?;
     Ok(message_id)
 }
 
@@ -347,7 +428,7 @@ pub fn resolve_program(cmd: &str) -> Option<String> {
 fn steer(app: &tauri::AppHandle, agent_id: &str, text: &str) {
     if let Some(state) = app.try_state::<crate::AppState>() {
         if let Some(s) = state.chat.sessions.lock().unwrap().get_mut(agent_id) {
-            let _ = s.send_turn(text);
+            let _ = s.send_turn(&UserTurn::plain(text));
         }
     }
 }
@@ -443,6 +524,8 @@ pub(crate) struct Launch {
     /// The agent may start temporary helpers, and on which model ("" = the provider's choice).
     pub helpers: bool,
     pub helper_model: String,
+    /// Starkline's attachments folder, which the agent may read.
+    pub shared_dir: String,
 }
 
 /// Gather an agent's launch settings; fails when its provider's CLI isn't installed.
@@ -472,6 +555,7 @@ pub(crate) fn launch_for(app: &tauri::AppHandle, agent_id: &str, cwd: &str, resu
         node: resolve_program("node").unwrap_or_else(|| "node".into()),
         helpers,
         helper_model,
+        shared_dir: attachments::root(app).to_string_lossy().into_owned(),
         engine,
     })
 }
@@ -560,6 +644,12 @@ fn build_headless(launch: &Launch) -> Command {
             .iter()
             .map(|s| s.to_string()),
         );
+
+        // Attached files live in Starkline's folder: Claude Code may read them there.
+        if !launch.shared_dir.is_empty() {
+            args.push("--add-dir".into());
+            args.push(launch.shared_dir.clone());
+        }
 
         // Resume the stored session so the conversation continues with full
         // context; the prior session already carries the system prompt.
@@ -687,6 +777,7 @@ pub(crate) fn session_ready(app: &tauri::AppHandle, agent_id: &str, sink: &Sink,
             message_id: None,
             conversation_id: sink.conversation_for(app, agent_id),
             task_id: sink.task_for(app, agent_id),
+            attachments: Vec::new(),
         },
     );
     crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
@@ -695,6 +786,7 @@ pub(crate) fn session_ready(app: &tauri::AppHandle, agent_id: &str, sink: &Sink,
 /// The agent said something.
 pub(crate) fn said(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, text: &str) {
     crate::pty::emit_status(app, agent_id, AgentStatus::Working);
+    crate::outputs::said(agent_id, text);
     if !text.trim().is_empty() {
         record_in(app, sink, agent_id, "text", "agent", Some(text), None, None);
     }
@@ -715,6 +807,12 @@ pub(crate) fn tool_called(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, t
     record_in(app, sink, agent_id, "tool", "tool", None, Some(name), Some(&detail));
     let task = sink.task_for(app, agent_id);
     crate::tasks::tool_use(app, agent_id, task.as_deref(), tool_use_id, name, input);
+    if matches!(name, "Write" | "Edit" | "MultiEdit" | "NotebookEdit") {
+        let path = ["file_path", "notebook_path"].iter().find_map(|k| input.get(*k).and_then(|v| v.as_str())).unwrap_or("");
+        if !path.is_empty() {
+            crate::outputs::wrote(agent_id, path);
+        }
+    }
     // Runaway loop guard for headless sessions: trip if the same call repeats too often.
     let sig = format!("{name}|{detail}");
     if crate::breaker::is_runaway(crate::breaker::note_tool_call(agent_id, &sig)) {
@@ -738,6 +836,14 @@ pub(crate) struct TurnUsage {
 /// The agent's turn ended: the transcript, the HUD, the loop guard, delegation
 /// and the task engine all hear about it.
 pub(crate) fn turn_finished(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, text: Option<String>, usage: TurnUsage) {
+    let (made, more) = crate::outputs::finished(agent_id);
+    // Only files the agent may read without asking: nothing reaches the chat past the gate.
+    let made: Vec<_> = made.into_iter().filter(|p| crate::bridge::may_read_freely(app, agent_id, p)).collect();
+    if !made.is_empty() {
+        let (kept, _) = keep_copies(app, &made);
+        let caption = (more > 0).then(|| format!("And {more} more {} in the folder.", if more == 1 { "file" } else { "files" }));
+        post_files(app, sink, agent_id, "made", caption.as_deref(), &kept);
+    }
     emit(
         app,
         ChatEvent {
@@ -750,6 +856,7 @@ pub(crate) fn turn_finished(app: &tauri::AppHandle, sink: &Sink, agent_id: &str,
             message_id: None,
             conversation_id: sink.conversation_for(app, agent_id),
             task_id: sink.task_for(app, agent_id),
+            attachments: Vec::new(),
         },
     );
     let _ = app.emit(
@@ -993,7 +1100,7 @@ fn start_claude(app: &tauri::AppHandle, launch: &Launch, gen: u64) -> Result<(Ch
 pub fn send(
     app: &tauri::AppHandle,
     agent_id: &str,
-    text: &str,
+    turn: &UserTurn,
     cwd: &str,
     sock_path: &str,
 ) -> Result<(), String> {
@@ -1017,16 +1124,13 @@ pub fn send(
 
     // The orchestrator gets the current team + project map prepended to each turn,
     // so a renamed/added agent or project is reflected immediately (see §01.8).
-    let content = if crate::prompts::agent_is_orchestrator(app, agent_id) {
+    let mut content = turn.clone();
+    if crate::prompts::agent_is_orchestrator(app, agent_id) {
         let ctx = crate::prompts::orchestrator_turn_context(app, agent_id);
-        if ctx.is_empty() {
-            text.to_string()
-        } else {
-            format!("{ctx}\n\n{text}")
+        if !ctx.is_empty() {
+            content.text = format!("{ctx}\n\n{}", turn.text);
         }
-    } else {
-        text.to_string()
-    };
+    }
     let state = app.state::<crate::AppState>();
     let mut map = state.chat.sessions.lock().unwrap();
     let s = map
@@ -1034,6 +1138,7 @@ pub fn send(
         .ok_or_else(|| format!("no chat session for {agent_id}"))?;
     s.send_turn(&content)?;
     drop(map);
+    crate::outputs::started(agent_id, &Sink::chat(), cwd);
 
     crate::pty::emit_status(app, agent_id, AgentStatus::Thinking);
     Ok(())
@@ -1093,6 +1198,7 @@ fn run_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, cwd: &str, sin
     // Delegated workers also get their skill kit + the ask_human bridge, so
     // their review gates work even when JARVIS delegated the task.
     let launch = launch_for(app, agent_id, cwd, None)?;
+    crate::outputs::started(agent_id, sink, cwd);
     match launch.engine.kind.as_str() {
         "codex" => return crate::codex::run_once(app, &launch, task, sink),
         "opencode" => return crate::opencode::run_once(app, &launch, task, sink),

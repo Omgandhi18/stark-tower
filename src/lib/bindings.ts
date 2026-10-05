@@ -51,6 +51,45 @@ async deleteConversation(conversationId: number) : Promise<Result<null, string>>
 }
 },
 /**
+ * Keep copies of files the developer picked or dropped, to send with a message.
+ */
+async attachFiles(paths: string[]) : Promise<Result<Attachment[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("attach_files", { paths }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Keep a file the developer pasted (a screenshot, say), sent as base64.
+ */
+async attachData(name: string, data: string) : Promise<Result<Attachment, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("attach_data", { name, data }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Forget files attached to a message that was never sent (their chip was removed).
+ */
+async discardAttachments(attachments: Attachment[]) : Promise<void> {
+    await TAURI_INVOKE("discard_attachments", { attachments });
+},
+/**
+ * The start of a chat's text or HTML file, for its preview.
+ */
+async readAttachmentText(path: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("read_attachment_text", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Where an agent's tone dials start: a built-in agent's character, else neutral.
  */
 async defaultTone(agentId: string) : Promise<Tone> {
@@ -60,9 +99,9 @@ async defaultTone(agentId: string) : Promise<Tone> {
  * Hand work to an agent as a task: it starts in a conversation of its own, or
  * waits its turn if the agent is busy.
  */
-async startTask(agentId: string, prompt: string, dir: string | null) : Promise<Result<Task, string>> {
+async startTask(agentId: string, prompt: string, dir: string | null, attachments: Attachment[]) : Promise<Result<Task, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("start_task", { agentId, prompt, dir }) };
+    return { status: "ok", data: await TAURI_INVOKE("start_task", { agentId, prompt, dir, attachments }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -355,9 +394,9 @@ async requestAssist(from: string, to: string, note: string, cols: number, rows: 
  * Chat with an agent (headless Claude Code). Starts a session in `dir` (or the
  * agent's recorded workdir / current project) on first message.
  */
-async chatSend(agentId: string, text: string, dir: string | null) : Promise<Result<number | null, string>> {
+async chatSend(agentId: string, text: string, dir: string | null, attachments: Attachment[]) : Promise<Result<number | null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("chat_send", { agentId, text, dir }) };
+    return { status: "ok", data: await TAURI_INVOKE("chat_send", { agentId, text, dir, attachments }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -589,6 +628,31 @@ theme?: string;
  * theme ("own"), or one theme's outfits (one of [`THEMES`]).
  */
 outfits?: string; engines: EngineConfig[]; agents: AgentConfig[] }
+export type Attachment = { 
+/**
+ * Where the file is kept: Starkline's copy.
+ */
+path: string; name: string; 
+/**
+ * Its media type, e.g. "image/png".
+ */
+mime: string; kind: AttachmentKind; size: number }
+/**
+ * How a file previews in the chat.
+ */
+export type AttachmentKind = "image" | "video" | "audio" | "pdf" | "html" | 
+/**
+ * Markdown documents: shown rendered.
+ */
+"markdown" | 
+/**
+ * Plain text, data and source code.
+ */
+"text" | 
+/**
+ * Office and iWork documents, e-books: opened in their own app.
+ */
+"document" | "file"
 /**
  * How an engine authenticates. `cli-login` = whatever the CLI is already logged
  * into on this machine; `api-key-env` = inject `env` vars (e.g. an API key) into
@@ -946,7 +1010,11 @@ detail: string | null }
 /**
  * One persisted chat turn — enough to rebuild the transcript UI on reopen.
  */
-export type StoredMessage = { id: number; ts: number; role: string; text?: string | null; tool?: string | null; detail?: string | null }
+export type StoredMessage = { id: number; ts: number; role: string; text?: string | null; tool?: string | null; detail?: string | null; 
+/**
+ * Files with the message: what the developer attached, or what the agent made or shared.
+ */
+attachments: Attachment[] }
 export type Support = "yes" | 
 /**
  * Works in part (no built-in provider is limited today, but the interface shows it).

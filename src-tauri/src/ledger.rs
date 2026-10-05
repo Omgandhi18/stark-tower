@@ -1,3 +1,4 @@
+use crate::attachments::Attachment;
 use rusqlite::Connection;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -64,6 +65,34 @@ pub struct StoredMessage {
     pub tool: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// Files with the message: what the developer attached, or what the agent made or shared.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
+}
+
+/// Attachments as stored in a column: a JSON list, or nothing.
+fn attachments_column(attachments: &[Attachment]) -> String {
+    if attachments.is_empty() {
+        String::new()
+    } else {
+        serde_json::to_string(attachments).unwrap_or_default()
+    }
+}
+
+fn attachments_from(column: Option<String>) -> Vec<Attachment> {
+    column.filter(|c| !c.is_empty()).and_then(|c| serde_json::from_str(&c).ok()).unwrap_or_default()
+}
+
+fn stored_message(r: &rusqlite::Row) -> rusqlite::Result<StoredMessage> {
+    Ok(StoredMessage {
+        id: r.get(0)?,
+        ts: r.get(1)?,
+        role: r.get(2)?,
+        text: r.get(3)?,
+        tool: r.get(4)?,
+        detail: r.get(5)?,
+        attachments: attachments_from(r.get(6)?),
+    })
 }
 
 /// A unit of work with an accountable owner. The developer starts one from Work;
@@ -414,6 +443,8 @@ impl Ledger {
         // Migrate: tasks remember their folder, conversation, origin, branch,
         // timing and plan progress (older databases gain them empty).
         ensure_column(&conn, "tasks", "cwd", "TEXT NOT NULL DEFAULT ''")?;
+        // Files attached to the request a task started from (JSON).
+        ensure_column(&conn, "tasks", "attachments", "TEXT NOT NULL DEFAULT ''")?;
         ensure_column(&conn, "tasks", "conversation_id", "INTEGER")?;
         ensure_column(&conn, "tasks", "parent_id", "TEXT")?;
         ensure_column(&conn, "tasks", "requested_by", "TEXT NOT NULL DEFAULT ''")?;
@@ -565,6 +596,8 @@ impl Ledger {
             "CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, id)",
             [],
         )?;
+        // Files with a message (JSON): attached by the developer, or made or shared by the agent.
+        ensure_column(&conn, "messages", "attachments", "TEXT NOT NULL DEFAULT ''")?;
         // Bugs agents report about the app, for the maintenance agent to fix.
         conn.execute(
             "CREATE TABLE IF NOT EXISTS bugs (
@@ -726,6 +759,38 @@ impl Ledger {
             Ok(it) => it.filter_map(|x| x.ok()).collect(),
             Err(_) => vec![],
         }
+    }
+
+    /// Remember the files a task's request came with, for when it starts.
+    pub fn set_task_attachments(&self, id: &str, attachments: &[Attachment]) {
+        let conn = self.conn.lock().unwrap();
+        let _ = conn.execute("UPDATE tasks SET attachments = ?2 WHERE id = ?1", rusqlite::params![id, attachments_column(attachments)]);
+    }
+
+    /// The files a task's request came with.
+    pub fn task_attachments(&self, id: &str) -> Vec<Attachment> {
+        let conn = self.conn.lock().unwrap();
+        attachments_from(conn.query_row("SELECT attachments FROM tasks WHERE id = ?1", [id], |r| r.get(0)).ok())
+    }
+
+    /// Whether any message or task still refers to a kept file.
+    pub fn attachment_in_use(&self, path: &str) -> bool {
+        // Paths are stored inside JSON, so look for the path as JSON writes it.
+        let needle = format!("\"path\":{}", serde_json::to_string(path).unwrap_or_default());
+        let conn = self.conn.lock().unwrap();
+        let found = |table: &str| {
+            conn.query_row(&format!("SELECT 1 FROM {table} WHERE instr(attachments, ?1) > 0 LIMIT 1"), [&needle], |_| Ok(()))
+                .is_ok()
+        };
+        found("messages") || found("tasks")
+    }
+
+    /// Every file in a conversation's messages.
+    pub fn conversation_attachments(&self, conv: i64) -> Vec<Attachment> {
+        let conn = self.conn.lock().unwrap();
+        let Ok(mut stmt) = conn.prepare("SELECT attachments FROM messages WHERE conversation_id = ?1 AND attachments != ''") else { return vec![] };
+        let Ok(rows) = stmt.query_map([conv], |r| r.get::<_, Option<String>>(0)) else { return vec![] };
+        rows.filter_map(|r| r.ok()).flat_map(attachments_from).collect()
     }
 
     /// Delete a conversation for good: its messages go, and tasks that ran in it keep their
@@ -1261,14 +1326,30 @@ impl Ledger {
         tool: Option<&str>,
         detail: Option<&str>,
     ) -> Option<i64> {
+        self.add_message_with(conv, agent_id, role, text, tool, detail, &[])
+    }
+
+    /// Append a chat message with files to a conversation. Returns the stored message's id.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_message_with(
+        &self,
+        conv: i64,
+        agent_id: &str,
+        role: &str,
+        text: Option<&str>,
+        tool: Option<&str>,
+        detail: Option<&str>,
+        attachments: &[Attachment],
+    ) -> Option<i64> {
         let ts = now_ms();
+        let files = attachments_column(attachments);
         let id = {
             let conn = self.conn.lock().unwrap();
             let inserted = conn
                 .execute(
-                    "INSERT INTO messages (ts, agent_id, role, text, tool, detail, conversation_id) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    rusqlite::params![ts, agent_id, role, text, tool, detail, conv],
+                    "INSERT INTO messages (ts, agent_id, role, text, tool, detail, conversation_id, attachments) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    rusqlite::params![ts, agent_id, role, text, tool, detail, conv, files],
                 )
                 .ok()
                 .map(|_| conn.last_insert_rowid());
@@ -1298,22 +1379,13 @@ impl Ledger {
     pub fn conversation_messages(&self, conv: i64, limit: i64) -> Vec<StoredMessage> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = match conn.prepare(
-            "SELECT id, ts, role, text, tool, detail FROM messages \
+            "SELECT id, ts, role, text, tool, detail, attachments FROM messages \
              WHERE conversation_id = ?1 ORDER BY id DESC LIMIT ?2",
         ) {
             Ok(s) => s,
             Err(_) => return vec![],
         };
-        let rows = stmt.query_map(rusqlite::params![conv, limit], |r| {
-            Ok(StoredMessage {
-                id: r.get(0)?,
-                ts: r.get(1)?,
-                role: r.get(2)?,
-                text: r.get(3)?,
-                tool: r.get(4)?,
-                detail: r.get(5)?,
-            })
-        });
+        let rows = stmt.query_map(rusqlite::params![conv, limit], stored_message);
         let mut v: Vec<StoredMessage> = match rows {
             Ok(it) => it.filter_map(|x| x.ok()).collect(),
             Err(_) => vec![],
@@ -1337,22 +1409,13 @@ impl Ledger {
             .ok()
             .flatten();
         let mut stmt = match conn.prepare(
-            "SELECT id, ts, role, text, tool, detail FROM messages \
+            "SELECT id, ts, role, text, tool, detail, attachments FROM messages \
              WHERE conversation_id = ?1 AND ts >= ?2 AND (?3 IS NULL OR ts < ?3) ORDER BY id DESC LIMIT ?4",
         ) {
             Ok(s) => s,
             Err(_) => return vec![],
         };
-        let rows = stmt.query_map(rusqlite::params![conv, from, until, limit], |r| {
-            Ok(StoredMessage {
-                id: r.get(0)?,
-                ts: r.get(1)?,
-                role: r.get(2)?,
-                text: r.get(3)?,
-                tool: r.get(4)?,
-                detail: r.get(5)?,
-            })
-        });
+        let rows = stmt.query_map(rusqlite::params![conv, from, until, limit], stored_message);
         let mut v: Vec<StoredMessage> = match rows {
             Ok(it) => it.filter_map(|x| x.ok()).collect(),
             Err(_) => vec![],
@@ -1535,6 +1598,42 @@ mod tests {
         l.set_task_status("t1", "reviewed", None);
         assert!(l.task_for_conversation(conv).is_none(), "nor do reviewed ones");
         assert!(l.task("t1").unwrap().finished.is_some(), "reviewed is a finished state");
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn messages_and_task_requests_keep_their_files() {
+        let (l, p) = temp_db();
+        let file = |name: &str| Attachment {
+            path: format!("/kept/{name}"),
+            name: name.into(),
+            mime: "image/png".into(),
+            kind: crate::attachments::AttachmentKind::Image,
+            size: 3,
+        };
+        let conv = l.create_conversation("jarvis", "/work/app", "Chat");
+        l.add_message_with(conv, "jarvis", "user", Some("look"), None, None, &[file("a.png")]);
+        l.add_message_to(conv, "jarvis", "agent", Some("seen"), None, None);
+        let messages = l.conversation_messages(conv, 10);
+        assert_eq!(messages[0].attachments, vec![file("a.png")]);
+        assert!(messages[1].attachments.is_empty());
+        assert_eq!(l.conversation_attachments(conv), vec![file("a.png")]);
+
+        l.create_task(&NewTask {
+            id: "t1",
+            title: "t1",
+            assignee: "jarvis",
+            status: "todo",
+            cwd: "/work/app",
+            parent_id: None,
+            requested_by: "you",
+            prompt: "look",
+        });
+        assert!(l.task_attachments("t1").is_empty());
+        l.set_task_attachments("t1", &[file("b.png")]);
+        assert_eq!(l.task_attachments("t1"), vec![file("b.png")]);
+        assert!(l.attachment_in_use("/kept/a.png") && l.attachment_in_use("/kept/b.png"));
+        assert!(!l.attachment_in_use("/kept/c.png"));
         std::fs::remove_file(&p).ok();
     }
 

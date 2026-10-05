@@ -5,19 +5,23 @@ import { startTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { useAgents, selectOrchestrator } from "../../stores/agents";
 import { useNavigation } from "../../stores/navigation";
+import { AttachButton, AttachmentTray } from "../attachments/AttachmentTray";
+import type { AttachmentDraft } from "../attachments/useAttachmentDraft";
 import { mentionSuggestions, routeMessage } from "./mentions";
 
 interface ComposerProps {
   /** The project Work is filtered to: messages run there. */
   project: string | null;
+  /** Files attached to the request (Work takes dropped ones too). */
+  attachments: AttachmentDraft;
 }
 
 type Notice =
   | { kind: "started" | "queued"; taskId: string; name: string }
   | { kind: "error"; text: string };
 
-/** Ask the orchestrator, or @mention any agent. ⌘K focuses it from anywhere on Work. */
-export default function Composer({ project }: ComposerProps) {
+/** Ask the orchestrator, or @mention any agent, with files attached if you like. ⌘K focuses it from anywhere on Work. */
+export default function Composer({ project, attachments }: ComposerProps) {
   const agents = useAgents((s) => s.agents);
   const orchestrator = useAgents(selectOrchestrator);
   const openTask = useNavigation((s) => s.openTask);
@@ -66,9 +70,10 @@ export default function Composer({ project }: ComposerProps) {
     setNotice(null);
     const name = target?.name ?? routing.agentId;
     try {
-      // Work handed over here becomes a task with its own conversation.
-      const task = await startTask(routing.agentId, routing.message, project ?? undefined);
+      // Work handed over here becomes a task, in that project's chat with the agent.
+      const task = await startTask(routing.agentId, routing.message, project ?? undefined, [...attachments.files]);
       setText("");
+      attachments.sent();
       setNotice({ kind: task.status === "todo" ? "queued" : "started", taskId: task.id, name });
     } catch (err) {
       setNotice({ kind: "error", text: errorMessage(err, `The task couldn't be handed to ${name}.`) });
@@ -119,10 +124,17 @@ export default function Composer({ project }: ComposerProps) {
             if (notice?.kind === "error") setNotice(null);
           }}
           onKeyDown={onKeyDown}
+          onPaste={(e) => {
+            const pasted = Array.from(e.clipboardData.files);
+            if (!pasted.length) return;
+            e.preventDefault();
+            attachments.addBlobs(pasted);
+          }}
         />
+        <AttachButton draft={attachments} />
         <Kbd>⌘K</Kbd>
         <span className="composer-divider" aria-hidden />
-        <IconButton icon={SendHorizontal} label="Send" type="submit" disabled={sending || !text.trim()} />
+        <IconButton icon={SendHorizontal} label="Send" type="submit" disabled={sending || !text.trim() || attachments.adding > 0} />
         {showSuggestions && (
           <ul id={listId} role="listbox" className="mention-list" aria-label="Agents">
             {suggestions.map((a, i) => (
@@ -148,6 +160,7 @@ export default function Composer({ project }: ComposerProps) {
           </ul>
         )}
       </form>
+      <AttachmentTray draft={attachments} />
       <p className="composer-notice" role="status" aria-live="polite">
         {(notice?.kind === "started" || notice?.kind === "queued") && (
           <>

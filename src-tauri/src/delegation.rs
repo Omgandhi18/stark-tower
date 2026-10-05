@@ -121,7 +121,7 @@ fn inject_user_turn(app: &tauri::AppHandle, agent_id: &str, text: &str) -> bool 
     let Some(state) = app.try_state::<crate::AppState>() else { return false };
     let mut map = state.chat.sessions.lock().unwrap();
     let Some(s) = map.get_mut(agent_id) else { return false };
-    if s.send_turn(text).is_ok() {
+    if s.send_turn(&crate::chat::UserTurn::plain(text)).is_ok() {
         drop(map);
         crate::pty::emit_status(app, agent_id, AgentStatus::Thinking);
         true

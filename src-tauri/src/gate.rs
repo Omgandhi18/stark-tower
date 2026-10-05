@@ -193,6 +193,8 @@ pub struct Context {
     pub local_bins: HashSet<String>,
     /// Starkline's own policy and bridge files: agents never change these on their own.
     pub protected: Vec<PathBuf>,
+    /// Folders the developer shares with agents (chat attachments): reading them is automatic.
+    pub shared: Vec<PathBuf>,
 }
 
 impl Context {
@@ -201,12 +203,18 @@ impl Context {
         let local_bins = std::fs::read_dir(project.join("node_modules/.bin"))
             .map(|dir| dir.filter_map(|e| e.ok()).filter_map(|e| e.file_name().into_string().ok()).collect())
             .unwrap_or_default();
-        Context { project, home: PathBuf::from(std::env::var("HOME").unwrap_or_default()), local_bins, protected: Vec::new() }
+        Context { project, home: PathBuf::from(std::env::var("HOME").unwrap_or_default()), local_bins, protected: Vec::new(), shared: Vec::new() }
     }
 
     /// Also hold these folders back from agents, wherever they are.
     pub fn protecting(mut self, paths: impl IntoIterator<Item = PathBuf>) -> Context {
         self.protected.extend(paths.into_iter().map(|p| normalize(&p)));
+        self
+    }
+
+    /// Let agents read these folders freely (writing to them is judged as before).
+    pub fn sharing(mut self, paths: impl IntoIterator<Item = PathBuf>) -> Context {
+        self.shared.extend(paths.into_iter().map(|p| normalize(&p)));
         self
     }
 }
@@ -709,6 +717,9 @@ fn check_paths(paths: &[String], access: Access, cwd: &Path, ctx: &Context) -> A
                 Rule::Safeguards,
                 format!("It changes {shown}, part of Starkline's own safety checks and settings."),
             ));
+            continue;
+        }
+        if access == Access::Read && ctx.shared.iter().any(|p| path.starts_with(p)) {
             continue;
         }
         let found = match (place_of(&path, ctx), access) {
@@ -1331,8 +1342,21 @@ mod tests {
             home: PathBuf::from("/Users/dev"),
             local_bins: ["tsc", "vitest", "eslint", "playwright"].into_iter().map(String::from).collect(),
             protected: Vec::new(),
+            shared: Vec::new(),
         }
         .protecting([PathBuf::from("/Users/dev/app/src-tauri/mcp"), PathBuf::from("/Users/dev/Library/Application Support/starkline")])
+        .sharing([PathBuf::from("/Users/dev/Library/Application Support/starkline/attachments")])
+    }
+
+    #[test]
+    fn attachments_are_shared_for_reading_only() {
+        let c = ctx();
+        let file = |path: &str| serde_json::json!({ "file_path": path });
+        let attached = file("/Users/dev/Library/Application Support/starkline/attachments/ab12/report.pdf");
+        assert_eq!(assess("Read", &attached, &c).tier, Tier::Automatic);
+        assert_eq!(assess("Write", &attached, &c).rule, Rule::Safeguards, "agents can't change what was attached");
+        let policy_file = file("/Users/dev/Library/Application Support/starkline/config.json");
+        assert_eq!(assess("Read", &policy_file, &c).rule, Rule::OutsideProject, "the rest of the app's data stays closed");
     }
 
     fn tier(cmd: &str) -> Tier {

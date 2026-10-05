@@ -61,8 +61,18 @@ fn sandbox() -> Value {
     json!({ "type": "workspaceWrite", "writableRoots": [], "networkAccess": false })
 }
 
-fn text_input(text: &str) -> Value {
-    json!([{ "type": "text", "text": text, "text_elements": [] }])
+/// A developer turn as Codex input: the words (naming the files), images as images,
+/// and other files as mentions Codex can open.
+fn turn_input(turn: &chat::UserTurn) -> Value {
+    let mut items = vec![json!({ "type": "text", "text": turn.text_with_files(), "text_elements": [] })];
+    for a in &turn.attachments {
+        if crate::attachments::is_inline_image(a) {
+            items.push(json!({ "type": "localImage", "path": a.path }));
+        } else {
+            items.push(json!({ "type": "mention", "name": a.name, "path": a.path }));
+        }
+    }
+    Value::Array(items)
 }
 
 /// Thread settings Codex doesn't keep between runs, so every start and resume sends them.
@@ -320,7 +330,7 @@ impl Codex {
     }
 
     /// Start a turn, or steer the one running.
-    fn send(&self, text: &str) -> Result<(), String> {
+    fn send(&self, turn: &chat::UserTurn) -> Result<(), String> {
         let (thread, active) = {
             let turns = self.turns.lock().unwrap();
             (turns.thread.clone().ok_or("Codex has no thread open.")?, turns.active.clone())
@@ -333,10 +343,10 @@ impl Codex {
             }
         };
         match active {
-            Some(turn) => self.rpc.request_then("turn/steer", json!({ "threadId": thread, "input": text_input(text), "expectedTurnId": turn }), report),
+            Some(running) => self.rpc.request_then("turn/steer", json!({ "threadId": thread, "input": turn_input(turn), "expectedTurnId": running }), report),
             None => self.rpc.request_then(
                 "turn/start",
-                json!({ "threadId": thread, "input": text_input(text), "approvalPolicy": APPROVAL_POLICY, "sandboxPolicy": sandbox() }),
+                json!({ "threadId": thread, "input": turn_input(turn), "approvalPolicy": APPROVAL_POLICY, "sandboxPolicy": sandbox() }),
                 report,
             ),
         }
@@ -485,7 +495,7 @@ pub(crate) fn start_chat(app: &tauri::AppHandle, launch: &Launch, gen: u64) -> R
     };
     codex.turns.lock().unwrap().thread = Some(thread.clone());
     chat::session_ready(app, &launch.agent_id, &codex.sink, Some(&thread), Some(launch.cwd.clone()));
-    Ok((child, Input::Turns(Box::new(move |text| codex.send(text)))))
+    Ok((child, Input::Turns(Box::new(move |turn| codex.send(turn)))))
 }
 
 /// A delegated task on Codex: one turn in a thread of its own, and its final answer.
@@ -504,7 +514,7 @@ pub(crate) fn run_once(app: &tauri::AppHandle, launch: &Launch, task: &str, sink
             turns.finished = Some(tx);
         }
         chat::session_ready(app, &launch.agent_id, sink, None, Some(launch.cwd.clone()));
-        codex.send(task)?;
+        codex.send(&chat::UserTurn::plain(task))?;
         rx.recv().unwrap_or_else(|_| Err("Codex stopped before it finished.".into()))
     })();
     crate::proc::kill_tree(pid);
@@ -580,6 +590,7 @@ pub(crate) mod tests {
             node: chat::resolve_program("node").unwrap_or_else(|| "node".into()),
             helpers: false,
             helper_model: String::new(),
+            shared_dir: String::new(),
         }
     }
 
@@ -621,7 +632,7 @@ pub(crate) mod tests {
         println!("thread: {thread_id}, sandbox before the turn: {}", thread["sandbox"]);
         // Not on Codex's list of known-safe commands, so it has to ask first.
         let prompt = "Run the shell command `node -e \"console.log('starkline-' + 'smoke')\"` and reply with only its output.";
-        let turn = json!({ "threadId": thread_id, "input": text_input(prompt), "approvalPolicy": APPROVAL_POLICY, "sandboxPolicy": sandbox() });
+        let turn = json!({ "threadId": thread_id, "input": turn_input(&chat::UserTurn::plain(prompt)), "approvalPolicy": APPROVAL_POLICY, "sandboxPolicy": sandbox() });
         rpc.request("turn/start", turn, HANDSHAKE_TIMEOUT).unwrap();
 
         let deadline = Instant::now() + Duration::from_secs(240);
@@ -673,6 +684,6 @@ pub(crate) mod tests {
     fn turns_run_sandboxed_and_ask_first() {
         assert_eq!(sandbox()["type"], "workspaceWrite");
         assert_eq!(sandbox()["networkAccess"], false);
-        assert_eq!(text_input("hi")[0]["text"], "hi");
+        assert_eq!(turn_input(&chat::UserTurn::plain("hi"))[0]["text"], "hi");
     }
 }

@@ -6,6 +6,8 @@ export type {
   AgentKind,
   AgentStatus,
   AgentConfig,
+  Attachment,
+  AttachmentKind,
   Tone,
   AppConfig,
   AuthConfig,
@@ -41,7 +43,7 @@ export type {
   Schedule,
 } from "./bindings";
 
-import type { AgentStatus } from "./bindings";
+import type { AgentStatus, Attachment } from "./bindings";
 
 // ---- UI / event-payload types (not command types, so not generated) ----
 
@@ -80,7 +82,7 @@ export interface UpdateStatus {
   url?: string;
 }
 
-export type ChatEventKind = "init" | "text" | "thinking" | "tool" | "result" | "error" | "exit" | "system";
+export type ChatEventKind = "init" | "text" | "thinking" | "tool" | "result" | "error" | "exit" | "system" | "artifact";
 
 export interface ChatEvent {
   agentId: string;
@@ -95,6 +97,8 @@ export interface ChatEvent {
   conversationId?: number;
   /** The task it belongs to, when the agent is on one. */
   taskId?: string;
+  /** Files with it: what the agent made ("made") or shared on purpose ("shared"), named by `detail`. */
+  attachments?: Attachment[];
 }
 
 /** An agent now talks in a different conversation (chat://switched). */

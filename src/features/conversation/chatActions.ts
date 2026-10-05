@@ -2,17 +2,17 @@
 // action updates the shared thread and talks to the backend.
 import { chatSend, chatStop, newChat, openConversation } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
-import type { ReviewRequest } from "../../lib/types";
+import type { Attachment, ReviewRequest } from "../../lib/types";
 import { useAttention } from "../../stores/attention";
 import { selectThread, useChats } from "../../stores/chats";
 
-/** Send a message into the agent's thread. Resolves false (with the reason in the thread) if it failed. */
-export async function sendMessage(agentId: string, text: string, folder: string): Promise<boolean> {
+/** Send a message (and any files) into the agent's thread. Resolves false (with the reason in the thread) if it failed. */
+export async function sendMessage(agentId: string, text: string, folder: string, attachments: Attachment[] = []): Promise<boolean> {
   const chats = useChats.getState();
-  const key = chats.pushUser(agentId, text);
+  const key = chats.pushUser(agentId, text, attachments);
   chats.setPending(agentId, true);
   try {
-    const storedId = await chatSend(agentId, text, folder || undefined);
+    const storedId = await chatSend(agentId, text, folder || undefined, attachments);
     if (storedId !== null) useChats.getState().confirmStored(agentId, key, storedId);
     return true;
   } catch (error) {

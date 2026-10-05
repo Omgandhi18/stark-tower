@@ -229,7 +229,7 @@ fn run(app: &tauri::AppHandle, a: &Automation, scheduled_for: i64, trigger: &str
     let requested_by = requester(a.id);
     let first_note = format!("Scheduled by {}", a.name);
     let origin = crate::tasks::Origin { requested_by: &requested_by, title: Some(&a.name), note: &first_note };
-    let result = match crate::tasks::start_for(app, &a.agent_id, &prompt, Some(a.cwd.clone()), &origin) {
+    let result = match crate::tasks::start_for(app, &a.agent_id, &prompt, Some(a.cwd.clone()), &[], &origin) {
         Ok(task) => state
             .ledger
             .add_automation_run(a.id, scheduled_for, trigger, "running", Some(&task.id), "")

@@ -81,3 +81,26 @@ test("denies when the app can't be reached", async () => {
   const result = await callTool(join(tmpdir(), "no-such-starkline.sock"), "approve", { tool_name: "Bash", input: { command: "npm test" } });
   assert.equal(JSON.parse(result.content[0].text).behavior, "deny");
 });
+
+test("shares files through the app and relays what it says", async () => {
+  const app = await fakeApp(() => ({ result: "Shared 2 files in the chat." }));
+  try {
+    const result = await callTool(app.sock, "share", { paths: ["out/chart.png", "/tmp/demo.mp4", 42], caption: "The new chart" });
+    assert.deepEqual(app.requests, [{ type: "share", agentId: "friday", paths: ["out/chart.png", "/tmp/demo.mp4"], caption: "The new chart", token: TOKEN }]);
+    assert.equal(result.content[0].text, "Shared 2 files in the chat.");
+    assert.equal(result.isError, undefined);
+  } finally {
+    app.close();
+  }
+});
+
+test("reports a share the app refused as an error", async () => {
+  const app = await fakeApp(() => ({ error: "/Users/dev/.ssh/id_ed25519 is outside the project." }));
+  try {
+    const result = await callTool(app.sock, "share", { paths: ["/Users/dev/.ssh/id_ed25519"] });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /outside the project/);
+  } finally {
+    app.close();
+  }
+});

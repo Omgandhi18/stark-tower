@@ -3,9 +3,10 @@
 // and drafts survive switching screens.
 import { create } from "zustand";
 import { activeConversation, getChat } from "../lib/api";
-import type { ChatEvent } from "../lib/types";
+import type { Attachment, ChatEvent } from "../lib/types";
 
-export type MessageRole = "user" | "agent" | "tool" | "thinking" | "error" | "system";
+/** "artifact": files an agent made or shared (`detail` says which). */
+export type MessageRole = "user" | "agent" | "tool" | "thinking" | "error" | "system" | "artifact";
 
 export interface ChatMessage {
   /** Local key, unique for the app session. */
@@ -14,6 +15,8 @@ export interface ChatMessage {
   text?: string;
   tool?: string;
   detail?: string;
+  /** Files with the message: attached by the developer, or made or shared by the agent. */
+  attachments?: Attachment[];
   /** The transcript row, once known; how a live message and its saved copy are matched. */
   storedId?: number;
 }
@@ -29,6 +32,8 @@ export interface ChatThread {
   /** The saved chat this thread is (null until known, or for a chat never sent). */
   conversationId: number | null;
   draft: string;
+  /** Files attached to the message being written (kept copies). */
+  files: Attachment[];
   /** The folder this chat runs in ("" until known). */
   folder: string;
 }
@@ -42,12 +47,14 @@ interface ChatsState {
   /** Add a message the app produced locally (what you sent, a question you answered, an error). Returns its key. */
   push: (agentId: string, message: Omit<ChatMessage, "id">) => number;
   /** Returns the message's key, to confirm once the backend has stored it. */
-  pushUser: (agentId: string, text: string) => number;
+  pushUser: (agentId: string, text: string, attachments?: Attachment[]) => number;
   /** A local message was stored as `storedId`; drop it if the saved copy is already shown. */
   confirmStored: (agentId: string, messageId: number, storedId: number) => void;
   pushError: (agentId: string, text: string) => void;
   setPending: (agentId: string, pending: boolean) => void;
   setDraft: (agentId: string, draft: string) => void;
+  /** Change the files attached to the message being written. */
+  updateFiles: (agentId: string, update: (current: readonly Attachment[]) => Attachment[]) => void;
   setFolder: (agentId: string, folder: string) => void;
   /** Forget the thread (a new or reopened conversation); it re-hydrates on next view. */
   reset: (agentId: string) => void;
@@ -62,6 +69,7 @@ const EMPTY: ChatThread = {
   loading: false,
   conversationId: null,
   draft: "",
+  files: [],
   folder: "",
 };
 
@@ -86,6 +94,8 @@ export function messageFor(event: ChatEvent): Omit<ChatMessage, "id"> | null {
       return { role: "system", text: "Session ended" };
     case "system":
       return event.text ? { role: "system", text: event.text } : null;
+    case "artifact":
+      return event.attachments?.length ? { role: "artifact", text: event.text, detail: event.detail, attachments: event.attachments, storedId } : null;
     default:
       return null;
   }
@@ -146,6 +156,7 @@ export const useChats = create<ChatsState>((set, get) => {
         text: r.text ?? undefined,
         tool: r.tool ?? undefined,
         detail: r.detail ?? undefined,
+        attachments: r.attachments?.length ? r.attachments : undefined,
         storedId: r.id,
       }));
       // Live events that landed while loading must not be lost, or shown twice.
@@ -176,7 +187,7 @@ export const useChats = create<ChatsState>((set, get) => {
       update(agentId, (t) => ({ messages: [...t.messages, { id: key, ...message }] }));
       return key;
     },
-    pushUser: (agentId, text) => get().push(agentId, { role: "user", text }),
+    pushUser: (agentId, text, attachments) => get().push(agentId, { role: "user", text, ...(attachments?.length ? { attachments } : {}) }),
     confirmStored: (agentId, messageId, storedId) =>
       update(agentId, (t) => ({
         messages: holds(t, storedId)
@@ -189,6 +200,7 @@ export const useChats = create<ChatsState>((set, get) => {
     },
     setPending: (agentId, pending) => update(agentId, () => ({ pending })),
     setDraft: (agentId, draft) => update(agentId, () => ({ draft })),
+    updateFiles: (agentId, change) => update(agentId, (t) => ({ files: change(t.files) })),
     setFolder: (agentId, folder) => update(agentId, () => ({ folder })),
     reset: (agentId) =>
       set((s) => {

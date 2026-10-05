@@ -362,7 +362,7 @@ pub fn resume(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     state.ledger.open_conversation(conversation);
     let _ = app.emit("chat://switched", serde_json::json!({ "agentId": task.assignee, "conversationId": conversation }));
     developer_message(app, &task.assignee);
-    crate::chat::send_user_turn(app, &task.assignee, "Please continue the task where you left off.", &task.cwd)?;
+    crate::chat::send_user_turn(app, &task.assignee, "Please continue the task where you left off.", &[], &task.cwd)?;
     Ok(())
 }
 
@@ -376,13 +376,21 @@ pub struct Origin<'a> {
     pub note: &'a str,
 }
 
-/// The developer hands work to an agent. It starts now, or waits for the agent to finish.
-pub fn start(app: &tauri::AppHandle, agent_id: &str, prompt: &str, dir: Option<String>) -> Result<Task, String> {
-    start_for(app, agent_id, prompt, dir, &Origin { requested_by: BY_DEVELOPER, title: None, note: "You asked for this" })
+/// The developer hands work to an agent, with any files they attached. It starts now,
+/// or waits for the agent to finish.
+pub fn start(app: &tauri::AppHandle, agent_id: &str, prompt: &str, dir: Option<String>, files: &[crate::attachments::Attachment]) -> Result<Task, String> {
+    start_for(app, agent_id, prompt, dir, files, &Origin { requested_by: BY_DEVELOPER, title: None, note: "You asked for this" })
 }
 
-/// Work for an agent, asked for by the developer or one of their automations.
-pub fn start_for(app: &tauri::AppHandle, agent_id: &str, prompt: &str, dir: Option<String>, origin: &Origin) -> Result<Task, String> {
+/// Work for an agent, asked for by the developer (with any files they attached) or one of their automations.
+pub fn start_for(
+    app: &tauri::AppHandle,
+    agent_id: &str,
+    prompt: &str,
+    dir: Option<String>,
+    files: &[crate::attachments::Attachment],
+    origin: &Origin,
+) -> Result<Task, String> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
         return Err("Say what you'd like done.".into());
@@ -411,6 +419,10 @@ pub fn start_for(app: &tauri::AppHandle, agent_id: &str, prompt: &str, dir: Opti
             prompt,
         })
         .ok_or("The task couldn't be saved.")?;
+    // Kept with the task, so it starts with them even if it waits its turn.
+    if !files.is_empty() {
+        state.ledger.set_task_attachments(&id, files);
+    }
     event(app, &id, agent_id, "created", origin.note, "");
     if is_busy(app, agent_id) {
         state.tasks.queue.lock().unwrap().entry(agent_id.to_string()).or_default().push_back(id.clone());
@@ -448,7 +460,8 @@ fn begin(app: &tauri::AppHandle, task: &Task) -> Result<(), String> {
     let _ = app.emit("chat://switched", serde_json::json!({ "agentId": agent, "conversationId": conversation }));
     let _ = app.emit("conversations://changed", ());
     emit_changed(app);
-    if let Err(e) = crate::chat::send_user_turn(app, agent, &task.prompt, &task.cwd) {
+    let files = state.ledger.task_attachments(&task.id);
+    if let Err(e) = crate::chat::send_user_turn(app, agent, &task.prompt, &files, &task.cwd) {
         state.ledger.set_task_status(&task.id, "blocked", Some(&e));
         state.tasks.current.lock().unwrap().remove(agent);
         event(app, &task.id, agent, "status", &format!("Couldn't start: {e}"), "");

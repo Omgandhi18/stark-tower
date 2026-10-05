@@ -49,7 +49,7 @@ struct Turn {
     session: Option<String>,
     /// A prompt is running; messages sent meanwhile wait their turn.
     busy: bool,
-    queued: VecDeque<String>,
+    queued: VecDeque<chat::UserTurn>,
     /// Streamed text, by message, until the message is complete.
     text: Option<(String, String)>,
     thought: Option<(String, String)>,
@@ -85,6 +85,32 @@ fn as_message(text: &str) -> String {
     } else {
         text.to_string()
     }
+}
+
+/// A local file as a `file://` URI (spaces and the like percent-encoded).
+fn file_uri(path: &str) -> String {
+    let mut uri = String::from("file://");
+    for byte in path.bytes() {
+        if byte.is_ascii_alphanumeric() || b"/-._~".contains(&byte) {
+            uri.push(byte as char);
+        } else {
+            uri.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    uri
+}
+
+/// A developer turn as ACP prompt content: the words (naming the files), images
+/// inline, and other files as links OpenCode can read.
+fn prompt_blocks(turn: &chat::UserTurn) -> Value {
+    let mut blocks = vec![json!({ "type": "text", "text": as_message(&turn.text_with_files()) })];
+    for a in &turn.attachments {
+        match crate::attachments::image_data(a) {
+            Some((mime, data)) => blocks.push(json!({ "type": "image", "mimeType": mime, "data": data })),
+            None => blocks.push(json!({ "type": "resource_link", "uri": file_uri(&a.path), "name": a.name, "mimeType": a.mime, "size": a.size })),
+        }
+    }
+    Value::Array(blocks)
 }
 
 /// Starkline's bridge as an ACP MCP server entry (args and env must be arrays).
@@ -287,12 +313,12 @@ impl OpenCode {
     }
 
     /// Start a prompt, or queue the message while one runs.
-    fn send(self: &Arc<Self>, text: &str) -> Result<(), String> {
+    fn send(self: &Arc<Self>, message: &chat::UserTurn) -> Result<(), String> {
         let session = {
             let mut turn = self.turn.lock().unwrap();
             let session = turn.session.clone().ok_or("OpenCode has no session open.")?;
             if turn.busy {
-                turn.queued.push_back(text.to_string());
+                turn.queued.push_back(message.clone());
                 return Ok(());
             }
             turn.busy = true;
@@ -301,7 +327,7 @@ impl OpenCode {
             session
         };
         let me = self.clone();
-        let params = json!({ "sessionId": session, "prompt": [{ "type": "text", "text": as_message(text) }] });
+        let params = json!({ "sessionId": session, "prompt": prompt_blocks(message) });
         let sent = self.rpc.request_then("session/prompt", params, move |reply| me.prompt_ended(reply));
         if sent.is_err() {
             self.turn.lock().unwrap().busy = false;
@@ -443,7 +469,7 @@ pub(crate) fn start_chat(app: &tauri::AppHandle, launch: &Launch, gen: u64) -> R
         }
     };
     chat::session_ready(app, &launch.agent_id, &opencode.sink, Some(&session), Some(launch.cwd.clone()));
-    Ok((child, Input::Turns(Box::new(move |text| opencode.send(text)))))
+    Ok((child, Input::Turns(Box::new(move |turn| opencode.send(turn)))))
 }
 
 /// A delegated task on OpenCode: one prompt in a session of its own, and its final answer.
@@ -458,7 +484,7 @@ pub(crate) fn run_once(app: &tauri::AppHandle, launch: &Launch, task: &str, sink
         let (tx, rx) = mpsc::channel();
         opencode.turn.lock().unwrap().finished = Some(tx);
         chat::session_ready(app, &launch.agent_id, sink, None, Some(launch.cwd.clone()));
-        opencode.send(task)?;
+        opencode.send(&chat::UserTurn::plain(task))?;
         rx.recv().unwrap_or_else(|_| Err("OpenCode stopped before it finished.".into()))
     })();
     stop(&mut child);

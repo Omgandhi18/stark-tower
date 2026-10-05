@@ -41,6 +41,30 @@ function install(scenario: Scenario) {
   };
   for (const a of state.config.agents) a.tone ??= usualTone(a.id);
 
+  // Kept copies of attached files. They point at images the dev server really serves, so previews render.
+  const SAMPLE_IMAGES = ["/src/assets/portraits/engineer.png", "/src/assets/portraits/commander.png", "/src/assets/portraits/architect.png"];
+  let nextKept = 0;
+  const kindOf = (name: string): { kind: string; mime: string } => {
+    const ext = name.split(".").pop()?.toLowerCase() ?? "";
+    if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) return { kind: "image", mime: `image/${ext === "jpg" ? "jpeg" : ext}` };
+    if (ext === "md") return { kind: "markdown", mime: "text/markdown" };
+    if (ext === "html") return { kind: "html", mime: "text/html" };
+    if (ext === "pdf") return { kind: "pdf", mime: "application/pdf" };
+    if (["txt", "csv", "json", "ts"].includes(ext)) return { kind: "text", mime: "text/plain" };
+    return { kind: "file", mime: "application/octet-stream" };
+  };
+  const keep = (name: string) => {
+    const { kind, mime } = kindOf(name);
+    const n = nextKept++;
+    const path = kind === "image" ? SAMPLE_IMAGES[n % SAMPLE_IMAGES.length] : `/attachments/${n}/${name}`;
+    return { path, name, mime, kind, size: 48_213 + n };
+  };
+  const SAMPLE_TEXT: Record<string, string> = {
+    html: "<html><head><title>Pricing</title></head><body style='font-family:sans-serif'><h1>Pricing</h1><p>Three plans, monthly or yearly.</p></body></html>",
+    markdown: "# Release notes 2.4\n\n- Refunds from the dashboard\n- Dark mode\n- Faster checkout",
+    text: "id,amount\n1,20\n2,35",
+  };
+
   const emit = (event: string, payload: unknown) => {
     for (const id of listeners.get(event) ?? []) callbacks.get(id)?.({ event, id, payload });
   };
@@ -137,7 +161,10 @@ function install(scenario: Scenario) {
       return Number(args.handler);
     },
     "plugin:event|unlisten": () => null,
-    "plugin:dialog|open": () => "/Users/dev/code/design-system",
+    "plugin:dialog|open": (args) =>
+      (args.options as { directory?: boolean } | undefined)?.directory
+        ? "/Users/dev/code/design-system"
+        : ["/Users/dev/Desktop/mockup.png", "/Users/dev/Desktop/brief.md"],
     "plugin:opener|open_url": () => null,
     "plugin:window|destroy": () => null,
     "plugin:window|close": () => null,
@@ -403,10 +430,22 @@ function install(scenario: Scenario) {
       emit("conversations://changed", null);
       return null;
     },
+    attach_files: (args) => (args.paths as string[]).map((p) => keep(p.split("/").pop() ?? p)),
+    attach_data: (args) => keep(String(args.name)),
+    discard_attachments: () => null,
+    read_attachment_text: (args) => {
+      const path = String(args.path);
+      const kind = kindOf(path).kind;
+      if (!SAMPLE_TEXT[kind]) throw "Only a chat's own files can be previewed.";
+      return SAMPLE_TEXT[kind];
+    },
+    "plugin:opener|open_path": () => null,
+    "plugin:opener|reveal_item_in_dir": () => null,
     chat_send: (args) => {
       const agentId = String(args.agentId);
       const text = String(args.text);
-      const messageId = persist(agentId, "user", { text });
+      const files = (args.attachments as unknown[] | undefined) ?? [];
+      const messageId = persist(agentId, "user", { text, ...(files.length ? { attachments: files } : {}) });
       reply(agentId, text);
       return messageId;
     },

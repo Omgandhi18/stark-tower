@@ -191,6 +191,12 @@ hit a bug or error in the Starkline APP itself (a broken tool, a crash, wrong be
 project you're working on), file it with `report_bug` and carry on; the maintenance agent fixes \
 those later.";
 
+const SHARE_NOTE: &str = "When you make something the developer should see — an image, chart, video, \
+audio, PDF, web page or document — `share` it (its path, and a short caption if it helps) and it shows \
+up in the chat as a preview they can open. Save it in the project or a temporary folder first. Share \
+finished results, not every file you touch. Files the developer attaches to a message are listed with \
+their paths in Starkline's attachments folder; read them with your tools.";
+
 const JARVIS_PLAYBOOK: &str = "Planning playbook (the sarathi funnel) — for a large or foggy \
 request, think before delegating: (1) if the idea is foggy, open it into a few distinct \
 directions and settle on one; (2) stress-test the plan by asking the user the key open decisions via \
@@ -225,6 +231,8 @@ pub(crate) fn system_prompt_for(app: &tauri::AppHandle, agent_id: &str) -> Strin
             s.push_str(PERMISSION_NOTE);
             s.push_str("\n\n");
             s.push_str(MESSAGE_NOTE);
+            s.push_str("\n\n");
+            s.push_str(SHARE_NOTE);
             s.push_str("\n\nYour current team and the projects you can delegate into are provided \
 with each of the user's messages under [CURRENT TEAM & PROJECTS] — always use that list; it supersedes \
 any roster mentioned earlier in this conversation.");
@@ -239,6 +247,8 @@ any roster mentioned earlier in this conversation.");
             s.push_str(PERMISSION_NOTE);
             s.push_str("\n\n");
             s.push_str(MESSAGE_NOTE);
+            s.push_str("\n\n");
+            s.push_str(SHARE_NOTE);
         }
         s
     };

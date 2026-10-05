@@ -168,6 +168,10 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
             handle_report_bug(app, &mut writer, &req);
             return;
         }
+        Some("share") => {
+            handle_share(app, &mut writer, &req);
+            return;
+        }
         _ => {}
     }
 
@@ -406,8 +410,68 @@ fn assess(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_json
         std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/mcp")),
     ];
     protected.extend(app.path().app_data_dir().ok());
-    let context = crate::gate::Context::for_project(&project).protecting(protected);
+    let context = crate::gate::Context::for_project(&project).protecting(protected).sharing([crate::attachments::root(app)]);
     (cwd, crate::gate::assess(tool, input, &context))
+}
+
+/// Whether the agent may read a file without asking: in its project, a temporary folder,
+/// or Starkline's attachments. Only such files are shown in its chat, so sharing can't
+/// carry anything past the gate.
+pub(crate) fn may_read_freely(app: &tauri::AppHandle, agent_id: &str, path: &std::path::Path) -> bool {
+    let input = serde_json::json!({ "file_path": path.to_string_lossy() });
+    assess(app, agent_id, "Read", &input).1.tier == crate::gate::Tier::Automatic
+}
+
+/// An agent shares files it made: Starkline keeps copies and shows them in its chat.
+fn handle_share(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_json::Value) {
+    let reply = |w: &mut UnixStream, v: serde_json::Value| {
+        let _ = w.write_all((v.to_string() + "\n").as_bytes());
+    };
+    let from = req.get("agentId").and_then(|s| s.as_str()).unwrap_or("");
+    let caption = req.get("caption").and_then(|s| s.as_str()).map(str::trim).filter(|c| !c.is_empty());
+    let asked: Vec<String> = req
+        .get("paths")
+        .and_then(|p| p.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    if from.is_empty() || asked.is_empty() {
+        reply(writer, serde_json::json!({ "error": "Name at least one file to share." }));
+        return;
+    }
+    let cwd = crate::outputs::cwd_for(from)
+        .or_else(|| app.try_state::<crate::AppState>().and_then(|s| s.workdirs.lock().unwrap().get(from).cloned()).map(std::path::PathBuf::from))
+        .unwrap_or_default();
+    let mut refused: Vec<String> = Vec::new();
+    let paths: Vec<std::path::PathBuf> = asked
+        .iter()
+        .map(|raw| crate::outputs::resolve(&cwd, raw))
+        .filter(|path| {
+            let free = may_read_freely(app, from, path);
+            if !free {
+                refused.push(format!("{} is outside the project; save it in the project or a temporary folder to share it.", path.display()));
+            }
+            free
+        })
+        .collect();
+    let (kept, missed) = crate::chat::keep_copies(app, &paths);
+    crate::outputs::shared(from, &paths);
+    crate::chat::post_files(app, &crate::outputs::sink_for(from), from, "shared", caption, &kept);
+    let problems: Vec<String> = refused.into_iter().chain(missed).collect();
+    if kept.is_empty() {
+        reply(writer, serde_json::json!({ "error": problems.join(" ") }));
+    } else if problems.is_empty() {
+        reply(writer, serde_json::json!({ "result": format!("Shared {} in the chat.", files_word(kept.len())) }));
+    } else {
+        reply(writer, serde_json::json!({ "result": format!("Shared {}. Not shared: {}", files_word(kept.len()), problems.join(" ")) }));
+    }
+}
+
+fn files_word(n: usize) -> String {
+    if n == 1 {
+        "1 file".into()
+    } else {
+        format!("{n} files")
+    }
 }
 
 /// The provider's pre-tool hook asks before every call: anything that isn't

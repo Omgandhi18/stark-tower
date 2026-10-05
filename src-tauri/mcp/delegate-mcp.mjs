@@ -174,8 +174,25 @@ const REPORT_BUG_TOOL = {
   },
 };
 
+const SHARE_TOOL = {
+  name: "share",
+  description:
+    "Show the developer something you made — an image, chart, video, audio clip, PDF, web page " +
+    "(HTML), document or any other file — right in the chat, as a preview they can open. Give " +
+    "absolute paths or paths relative to your working folder; the files must be in the project or a " +
+    "temporary folder. Starkline keeps a copy as it is now. Share finished results, not every file you touch.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      paths: { type: "array", items: { type: "string" }, description: "The files to show." },
+      caption: { type: "string", description: "A short line about what they are (optional)." },
+    },
+    required: ["paths"],
+  },
+};
+
 async function toolsList() {
-  const tools = [ASK_HUMAN_TOOL, MESSAGE_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
+  const tools = [ASK_HUMAN_TOOL, MESSAGE_TOOL, SHARE_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
   if (IS_ORCH) {
     const workers = await getRoster();
     tools.unshift(buildDelegateTool(workers));
@@ -252,6 +269,12 @@ rl.on("line", async (raw) => {
       });
       if (res.error) result(id, "message failed: " + res.error, true);
       else result(id, res.result || "(queued)");
+    } else if (name === "share") {
+      const paths = Array.isArray(args.paths) ? args.paths.filter((p) => typeof p === "string") : [];
+      log("share ->", paths.length);
+      const res = await bridge({ type: "share", agentId: AGENT_ID, paths, caption: args.caption || "" });
+      if (res.error) result(id, "share failed: " + res.error, true);
+      else result(id, res.result || "(shared)");
     } else if (name === "report_bug") {
       log("report_bug ->", args.title);
       const res = await bridge({

@@ -389,6 +389,21 @@ export function defaultScenario(): Scenario {
         }),
         message(5, "tool", { tool: "Edit", detail: "src/pages/Settings.tsx" }),
         message(6, "tool", { tool: "Bash", detail: "npm test -- settings" }),
+        message(7, "artifact", {
+          detail: "made",
+          attachments: [
+            { path: "/src/assets/portraits/engineer.png", name: "settings-search.png", mime: "image/png", kind: "image", size: 182_431 },
+            { path: "/attachments/a1/pricing.html", name: "pricing.html", mime: "text/html", kind: "html", size: 2_210 },
+            { path: "/attachments/a2/RELEASE.md", name: "RELEASE.md", mime: "text/markdown", kind: "markdown", size: 1_024 },
+            {
+              path: "/attachments/a3/Roadmap.docx",
+              name: "Roadmap.docx",
+              mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              kind: "document",
+              size: 48_120,
+            },
+          ],
+        }),
       ],
       10: [
         message(1, "user", { text: "The checkout test fails about one run in five." }),
