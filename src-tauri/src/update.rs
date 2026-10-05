@@ -73,26 +73,35 @@ pub fn check(app: &tauri::AppHandle) {
             "-sSL",
             "-H",
             "Accept: application/vnd.github+json",
+            // Append the HTTP status on its own line: a rate-limited 403 and a
+            // "no releases yet" 404 both have bodies, and only one is an error.
+            "-w",
+            "\n%{http_code}",
             &format!("https://api.github.com/repos/{REPO}/releases/latest"),
         ])
         .output();
     match out {
         Ok(o) if o.status.success() => {
-            let body = String::from_utf8_lossy(&o.stdout);
-            let tag = serde_json::from_str::<serde_json::Value>(&body)
+            let text = String::from_utf8_lossy(&o.stdout);
+            let (body, code) = text.rsplit_once('\n').unwrap_or((&text, ""));
+            let tag = serde_json::from_str::<serde_json::Value>(body)
                 .ok()
                 .and_then(|v| v.get("tag_name").and_then(|t| t.as_str()).map(String::from));
-            match tag {
-                Some(latest) => {
+            match (code.trim(), tag) {
+                ("200", Some(latest)) => {
                     let available = is_newer(current, &latest);
                     breadcrumb(app, &format!("latest release {latest} — available={available}"));
                     emit(app, available, Some(&latest), None);
                 }
-                None => {
-                    // No releases yet (404 body) or unexpected shape — not an error
-                    // the user needs, but log it.
+                ("404", _) => {
+                    // No published release yet: nothing to offer, not an error.
                     breadcrumb(app, "no published release found");
                     emit(app, false, None, None);
+                }
+                (code, _) => {
+                    let msg = format!("update check: GitHub answered HTTP {code} without a release");
+                    breadcrumb(app, &msg);
+                    emit(app, false, None, Some(&msg));
                 }
             }
         }

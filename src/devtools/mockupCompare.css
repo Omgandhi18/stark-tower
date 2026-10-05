@@ -1,0 +1,33 @@
+/* The mockup is drawn at its native 1584 x 993 CSS px from the window's
+   top-left, upscaled the same nearest-neighbour way the app draws it. */
+.mockup-compare {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1584px;
+  height: 993px;
+  z-index: 2147483000;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.mockup-compare-onion {
+  opacity: 0.5;
+}
+
+.mockup-compare-difference {
+  mix-blend-mode: difference;
+}
+
+.mockup-compare-chip {
+  position: fixed;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2147483001;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font: 11px/1.2 var(--mono);
+  pointer-events: none;
+}

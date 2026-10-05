@@ -1,0 +1,392 @@
+{
+  "$comment": "Cuts docs/mockups/2026-09-16/04-environment-rnd.png into runtime layers. All rects are [x0, y0, x1, y1) in source pixels. Fills use the named method; sprites are matted against their plate's filled background so they recompose to the source exactly.",
+  "source": "docs/mockups/2026-09-16/04-environment-rnd.png",
+  "outDir": "src/assets/themes/after-hours-rnd/reference",
+  "viewport": [1584, 993],
+  "plates": [
+    {
+      "id": "topbar",
+      "rect": [0, 0, 1584, 58],
+      "fills": [
+        {
+          "id": "brand",
+          "rect": [16, 9, 228, 51],
+          "method": "vertical"
+        },
+        {
+          "id": "statusDot",
+          "rect": [993, 17, 1023, 47],
+          "method": "vertical"
+        },
+        {
+          "id": "statusValue",
+          "rect": [1024, 34, 1074, 50],
+          "method": "vertical"
+        },
+        {
+          "id": "toggle",
+          "rect": [1350, 15, 1404, 47],
+          "method": "vertical"
+        },
+        {
+          "id": "windowButtons",
+          "rect": [1424, 10, 1584, 52],
+          "method": "vertical"
+        }
+      ],
+      "mirrors": [
+        {
+          "id": "bellUnderBadge",
+          "rect": [1178, 6, 1200, 27],
+          "sumX": 2355
+        }
+      ]
+    },
+    {
+      "id": "sidebar",
+      "rect": [0, 58, 184, 993],
+      "fills": [
+        {
+          "id": "activeHighlight",
+          "rect": [5, 136, 180, 188],
+          "method": "vertical"
+        },
+        {
+          "id": "notificationsBadge",
+          "rect": [148, 302, 176, 330],
+          "method": "vertical"
+        }
+      ]
+    },
+    {
+      "id": "environment",
+      "rect": [184, 58, 1584, 993],
+      "fills": [
+        {
+          "id": "agentCard",
+          "rect": [387, 401, 563, 472],
+          "method": "vertical"
+        },
+        {
+          "id": "focusControl",
+          "rect": [1197, 935, 1352, 976],
+          "method": "vertical"
+        },
+        {
+          "id": "zoomControl",
+          "rect": [1359, 935, 1499, 976],
+          "method": "vertical"
+        },
+        {
+          "id": "fullscreenControl",
+          "rect": [1521, 935, 1570, 976],
+          "method": "vertical"
+        }
+      ],
+      "patches": [
+        {
+          "id": "agentCard",
+          "rect": [387, 401, 563, 472],
+          "file": "assets/after-hours-rnd/fills/agent-card.png"
+        },
+        {
+          "id": "leftPodEmpty",
+          "rect": [351, 234, 437, 365],
+          "file": "assets/after-hours-rnd/fills/left-pod-empty.png",
+          "intended": true
+        },
+        {
+          "id": "buildBayEmpty",
+          "rect": [396, 475, 514, 632],
+          "file": "assets/after-hours-rnd/fills/build-bay-empty.png"
+        },
+        {
+          "id": "buildBayFloor",
+          "rect": [421, 599, 668, 689],
+          "file": "assets/after-hours-rnd/fills/build-bay-floor.png"
+        },
+        {
+          "id": "commandDeckEmpty",
+          "rect": [740,  109,  802,  282],
+          "file": "assets/after-hours-rnd/fills/command-deck-empty.png"
+        },
+        {
+          "id": "reviewWallEmpty",
+          "rect": [899,  396,  977,  609],
+          "file": "assets/after-hours-rnd/fills/review-wall-empty.png"
+        },
+        {
+          "id": "rightDeskEmpty",
+          "rect": [1189,  561,  1275,  769],
+          "file": "assets/after-hours-rnd/fills/right-desk-empty.png"
+        },
+        {
+          "id": "rightPodEmpty",
+          "rect": [1362,  230,  1450,  366],
+          "file": "assets/after-hours-rnd/fills/right-pod-empty.png"
+        },
+        {
+          "id": "bottomDeskEmpty",
+          "rect": [725,  811,  830,  984],
+          "file": "assets/after-hours-rnd/fills/bottom-desk-empty.png"
+        }
+      ]
+    }
+  ],
+  "sprites": [
+    {
+      "id": "brand",
+      "plate": "topbar",
+      "rect": [16, 9, 228, 51],
+      "threshold": 36
+    },
+    {
+      "id": "toggleOn",
+      "plate": "topbar",
+      "rect": [1350, 15, 1404, 47],
+      "threshold": 36,
+      "clearText": {
+        "center": [1387, 30],
+        "radius": 9,
+        "minLuma": 110
+      }
+    },
+    {
+      "id": "statusDot",
+      "plate": "topbar",
+      "rect": [994, 18, 1022, 46],
+      "threshold": 36
+    },
+    {
+      "id": "bellBadge",
+      "plate": "topbar",
+      "rect": [1178, 5, 1201, 26],
+      "threshold": 36,
+      "clearText": {
+        "center": [1190, 15],
+        "radius": 6,
+        "minLuma": 150
+      }
+    },
+    {
+      "id": "navBadge",
+      "plate": "sidebar",
+      "rect": [149, 303, 174, 328],
+      "threshold": 36,
+      "clearText": {
+        "center": [161, 315],
+        "radius": 7,
+        "minLuma": 150
+      }
+    },
+    {
+      "id": "cardDot",
+      "panel": "agentCard",
+      "rect": [397, 410, 415, 428],
+      "threshold": 36
+    }
+  ],
+  "panels": [
+    {
+      "id": "agentCard",
+      "rect": [387, 401, 563, 472],
+      "clear": [
+        [396, 409, 532, 466]
+      ]
+    },
+    {
+      "id": "focusControl",
+      "rect": [1197, 935, 1352, 976],
+      "clear": [
+        [1242, 947, 1342, 966]
+      ]
+    },
+    {
+      "id": "zoomControl",
+      "rect": [1359, 935, 1499, 976],
+      "clear": [
+        [1408, 947, 1456, 966]
+      ]
+    },
+    {
+      "id": "fullscreenControl",
+      "rect": [1521, 935, 1570, 976],
+      "clear": []
+    }
+  ],
+  "nav": {
+    "plate": "sidebar",
+    "highlightRect": [5, 136, 180, 188],
+    "activeItem": "environment",
+    "items": [
+      {
+        "id": "work",
+        "content": [20, 96, 150, 124]
+      },
+      {
+        "id": "environment",
+        "content": [20, 145, 150, 178]
+      },
+      {
+        "id": "agents",
+        "content": [20, 200, 150, 227]
+      },
+      {
+        "id": "automations",
+        "content": [20, 250, 150, 281]
+      },
+      {
+        "id": "notifications",
+        "content": [20, 301, 146, 334]
+      },
+      {
+        "id": "settings",
+        "content": [20, 358, 150, 388]
+      }
+    ],
+    "inactiveColorFrom": [62, 100, 95, 120],
+    "activeColorFrom": [62, 150, 144, 172]
+  },
+  "colors": {
+    "statusOk": {
+      "rect": [1026, 36, 1070, 49],
+      "mode": "bright"
+    },
+    "statusDot": {
+      "rect": [1004, 28, 1012, 36],
+      "mode": "median"
+    },
+    "badgeFill": {
+      "rect": [1183, 12, 1186, 18],
+      "mode": "median"
+    },
+    "badgeText": {
+      "rect": [1186, 9, 1193, 21],
+      "mode": "bright"
+    },
+    "cardName": {
+      "rect": [418, 415, 460, 425],
+      "mode": "bright"
+    },
+    "cardStatus": {
+      "rect": [418, 432, 461, 444],
+      "mode": "bright"
+    },
+    "cardTask": {
+      "rect": [418, 449, 509, 461],
+      "mode": "bright"
+    },
+    "cardDot": {
+      "rect": [402, 416, 409, 423],
+      "mode": "median"
+    },
+    "controlText": {
+      "rect": [1245, 951, 1329, 961],
+      "mode": "bright"
+    }
+  },
+  "text": {
+    "statusValue": {
+      "rect": [1026, 36, 1070, 49]
+    },
+    "notificationsBadge": {
+      "rect": [152, 306, 171, 325]
+    },
+    "bellBadge": {
+      "rect": [1182, 7, 1198, 23]
+    },
+    "statusDot": {
+      "rect": [1001, 25, 1015, 39]
+    },
+    "cardDot": {
+      "rect": [400, 413, 411, 425]
+    },
+    "cardName": {
+      "rect": [418, 415, 460, 425]
+    },
+    "cardStatus": {
+      "rect": [418, 432, 461, 444]
+    },
+    "cardTask": {
+      "rect": [418, 449, 509, 461]
+    },
+    "focusLabel": {
+      "rect": [1245, 951, 1329, 961]
+    },
+    "zoomLabel": {
+      "rect": [1413, 951, 1443, 961]
+    }
+  },
+  "cutouts": [
+    {
+      "id": "buildBayOccupied",
+      "rect": [396, 475, 514, 632],
+      "mask": "assets/after-hours-rnd/masks/build-bay-occupied.png"
+    },
+    {
+      "id": "helper-1-body",
+      "rect": [425, 603, 471, 653],
+      "mask": "assets/after-hours-rnd/masks/helper-1-body.png"
+    },
+    {
+      "id": "helper-1-ground",
+      "rect": [421, 599, 475, 657],
+      "mask": "assets/after-hours-rnd/masks/helper-1-ground.png"
+    },
+    {
+      "id": "helper-2-body",
+      "rect": [607, 608, 651, 658],
+      "mask": "assets/after-hours-rnd/masks/helper-2-body.png"
+    },
+    {
+      "id": "helper-2-ground",
+      "rect": [603, 604, 655, 662],
+      "mask": "assets/after-hours-rnd/masks/helper-2-ground.png"
+    },
+    {
+      "id": "helper-3-body",
+      "rect": [502, 630, 552, 685],
+      "mask": "assets/after-hours-rnd/masks/helper-3-body.png"
+    },
+    {
+      "id": "helper-3-ground",
+      "rect": [498, 626, 556, 689],
+      "mask": "assets/after-hours-rnd/masks/helper-3-ground.png"
+    },
+    {
+      "id": "helper-overflow-body",
+      "rect": [623, 645, 664, 678],
+      "mask": "assets/after-hours-rnd/masks/helper-overflow-body.png"
+    },
+    {
+      "id": "helper-overflow-ground",
+      "rect": [619, 641, 668, 682],
+      "mask": "assets/after-hours-rnd/masks/helper-overflow-ground.png"
+    },
+    {
+      "id": "commandDeckOccupied",
+      "rect": [740,  109,  802,  282],
+      "mask": "assets/after-hours-rnd/masks/command-deck-occupied.png"
+    },
+    {
+      "id": "reviewWallOccupied",
+      "rect": [899,  396,  977,  609],
+      "mask": "assets/after-hours-rnd/masks/review-wall-occupied.png"
+    },
+    {
+      "id": "rightDeskOccupied",
+      "rect": [1189,  561,  1275,  769],
+      "mask": "assets/after-hours-rnd/masks/right-desk-occupied.png"
+    },
+    {
+      "id": "rightPodOccupied",
+      "rect": [1362,  230,  1450,  366],
+      "mask": "assets/after-hours-rnd/masks/right-pod-occupied.png"
+    },
+    {
+      "id": "bottomDeskOccupied",
+      "rect": [725,  811,  830,  984],
+      "mask": "assets/after-hours-rnd/masks/bottom-desk-occupied.png"
+    }
+  ]
+}

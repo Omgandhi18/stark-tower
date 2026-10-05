@@ -100,9 +100,14 @@ pub fn route_once(floor_dir: &str) -> Vec<Message> {
     delivered
 }
 
-/// Drain an agent's inbox: return its undelivered messages and archive them to
-/// `inbox/.done/` (the archive IS the cursor — a message is drained exactly once).
-pub fn drain_inbox(floor_dir: &str, agent_id: &str) -> Vec<Message> {
+/// Hand an agent's inbox to `deliver`, oldest first, archiving each message it
+/// accepts to `inbox/.done/` (the archive IS the cursor). Stops at the first
+/// refusal, so a message that couldn't be delivered stays queued, in order.
+pub fn drain_inbox_with(
+    floor_dir: &str,
+    agent_id: &str,
+    mut deliver: impl FnMut(&Message) -> bool,
+) -> Vec<Message> {
     let mut out = Vec::new();
     let inbox = Path::new(floor_dir).join("agents").join(agent_id).join("inbox");
     let Ok(files) = std::fs::read_dir(&inbox) else {
@@ -110,26 +115,45 @@ pub fn drain_inbox(floor_dir: &str, agent_id: &str) -> Vec<Message> {
     };
     let done = inbox.join(".done");
     let _ = std::fs::create_dir_all(&done);
-    for f in files.flatten() {
-        let p = f.path();
-        if p.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
+    let mut pending: Vec<PathBuf> = files
+        .flatten()
+        .map(|f| f.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+        .collect();
+    pending.sort_by_key(|p| message_order(p));
+    for p in pending {
         let Ok(txt) = std::fs::read_to_string(&p) else { continue };
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
-            let id = v.get("id").and_then(|i| i.as_str()).unwrap_or("msg").to_string();
-            out.push(Message {
-                id: id.clone(),
-                from: v.get("from").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                to: agent_id.to_string(),
-                kind: v.get("kind").and_then(|x| x.as_str()).unwrap_or("message").to_string(),
-                body: v.get("body").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-            });
-            let _ = std::fs::rename(&p, done.join(format!("{id}.json")));
-            DIRTY.store(true, Ordering::Relaxed);
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) else { continue };
+        let id = v.get("id").and_then(|i| i.as_str()).unwrap_or("msg").to_string();
+        let message = Message {
+            id: id.clone(),
+            from: v.get("from").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            to: agent_id.to_string(),
+            kind: v.get("kind").and_then(|x| x.as_str()).unwrap_or("message").to_string(),
+            body: v.get("body").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        };
+        if !deliver(&message) {
+            break;
         }
+        let _ = std::fs::rename(&p, done.join(format!("{id}.json")));
+        DIRTY.store(true, Ordering::Relaxed);
+        out.push(message);
     }
     out
+}
+
+/// Drain an agent's inbox, treating every message as delivered.
+#[cfg(test)]
+pub fn drain_inbox(floor_dir: &str, agent_id: &str) -> Vec<Message> {
+    drain_inbox_with(floor_dir, agent_id, |_| true)
+}
+
+/// Sort key for message files named `{ms}-{seq}.json`: by time, then sequence.
+fn message_order(path: &Path) -> (i64, u64, String) {
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+    let (ts, seq) = stem.split_once('-').unwrap_or((stem.as_str(), "0"));
+    let key = (ts.parse().unwrap_or(i64::MAX), seq.parse().unwrap_or(u64::MAX));
+    (key.0, key.1, stem)
 }
 
 fn floor_path(base: &str) -> PathBuf {
@@ -291,6 +315,28 @@ mod tests {
         assert_eq!(msgs[0].body, "can you check db.rs?");
         // draining is idempotent — the message is archived to .done
         assert!(drain_inbox(&floor, "edith").is_empty());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn undelivered_messages_stay_queued_in_order() {
+        let base = tmp_base();
+        let bs = base.to_string_lossy().to_string();
+        let floor = init(&bs, &["friday".into(), "edith".into()]);
+        enqueue(&floor, "friday", "edith", "message", "first");
+        enqueue(&floor, "friday", "edith", "message", "second");
+        route_once(&floor);
+
+        // Delivery fails: nothing is archived, so nothing is lost.
+        assert!(drain_inbox_with(&floor, "edith", |_| false).is_empty());
+        // The next attempt delivers both, oldest first.
+        let mut seen = Vec::new();
+        let delivered = drain_inbox_with(&floor, "edith", |m| {
+            seen.push(m.body.clone());
+            true
+        });
+        assert_eq!(delivered.len(), 2);
+        assert_eq!(seen, vec!["first", "second"]);
         std::fs::remove_dir_all(&base).ok();
     }
 

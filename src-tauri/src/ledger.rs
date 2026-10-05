@@ -455,7 +455,7 @@ impl Ledger {
     }
 
     /// The agent's current conversation without creating one (for reads).
-    fn current_conversation(&self, agent_id: &str) -> Option<i64> {
+    pub fn current_conversation(&self, agent_id: &str) -> Option<i64> {
         if let Some(id) = self.active.lock().unwrap().get(agent_id).copied() {
             return Some(id);
         }
@@ -548,19 +548,6 @@ impl Ledger {
         };
         v.reverse(); // DESC query → back to chronological
         v
-    }
-
-    /// Reset button: delete the agent's current conversation (messages + row) and
-    /// its legacy resume pointers, so the next message starts a genuinely fresh one.
-    pub fn clear_agent(&self, agent_id: &str) {
-        let conv = self.current_conversation(agent_id);
-        self.active.lock().unwrap().remove(agent_id);
-        let conn = self.conn.lock().unwrap();
-        if let Some(c) = conv {
-            let _ = conn.execute("DELETE FROM messages WHERE conversation_id = ?1", [c]);
-            let _ = conn.execute("DELETE FROM conversations WHERE id = ?1", [c]);
-        }
-        let _ = conn.execute("DELETE FROM sessions WHERE agent_id = ?1", [agent_id]);
     }
 
     /// Remember the Claude Code session id for (agent, cwd) so we can resume it.
@@ -672,17 +659,6 @@ mod tests {
         l.set_session("a", "/x", "sid-1");
         assert_eq!(l.get_session("a", "/x").as_deref(), Some("sid-1"));
         l.forget_session("a", "/x");
-        assert!(l.get_session("a", "/x").is_none());
-        std::fs::remove_file(&p).ok();
-    }
-
-    #[test]
-    fn clear_agent_wipes_messages_and_sessions() {
-        let (l, p) = temp_db();
-        l.add_message("a", "user", Some("hi"), None, None);
-        l.set_session("a", "/x", "sid");
-        l.clear_agent("a");
-        assert!(l.messages("a", 10).is_empty());
         assert!(l.get_session("a", "/x").is_none());
         std::fs::remove_file(&p).ok();
     }

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ArrowLeft, ArrowRight, Check, ShieldCheck, Settings as SettingsIcon } from "lucide-react";
 import type { AppConfig } from "../lib/types";
 import { setOnboarded, updateAgent, updateEngine } from "../lib/api";
+import { apiKeyNameFor } from "../lib/engines";
 
 interface Props {
   config: AppConfig;
@@ -14,18 +15,6 @@ const STEPS = [
   { key: "roster", label: "Crew" },
   { key: "ready", label: "Online" },
 ];
-
-/** The env var name an engine kind expects its API key under. */
-function keyNameFor(kind: string): string {
-  switch (kind) {
-    case "codex":
-      return "OPENAI_API_KEY";
-    case "opencode":
-      return "OPENCODE_API_KEY";
-    default:
-      return "ANTHROPIC_API_KEY";
-  }
-}
 
 /** A thin schematic arc-reactor mark — concentric HUD rings, not a glowing orb.
  *  Matches the app's brand-core motif; the outer ring idles slowly when online. */
@@ -66,7 +55,7 @@ export default function Onboarding({ config, onDone }: Props) {
   const [busy, setBusy] = useState(false);
 
   const engine = config.engines.find((e) => e.id === engineId);
-  const keyName = engine ? keyNameFor(engine.kind) : "ANTHROPIC_API_KEY";
+  const keyName = engine ? apiKeyNameFor(engine.kind) : "ANTHROPIC_API_KEY";
   const last = step === STEPS.length - 1;
 
   // Names are user-configurable, so the copy reads from config rather than

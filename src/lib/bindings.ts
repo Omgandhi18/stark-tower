@@ -158,8 +158,8 @@ async chatSend(agentId: string, text: string, dir: string | null) : Promise<Resu
 }
 },
 /**
- * Reset button: end the live session AND wipe this agent's saved transcript +
- * resume pointer, so the next message starts a genuinely fresh conversation.
+ * End the agent's live session. Saved chats are never deleted here; starting a
+ * fresh conversation is `new_chat`.
  */
 async chatStop(agentId: string) : Promise<void> {
     await TAURI_INVOKE("chat_stop", { agentId });
@@ -169,6 +169,13 @@ async chatStop(agentId: string) : Promise<void> {
  */
 async getChat(agentId: string, limit: number | null) : Promise<StoredMessage[]> {
     return await TAURI_INVOKE("get_chat", { agentId, limit });
+},
+/**
+ * The agent's current saved chat, if it has one, so the UI can restore the folder
+ * it runs in: resuming a Claude session only works from its own folder.
+ */
+async activeConversation(agentId: string) : Promise<Conversation | null> {
+    return await TAURI_INVOKE("active_conversation", { agentId });
 },
 /**
  * All saved chats across agents, most-recently-active first.

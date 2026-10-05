@@ -1,0 +1,91 @@
+{
+  "$comment": "Character stations painted into mockup 04, in mockup pixels. 'hit' covers the painted character; 'head' anchors the status card. 'figure' is the appearance key each agent carries in config. The left glass pod is intentionally unassigned: the roster has six humans. 'stations' are characters lifted out of the plate into their own layer: 'cutout' is them in place, and the plate under it shows the station empty. 'actors' are stations whose character can leave their seat; 'helpers' are FRIDAY's temporary-helper bots. 'floorY' is where something touches the floor, for depth sorting.",
+  "controls": {
+    "$comment": "Clickable halves of the zoom panel, in mockup pixels.",
+    "zoomOut": [1361, 937, 1401, 974],
+    "zoomIn": [1457, 937, 1497, 974]
+  },
+  "slots": [
+    {
+      "id": "commandDeck",
+      "figure": "commander",
+      "hit": [738, 112, 800, 290],
+      "head": [768, 116]
+    },
+    {
+      "id": "buildBay",
+      "figure": "engineer",
+      "hit": [420, 488, 522, 622],
+      "head": [470, 492]
+    },
+    {
+      "id": "reviewWall",
+      "figure": "architect",
+      "hit": [905, 405, 975, 585],
+      "head": [937, 410]
+    },
+    {
+      "id": "rightDesk",
+      "figure": "specialist",
+      "hit": [1195, 565, 1270, 732],
+      "head": [1235, 569]
+    },
+    {
+      "id": "rightPod",
+      "figure": "recon",
+      "hit": [1352, 240, 1440, 362],
+      "head": [1397, 245]
+    },
+    {
+      "id": "bottomDesk",
+      "figure": "operative",
+      "hit": [745, 808, 845, 962],
+      "head": [785, 811]
+    }
+  ],
+  "stations": {
+    "commandDeck": { "cutout": "commandDeckOccupied", "floorY": 277 },
+    "reviewWall": { "cutout": "reviewWallOccupied", "floorY": 579 },
+    "rightDesk": { "cutout": "rightDeskOccupied", "floorY": 737 },
+    "rightPod": { "cutout": "rightPodOccupied", "floorY": 361 },
+    "bottomDesk": { "cutout": "bottomDeskOccupied", "floorY": 977 }
+  },
+  "actors": {
+    "buildBay": {
+      "character": "friday",
+      "seatCutout": "buildBayOccupied",
+      "seatFloorY": 630,
+      "risePoint": [500, 630],
+      "standPoint": [506, 640],
+      "visitRoute": [[506, 640], [522, 656], [745, 660]],
+      "visitPause": {
+        "talk": 2.4,
+        "listen": 2.0,
+        "stand": 0.8
+      }
+    }
+  },
+  "helpers": [
+    {
+      "id": "helper-1",
+      "parts": ["helper-1-ground", "helper-1-body"],
+      "floorY": 652
+    },
+    {
+      "id": "helper-2",
+      "parts": ["helper-2-ground", "helper-2-body"],
+      "floorY": 657
+    },
+    {
+      "id": "helper-3",
+      "parts": ["helper-3-ground", "helper-3-body"],
+      "floorY": 684
+    },
+    {
+      "id": "helper-overflow",
+      "parts": ["helper-overflow-ground", "helper-overflow-body"],
+      "floorY": 677,
+      "overlay": true
+    }
+  ]
+}

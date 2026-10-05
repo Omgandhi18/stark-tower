@@ -77,11 +77,25 @@ pub fn hydrate(store: &SecretStore, engine: &mut crate::config::EngineConfig) {
     }
 }
 
+/// Load the store. A file that exists but won't parse is moved aside rather than
+/// left to be overwritten by the next save, so the keys in it can be recovered.
 pub fn load(path: &Path) -> SecretStore {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default()
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return SecretStore::default();
+    };
+    match serde_json::from_str(&text) {
+        Ok(store) => store,
+        Err(err) => {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            let aside = path.with_extension(format!("corrupt-{stamp}.json"));
+            eprintln!("[secrets] {} is unreadable ({err}); moved to {}", path.display(), aside.display());
+            let _ = std::fs::rename(path, &aside);
+            SecretStore::default()
+        }
+    }
 }
 
 /// Atomic write, owner-only (0600).
@@ -113,6 +127,21 @@ mod tests {
         s.remove("claude-code", "ANTHROPIC_API_KEY");
         assert!(!s.has("claude-code", "ANTHROPIC_API_KEY"));
         assert!(s.engines.is_empty()); // empty engine map pruned
+    }
+
+    #[test]
+    fn unreadable_store_is_moved_aside_not_lost() {
+        let dir = std::env::temp_dir().join(format!("stark-sec-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("secrets.json");
+        std::fs::write(&path, "{ not json").unwrap();
+        let loaded = load(&path);
+        assert!(loaded.engines.is_empty());
+        assert!(!path.exists(), "the corrupt file must not stay where a save would overwrite it");
+        let kept: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).collect();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(std::fs::read_to_string(kept[0].path()).unwrap(), "{ not json");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

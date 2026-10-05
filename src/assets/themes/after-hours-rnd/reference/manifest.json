@@ -1,0 +1,427 @@
+{
+  "source": "docs/mockups/2026-09-16/04-environment-rnd.png",
+  "viewport": [
+    1584,
+    993
+  ],
+  "plates": {
+    "topbar": {
+      "file": "plate-topbar.png",
+      "rect": [
+        0,
+        0,
+        1584,
+        58
+      ]
+    },
+    "sidebar": {
+      "file": "plate-sidebar.png",
+      "rect": [
+        0,
+        58,
+        184,
+        993
+      ]
+    },
+    "environment": {
+      "file": "plate-environment.png",
+      "rect": [
+        184,
+        58,
+        1584,
+        993
+      ]
+    }
+  },
+  "sprites": {
+    "brand": {
+      "file": "sprite-brand.png",
+      "rect": [
+        16,
+        9,
+        228,
+        51
+      ]
+    },
+    "toggleOn": {
+      "file": "sprite-toggleOn.png",
+      "rect": [
+        1350,
+        15,
+        1404,
+        47
+      ]
+    },
+    "statusDot": {
+      "file": "sprite-statusDot.png",
+      "rect": [
+        994,
+        18,
+        1022,
+        46
+      ]
+    },
+    "bellBadge": {
+      "file": "sprite-bellBadge.png",
+      "rect": [
+        1178,
+        5,
+        1201,
+        26
+      ]
+    },
+    "navBadge": {
+      "file": "sprite-navBadge.png",
+      "rect": [
+        149,
+        303,
+        174,
+        328
+      ]
+    },
+    "cardDot": {
+      "file": "sprite-cardDot.png",
+      "rect": [
+        397,
+        410,
+        415,
+        428
+      ]
+    }
+  },
+  "cutouts": {
+    "buildBayOccupied": {
+      "file": "cutout-buildBayOccupied.png",
+      "rect": [
+        396,
+        475,
+        514,
+        632
+      ]
+    },
+    "helper-1-body": {
+      "file": "cutout-helper-1-body.png",
+      "rect": [
+        425,
+        603,
+        471,
+        653
+      ]
+    },
+    "helper-1-ground": {
+      "file": "cutout-helper-1-ground.png",
+      "rect": [
+        421,
+        599,
+        475,
+        657
+      ]
+    },
+    "helper-2-body": {
+      "file": "cutout-helper-2-body.png",
+      "rect": [
+        607,
+        608,
+        651,
+        658
+      ]
+    },
+    "helper-2-ground": {
+      "file": "cutout-helper-2-ground.png",
+      "rect": [
+        603,
+        604,
+        655,
+        662
+      ]
+    },
+    "helper-3-body": {
+      "file": "cutout-helper-3-body.png",
+      "rect": [
+        502,
+        630,
+        552,
+        685
+      ]
+    },
+    "helper-3-ground": {
+      "file": "cutout-helper-3-ground.png",
+      "rect": [
+        498,
+        626,
+        556,
+        689
+      ]
+    },
+    "helper-overflow-body": {
+      "file": "cutout-helper-overflow-body.png",
+      "rect": [
+        623,
+        645,
+        664,
+        678
+      ]
+    },
+    "helper-overflow-ground": {
+      "file": "cutout-helper-overflow-ground.png",
+      "rect": [
+        619,
+        641,
+        668,
+        682
+      ]
+    },
+    "commandDeckOccupied": {
+      "file": "cutout-commandDeckOccupied.png",
+      "rect": [
+        740,
+        109,
+        802,
+        282
+      ]
+    },
+    "reviewWallOccupied": {
+      "file": "cutout-reviewWallOccupied.png",
+      "rect": [
+        899,
+        396,
+        977,
+        609
+      ]
+    },
+    "rightDeskOccupied": {
+      "file": "cutout-rightDeskOccupied.png",
+      "rect": [
+        1189,
+        561,
+        1275,
+        769
+      ]
+    },
+    "rightPodOccupied": {
+      "file": "cutout-rightPodOccupied.png",
+      "rect": [
+        1362,
+        230,
+        1450,
+        366
+      ]
+    },
+    "bottomDeskOccupied": {
+      "file": "cutout-bottomDeskOccupied.png",
+      "rect": [
+        725,
+        811,
+        830,
+        984
+      ]
+    }
+  },
+  "panels": {
+    "agentCard": {
+      "file": "panel-agentCard.png",
+      "rect": [
+        387,
+        401,
+        563,
+        472
+      ]
+    },
+    "focusControl": {
+      "file": "panel-focusControl.png",
+      "rect": [
+        1197,
+        935,
+        1352,
+        976
+      ]
+    },
+    "zoomControl": {
+      "file": "panel-zoomControl.png",
+      "rect": [
+        1359,
+        935,
+        1499,
+        976
+      ]
+    },
+    "fullscreenControl": {
+      "file": "panel-fullscreenControl.png",
+      "rect": [
+        1521,
+        935,
+        1570,
+        976
+      ]
+    }
+  },
+  "nav": {
+    "highlightX": [
+      5,
+      180
+    ],
+    "items": {
+      "work": {
+        "file": "nav-active-work.png",
+        "rect": [
+          5,
+          84,
+          180,
+          136
+        ]
+      },
+      "environment": {
+        "file": "nav-active-environment.png",
+        "rect": [
+          5,
+          136,
+          180,
+          188
+        ]
+      },
+      "agents": {
+        "file": "nav-active-agents.png",
+        "rect": [
+          5,
+          188,
+          180,
+          240
+        ]
+      },
+      "automations": {
+        "file": "nav-active-automations.png",
+        "rect": [
+          5,
+          240,
+          180,
+          292
+        ]
+      },
+      "notifications": {
+        "file": "nav-active-notifications.png",
+        "rect": [
+          5,
+          292,
+          180,
+          344
+        ]
+      },
+      "settings": {
+        "file": "nav-active-settings.png",
+        "rect": [
+          5,
+          348,
+          180,
+          400
+        ]
+      }
+    },
+    "activeItem": "environment",
+    "inkInactive": "#c7d9e3",
+    "inkActive": "#05e3f6"
+  },
+  "colors": {
+    "statusOk": "#3dc99e",
+    "statusDot": "#12f7ac",
+    "badgeFill": "#f41e3f",
+    "badgeText": "#fee2e9",
+    "cardName": "#fcfeff",
+    "cardStatus": "#22cb9a",
+    "cardTask": "#a3adbb",
+    "cardDot": "#18eda4",
+    "controlText": "#f2f6f9"
+  },
+  "text": {
+    "statusValue": {
+      "rect": [
+        1026,
+        36,
+        1070,
+        49
+      ]
+    },
+    "notificationsBadge": {
+      "rect": [
+        152,
+        306,
+        171,
+        325
+      ]
+    },
+    "bellBadge": {
+      "rect": [
+        1182,
+        7,
+        1198,
+        23
+      ]
+    },
+    "statusDot": {
+      "rect": [
+        1001,
+        25,
+        1015,
+        39
+      ]
+    },
+    "cardDot": {
+      "rect": [
+        400,
+        413,
+        411,
+        425
+      ]
+    },
+    "cardName": {
+      "rect": [
+        418,
+        415,
+        460,
+        425
+      ]
+    },
+    "cardStatus": {
+      "rect": [
+        418,
+        432,
+        461,
+        444
+      ]
+    },
+    "cardTask": {
+      "rect": [
+        418,
+        449,
+        509,
+        461
+      ]
+    },
+    "focusLabel": {
+      "rect": [
+        1245,
+        951,
+        1329,
+        961
+      ]
+    },
+    "zoomLabel": {
+      "rect": [
+        1413,
+        951,
+        1443,
+        961
+      ]
+    }
+  },
+  "intended": [
+    {
+      "id": "leftPodEmpty",
+      "rect": [
+        351,
+        234,
+        437,
+        365
+      ]
+    }
+  ]
+}

@@ -13,10 +13,16 @@
     "windows": [
       {
         "title": "Stark Tower",
-        "width": 1440,
-        "height": 900,
+        "width": 1584,
+        "height": 993,
         "minWidth": 1100,
-        "minHeight": 720
+        "minHeight": 720,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 22,
+          "y": 23
+        }
       }
     ],
     "security": {

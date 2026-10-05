@@ -9,6 +9,21 @@ use std::sync::{Mutex, OnceLock};
 use tauri::{Emitter, Manager};
 
 static TASK_SEQ: AtomicU64 = AtomicU64::new(1);
+/// Spawn counter for chat sessions; see [`ChatSession::gen`].
+static SESSION_GEN: AtomicU64 = AtomicU64::new(1);
+
+/// A task id that stays unique across launches: cards are upserted by id, so a
+/// counter that restarts at 1 would overwrite earlier tasks.
+fn next_task_id() -> String {
+    static LAUNCH_MS: OnceLock<u128> = OnceLock::new();
+    let launch = *LAUNCH_MS.get_or_init(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    });
+    format!("task-{launch:x}-{}", TASK_SEQ.fetch_add(1, Ordering::Relaxed))
+}
 
 /// Nudge the UI to reload the task board.
 fn emit_tasks_changed(app: &tauri::AppHandle) {
@@ -42,6 +57,9 @@ pub struct ChatSession {
     child: Child,
     pub(crate) stdin: ChildStdin,
     pub cwd: String,
+    /// Which spawn this is. A stop, new chat or folder switch replaces the session
+    /// under the same agent id; the replaced session's reader must leave it alone.
+    gen: u64,
 }
 
 impl Drop for ChatSession {
@@ -640,6 +658,7 @@ pub fn start_session(
     let app2 = app.clone();
     let id2 = agent_id.to_string();
     let orch = is_orch;
+    let gen = SESSION_GEN.fetch_add(1, Ordering::Relaxed);
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
         let mut saw_init = false;
@@ -657,26 +676,39 @@ pub fn start_session(
                 handle_line(&app2, &id2, &v, true);
             }
         }
-        // A resumed session that never reached `init` means the stored session id
-        // no longer resolves (Claude rotated or pruned it). Forget the stale
-        // pointer so the next message starts a genuinely fresh session instead of
-        // re-resuming the dead id forever, and tell the user to resend once.
-        if resumed && !saw_init {
-            if let Some(state) = app2.try_state::<crate::AppState>() {
-                let conv = state.ledger.active_conversation(&id2);
-                state.ledger.forget_conversation_session(conv);
+        // Only a session that is still current reports its own end. One that was
+        // stopped or replaced (new chat, folder switch) must not remove, offline or
+        // mark as expired the session that took its place.
+        let ended = {
+            let state = app2.state::<crate::AppState>();
+            let mut map = state.chat.sessions.lock().unwrap();
+            if map.get(&id2).map(|s| s.gen) == Some(gen) {
+                map.remove(&id2)
+            } else {
+                None
             }
-            simple(
-                &app2,
-                &id2,
-                "system",
-                Some("Previous session expired — starting fresh. Please resend your last message.".into()),
-            );
+        };
+        if let Some(ended) = ended {
+            drop(ended);
+            // A resumed session that never reached `init` means the stored session
+            // id no longer resolves (Claude rotated or pruned it). Forget the stale
+            // pointer so the next message starts a genuinely fresh session instead
+            // of re-resuming the dead id forever, and tell the user to resend once.
+            if resumed && !saw_init {
+                if let Some(state) = app2.try_state::<crate::AppState>() {
+                    let conv = state.ledger.active_conversation(&id2);
+                    state.ledger.forget_conversation_session(conv);
+                }
+                simple(
+                    &app2,
+                    &id2,
+                    "system",
+                    Some("Previous session expired — starting fresh. Please resend your last message.".into()),
+                );
+            }
+            simple(&app2, &id2, "exit", None);
+            crate::pty::emit_status(&app2, &id2, AgentStatus::Offline);
         }
-        simple(&app2, &id2, "exit", None);
-        let state = app2.state::<crate::AppState>();
-        state.chat.sessions.lock().unwrap().remove(&id2);
-        crate::pty::emit_status(&app2, &id2, AgentStatus::Offline);
         // If the orchestrator's session ended mid-turn (crash / stop / cwd switch),
         // seal any open delegation batch so pending workers' results aren't
         // stranded waiting for a `result` that will never come.
@@ -696,6 +728,7 @@ pub fn start_session(
                 child,
                 stdin,
                 cwd: cwd.to_string(),
+                gen,
             },
         );
     crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
@@ -775,6 +808,7 @@ pub fn stop(app: &tauri::AppHandle, agent_id: &str) {
 
 /// Run a one-shot task on a worker to completion, streaming its activity to the
 /// UI (so it's visible on the floor + its chat tab), and return the result text.
+/// The task card always closes: done with the result, or blocked with the reason.
 pub fn run_task_blocking(
     app: &tauri::AppHandle,
     agent_id: &str,
@@ -786,7 +820,7 @@ pub fn run_task_blocking(
     persist(app, agent_id, "system", Some(&marker), None, None);
     persist(app, agent_id, "user", Some(task), None, None);
     // Open a task card on the board so this delegation is trackable across turns.
-    let task_id = format!("task-{}", TASK_SEQ.fetch_add(1, Ordering::Relaxed));
+    let task_id = next_task_id();
     if let Some(state) = app.try_state::<crate::AppState>() {
         state
             .ledger
@@ -805,6 +839,23 @@ pub fn run_task_blocking(
     }
     crate::pty::emit_status(app, agent_id, AgentStatus::Thinking);
 
+    let outcome = run_worker(app, agent_id, task, cwd);
+    let (status, detail) = match &outcome {
+        Ok(result) if !result.trim().is_empty() => ("done", truncate(result, 200)),
+        Ok(_) => ("blocked", "The worker finished without a result.".to_string()),
+        Err(e) => ("blocked", truncate(e, 200)),
+    };
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        state.ledger.set_task_status(&task_id, status, Some(&detail));
+    }
+    emit_tasks_changed(app);
+    floor_log(app, agent_id, &format!("task-{status}"), &truncate(task, 80));
+    crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
+    outcome
+}
+
+/// Spawn a one-shot worker for `task` in `cwd` and wait for its final result.
+fn run_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, cwd: &str) -> Result<String, String> {
     // Delegated workers also get their skill kit + the ask_human bridge, so
     // their review gates work even when JARVIS delegated the task.
     let (sock, token) = app
@@ -839,8 +890,21 @@ pub fn run_task_blocking(
     if let Some(state) = app.try_state::<crate::AppState>() {
         state.oneshot_pids.lock().unwrap().insert(pid);
     }
-    let mut stdin = child.stdin.take().ok_or("no stdin")?;
-    let stdout = child.stdout.take().ok_or("no stdout")?;
+    let outcome = drive_worker(app, agent_id, task, &mut child);
+    if outcome.is_err() {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        state.oneshot_pids.lock().unwrap().remove(&pid);
+    }
+    outcome
+}
+
+/// Feed a spawned worker its task, stream its output, and return its result text.
+fn drive_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, child: &mut Child) -> Result<String, String> {
+    let mut stdin = child.stdin.take().ok_or("The worker has no input stream.")?;
+    let stdout = child.stdout.take().ok_or("The worker has no output stream.")?;
     if let Some(stderr) = child.stderr.take() {
         spawn_stderr_pump(app, agent_id, stderr);
     }
@@ -872,25 +936,21 @@ pub fn run_task_blocking(
             }
         }
     }
-    let _ = child.wait();
-    if let Some(state) = app.try_state::<crate::AppState>() {
-        state.oneshot_pids.lock().unwrap().remove(&pid);
-        // Close out the task card. Empty result = the worker produced nothing.
-        let status = if result.trim().is_empty() { "blocked" } else { "done" };
-        state
-            .ledger
-            .set_task_status(&task_id, status, Some(&truncate(&result, 200)));
-    }
-    emit_tasks_changed(app);
-    let status = if result.trim().is_empty() { "task-blocked" } else { "task-done" };
-    floor_log(app, agent_id, status, &truncate(task, 80));
-    crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
     Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_ids_are_unique_within_and_across_launches() {
+        let a = next_task_id();
+        let b = next_task_id();
+        assert_ne!(a, b);
+        // The launch stamp keeps ids from colliding with an earlier launch's `task-1`.
+        assert!(a.starts_with("task-") && a.matches('-').count() == 2, "{a}");
+    }
 
     #[test]
     fn resolve_program_honors_absolute_paths_and_rejects_bogus() {

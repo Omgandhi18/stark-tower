@@ -1,0 +1,59 @@
+{
+  "$comment": "Cut-out rig for FRIDAY's side-view walk (walk_rig.py). Coordinates are source px in the two 1024x1024 stills: side-arm.png is the full side view (only its near arm is used), side-body.png is the same pose made armless with the feet together. Both were restyled to match FRIDAY as the mockup draws her (fair skin, black messy bun, charcoal trousers, navy sneakers). Pivots are joint centres; radii are the round caps that keep joints closed when they bend.",
+  "arm": {
+    "source": "assets/after-hours-rnd/characters/friday/rig/side-arm.png",
+    "shoulder": [494, 326],
+    "elbow": [489, 437],
+    "elbowRadius": 28,
+    "polygon": [
+      [452, 338], [455, 322], [459, 309], [465, 299], [474, 292], [485, 287], [492, 280], [502, 279],
+      [509, 288], [518, 294], [524, 302], [530, 313], [534, 326], [536, 340], [532, 349], [528, 362],
+      [524, 378], [520, 392], [517, 405], [517, 425], [519, 445], [521, 468], [524, 492], [527, 516],
+      [531, 538], [536, 545], [543, 551], [549, 556], [554, 567], [556, 590], [553, 601], [549, 613],
+      [545, 623], [539, 629], [526, 630], [512, 626], [506, 614], [504, 590], [504, 566], [502, 555],
+      [498, 548], [493, 540], [486, 521], [479, 502], [472, 483], [466, 466], [461, 452], [458, 440],
+      [456, 420], [455, 400], [454, 380], [453, 360], [452, 345]
+    ]
+  },
+  "body": {
+    "source": "assets/after-hours-rnd/characters/friday/rig/side-body.png",
+    "top": 82,
+    "ground": 941,
+    "torsoBottom": 508,
+    "trouserRow": 514,
+    "hip": [508, 545],
+    "hipRadius": 59,
+    "knee": [503, 712],
+    "kneeRadius": 36,
+    "ankle": [480, 893],
+    "heel": [458, 939],
+    "ball": [553, 941],
+    "toe": [568, 925],
+    "shoe": [
+      [430, 960], [430, 900], [446, 888], [457, 882], [466, 885], [498, 886], [500, 872], [512, 870],
+      [518, 878], [523, 886], [533, 893], [546, 900], [559, 907], [571, 913], [600, 915], [600, 960]
+    ],
+    "ankleFill": [[462, 868], [514, 868], [516, 906], [460, 906]],
+    "skinSample": [[468, 872], [492, 872], [492, 882], [468, 882]]
+  },
+  "gait": {
+    "frames": 24,
+    "fps": 22,
+    "stride": 500,
+    "stance": 0.62,
+    "stanceCenter": -25,
+    "heelStrike": 14,
+    "flatAt": 0.08,
+    "heelRise": 0.38,
+    "toeOff": 32,
+    "lift": 22,
+    "stanceKnee": 6,
+    "loadingDrop": 3,
+    "lean": 1.5,
+    "armSwing": 16,
+    "armBias": -3,
+    "armLag": 0.04,
+    "elbowFlex": 22,
+    "farShade": 0.66
+  }
+}

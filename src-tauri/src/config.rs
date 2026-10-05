@@ -484,8 +484,13 @@ fn set_owner_only(path: &std::path::Path) {
 #[cfg(not(unix))]
 fn set_owner_only(_path: &std::path::Path) {}
 
-/// Append-only backup of the current config before it's overwritten, into a
-/// sibling `config-backups/` dir (never pruned), so any bad edit is recoverable.
+/// How many config backups to keep; older ones are pruned.
+const BACKUPS_KEPT: usize = 100;
+
+/// Back up the current config before it's overwritten, into a sibling
+/// `config-backups/` dir, so a bad edit stays recoverable. Identical consecutive
+/// copies are skipped and only the newest [`BACKUPS_KEPT`] are kept, so frequent
+/// small saves (a lighting toggle) can't grow the folder forever.
 fn backup_previous(path: &std::path::Path) {
     let Ok(prev) = std::fs::read_to_string(path) else {
         return;
@@ -499,14 +504,34 @@ fn backup_previous(path: &std::path::Path) {
     if std::fs::create_dir_all(&dir).is_err() {
         return;
     }
-    for n in 0..100_000 {
-        let candidate = dir.join(format!("config-{n}.json"));
-        if !candidate.exists() {
-            if std::fs::write(&candidate, &prev).is_ok() {
-                set_owner_only(&candidate);
-            }
-            return;
+    let mut numbered: Vec<(u64, std::path::PathBuf)> = std::fs::read_dir(&dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter_map(|e| {
+                    let p = e.path();
+                    let n = p.file_stem()?.to_str()?.strip_prefix("config-")?.parse::<u64>().ok()?;
+                    Some((n, p))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    numbered.sort_by_key(|(n, _)| *n);
+    if let Some((_, newest)) = numbered.last() {
+        if std::fs::read_to_string(newest).ok().as_deref() == Some(prev.as_str()) {
+            return; // nothing changed since the last backup
         }
+    }
+    let next = numbered.last().map(|(n, _)| n + 1).unwrap_or(0);
+    let candidate = dir.join(format!("config-{next}.json"));
+    if std::fs::write(&candidate, &prev).is_err() {
+        return;
+    }
+    set_owner_only(&candidate);
+    numbered.push((next, candidate));
+    let excess = numbered.len().saturating_sub(BACKUPS_KEPT);
+    for (_, old) in numbered.into_iter().take(excess) {
+        let _ = std::fs::remove_file(old);
     }
 }
 
@@ -590,6 +615,24 @@ mod tests {
         c.onboarded = true;
         save(&path, &c); // overwrites — backs up the previous version
         assert!(dir.join("config-backups/config-0.json").exists());
+        save(&path, &c); // backs up the onboarded version once...
+        save(&path, &c); // ...and doesn't stack identical copies of it
+        assert!(dir.join("config-backups/config-1.json").exists());
+        assert!(!dir.join("config-backups/config-2.json").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn backups_are_capped() {
+        let dir = tmp_dir("cap");
+        let path = dir.join("config.json");
+        let mut c = default_config();
+        for n in 0..(BACKUPS_KEPT as u32 + 5) {
+            c.standup_minutes = n;
+            save(&path, &c);
+        }
+        let kept = std::fs::read_dir(dir.join("config-backups")).unwrap().count();
+        assert_eq!(kept, BACKUPS_KEPT);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

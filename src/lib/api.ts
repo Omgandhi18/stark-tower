@@ -65,6 +65,9 @@ export const getChat = (agentId: string, limit?: number) =>
 
 export const listConversations = () => commands.listConversations();
 
+/** The agent's current saved chat (if any), including the folder it runs in. */
+export const activeConversation = (agentId: string) => commands.activeConversation(agentId);
+
 export const newChat = (agentId: string) => commands.newChat(agentId);
 
 export const openConversation = (conversationId: number) =>

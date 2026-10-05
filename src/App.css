@@ -50,37 +50,57 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  background: #071018;
 }
 
 /* ---- top strip ---- */
 .top {
   display: flex;
   align-items: center;
-  gap: 16px;
-  height: 50px;
-  padding: 0 18px;
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
+  gap: 18px;
+  height: 57px;
+  padding: 0 20px;
+  border-bottom: 1px solid rgba(157, 200, 220, 0.13);
+  background:
+    radial-gradient(circle at 30% -100%, rgba(39, 197, 232, 0.09), transparent 42%),
+    #09131c;
   flex-shrink: 0;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+  z-index: 20;
 }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand-core {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: radial-gradient(circle, #fff, var(--reactor) 45%, #0b2733 82%);
-  box-shadow: 0 0 10px rgba(89, 207, 255, 0.6);
+  position: relative;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px 9px 4px 9px;
+  border: 2px solid #2bdcff;
+  background:
+    linear-gradient(135deg, transparent 22%, rgba(43, 220, 255, 0.42) 23% 42%, transparent 43%),
+    #07141f;
+  box-shadow: 0 0 14px rgba(43, 220, 255, 0.42), inset 0 0 8px rgba(43, 220, 255, 0.32);
   animation: beat 3.4s ease-in-out infinite;
 }
+.brand-copy { display: flex; flex-direction: column; gap: 1px; }
 .brand-name {
-  font-family: var(--mono);
-  font-weight: 600;
-  letter-spacing: 0.26em;
-  font-size: 12.5px;
+  font-family: "Avenir Next", "Helvetica Neue", sans-serif;
+  font-weight: 620;
+  letter-spacing: 0.035em;
+  font-size: 15px;
   color: #f2f7fc;
+}
+.brand-subtitle {
+  color: #738896;
+  font: 9px/1.2 var(--mono);
+  letter-spacing: 0.02em;
 }
 .top-sp { flex: 1; }
 .telem { display: flex; gap: 22px; }
+.telem.compact {
+  gap: 14px;
+  padding: 0 15px;
+  border-left: 1px solid rgba(157, 200, 220, 0.12);
+}
 .telem-u { display: flex; flex-direction: column; align-items: flex-end; }
 .telem-v {
   font-family: var(--mono);
@@ -95,6 +115,165 @@ body {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--dim);
+}
+
+.supervisor-health {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 150px;
+  padding: 7px 12px;
+  border: 1px solid rgba(157, 200, 220, 0.12);
+  background: rgba(4, 13, 20, 0.46);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+}
+.supervisor-health > span:last-child {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.supervisor-health strong { color: #dce8ef; font-size: 10.5px; font-weight: 540; }
+.supervisor-health small { color: #52e4b6; font: 9px/1.3 var(--mono); }
+.supervisor-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #38e9b3;
+  box-shadow: 0 0 12px rgba(56, 233, 179, 0.72);
+}
+
+.workspace-shell {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 184px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+.app-nav {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 26px 9px 16px;
+  border-right: 1px solid rgba(157, 200, 220, 0.12);
+  background:
+    linear-gradient(180deg, rgba(17, 34, 47, 0.72), rgba(7, 17, 25, 0.96)),
+    #09131c;
+  z-index: 10;
+}
+
+.app-nav-main {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.app-nav button {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  align-items: center;
+  min-height: 46px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #b8c7d1;
+  font: 500 12px/1 "Avenir Next", "Helvetica Neue", sans-serif;
+  text-align: left;
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
+}
+
+.app-nav button::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-nav button:hover {
+  color: #ecf5fa;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.app-nav button.active {
+  color: #34ddff;
+  border-color: rgba(52, 221, 255, 0.09);
+  background: linear-gradient(90deg, rgba(35, 194, 228, 0.13), rgba(35, 194, 228, 0.035));
+}
+
+.app-nav button.active::before {
+  background: #31ddff;
+  box-shadow: 0 0 12px rgba(49, 221, 255, 0.72);
+}
+
+.app-nav button small {
+  color: #718490;
+  font: 8px/1 var(--mono);
+}
+
+.app-nav .nav-alert {
+  display: grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #ef4660;
+  color: #fff;
+}
+
+.app-nav-footer {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: auto;
+  padding: 12px 10px 0;
+  border-top: 1px solid rgba(157, 200, 220, 0.1);
+}
+.app-nav-footer > span:last-child { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.app-nav-footer strong {
+  overflow: hidden;
+  color: #bdcbd4;
+  font-size: 9.5px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-nav-footer small { color: #647985; font: 8px/1.3 var(--mono); }
+.nav-floor-light {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  background: #ffb44e;
+  box-shadow: 0 0 10px rgba(255, 180, 78, 0.52);
+}
+
+.shell-content {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Work screen inside the Starkline shell: the toolbar that used to be the top
+   strip, above the floor + chat grid. */
+.work-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.work-view > .main {
+  flex: 1;
+  height: auto;
+  min-height: 0;
 }
 
 /* ---- projects bar (chips in the top strip) ---- */
@@ -162,7 +341,8 @@ body {
 
 /* ---- main split: floor hero + chat rail ---- */
 .main {
-  flex: 1;
+  width: 100%;
+  height: 100%;
   display: grid;
   grid-template-columns: 1.62fr 1fr;
   min-height: 0;

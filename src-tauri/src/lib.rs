@@ -389,6 +389,17 @@ fn get_chat(state: tauri::State<AppState>, agent_id: String, limit: Option<i64>)
     state.ledger.messages(&agent_id, limit.unwrap_or(500))
 }
 
+/// The agent's current saved chat, if it has one, so the UI can restore the folder
+/// it runs in: resuming a Claude session only works from its own folder.
+#[tauri::command]
+#[specta::specta]
+fn active_conversation(state: tauri::State<AppState>, agent_id: String) -> Option<ledger::Conversation> {
+    state
+        .ledger
+        .current_conversation(&agent_id)
+        .and_then(|id| state.ledger.conversation(id))
+}
+
 /// All saved chats across agents, most-recently-active first.
 #[tauri::command]
 #[specta::specta]
@@ -489,14 +500,13 @@ fn list_files(dir: String, limit: Option<usize>) -> Vec<PathEntry> {
     out
 }
 
-/// Reset button: end the live session AND wipe this agent's saved transcript +
-/// resume pointer, so the next message starts a genuinely fresh conversation.
+/// End the agent's live session. Saved chats are never deleted here; starting a
+/// fresh conversation is `new_chat`.
 #[tauri::command]
 #[specta::specta]
-fn chat_stop(app: tauri::AppHandle, state: tauri::State<AppState>, agent_id: String) {
+fn chat_stop(app: tauri::AppHandle, agent_id: String) {
+    // Only the live session ends; the transcript stays in saved chats.
     chat::stop(&app, &agent_id);
-    state.ledger.clear_agent(&agent_id);
-    let _ = app.emit("conversations://changed", ());
 }
 
 /// Deliver the human's decision back to a blocked `ask_human` review.
@@ -691,7 +701,7 @@ fn run_maintenance(app: tauri::AppHandle, state: tauri::State<AppState>) -> Resu
     let _ = app.emit("bugs://changed", ());
 
     let mut task = String::from(
-        "Fix these bugs that agents reported in the Stark Tower app. Work in THIS repo (your cwd). \
+        "Fix these bugs that agents reported in the Starkline app. Work in THIS repo (your cwd). \
 For each: locate the cause, fix it cleanly (match the surrounding code, keep it minimal and \
 reversible), and briefly say what you changed. If one is too vague to act on, say what you'd need.\n\n",
     );
@@ -706,10 +716,12 @@ reversible), and briefly say what you changed. If one is too vague to act on, sa
     let ids: Vec<i64> = bugs.iter().map(|b| b.id).collect();
 
     std::thread::spawn(move || {
-        let _ = chat::run_task_blocking(&app, "dum-e", &task, &repo);
+        // A run that fails or ends without a result fixed nothing: reopen the bugs.
+        let outcome = chat::run_task_blocking(&app, "dum-e", &task, &repo);
+        let fixed = matches!(&outcome, Ok(result) if !result.trim().is_empty());
         if let Some(state) = app.try_state::<AppState>() {
             for id in ids {
-                state.ledger.set_bug_status(id, "fixed");
+                state.ledger.set_bug_status(id, if fixed { "fixed" } else { "open" });
             }
         }
         let _ = app.emit("bugs://changed", ());
@@ -996,6 +1008,7 @@ fn specta_builder() -> tauri_specta::Builder {
             chat_send,
             chat_stop,
             get_chat,
+            active_conversation,
             list_conversations,
             new_chat,
             open_conversation,
@@ -1154,10 +1167,15 @@ fn start_floor_router(app: tauri::AppHandle) {
                 .collect()
         };
         for id in live_idle {
-            for m in floor::drain_inbox(&floor_dir, &id) {
-                floor::log_event(&floor_dir, now, &id, "message-in", &format!("from {} ({})", m.from, m.id));
-                delegation::deliver_message(&app, &id, &m.from, &m.body);
-            }
+            // Archive a message only once it reached the session; otherwise it
+            // stays queued for the next pass.
+            floor::drain_inbox_with(&floor_dir, &id, |m| {
+                let delivered = delegation::deliver_message(&app, &id, &m.from, &m.body);
+                if delivered {
+                    floor::log_event(&floor_dir, now, &id, "message-in", &format!("from {} ({})", m.from, m.id));
+                }
+                delivered
+            });
         }
     });
 }

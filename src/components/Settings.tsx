@@ -4,6 +4,7 @@ import type { AgentConfig, AppConfig, EngineConfig } from "../lib/types";
 import { PALETTE, PRESETS, randomizeRecipe, serializeRecipe } from "../lib/charArt";
 import CharacterPortrait from "./CharacterPortrait";
 import { removeAgent, removeEngine, resetConfig, updateAgent, updateEngine } from "../lib/api";
+import { apiKeyNameFor } from "../lib/engines";
 
 interface Props {
   config: AppConfig;
@@ -318,7 +319,7 @@ function EnginesTab({ config, onConfig }: { config: AppConfig; onConfig: (c: App
   const set = <K extends keyof EngineConfig>(k: K, v: EngineConfig[K]) =>
     setDraft((d) => (d ? { ...d, [k]: v } : d));
 
-  const apiKeyName = draft?.kind === "codex" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
+  const apiKeyName = apiKeyNameFor(draft?.kind ?? "");
   const apiKey = draft?.auth?.env?.[apiKeyName] ?? "";
   const dirty = draft && current && JSON.stringify(draft) !== JSON.stringify(current);
   const inUse = draft ? config.agents.some((a) => a.engine === draft.id) : false;

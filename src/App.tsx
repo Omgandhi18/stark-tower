@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -46,6 +46,26 @@ import HistoryPanel from "./components/HistoryPanel";
 import BugsPanel from "./components/BugsPanel";
 import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
+import ReferenceShell from "./shell/ReferenceShell";
+import ReferenceEnvironment from "./environment/reference/ReferenceEnvironment";
+import type { NavItemId } from "./environment/reference/referenceAssets";
+import { REFERENCE_FIXTURE, type DisplayMode } from "./environment/reference/referenceState";
+import { IS_TAURI } from "./lib/platform";
+
+// Dev-only: overlays the approved mockup for pixel comparison (stripped from builds).
+const MockupCompare = import.meta.env.DEV ? lazy(() => import("./devtools/MockupCompare")) : null;
+
+type AppSection = "work" | "environment";
+
+const PREVIEW_AGENTS: Agent[] = [
+  { id: "jarvis", name: "JARVIS", role: "Orchestrator", kind: "orchestrator", engine: "claude-code", accent: "#4FD0FF", figure: "commander", home_x: 4, home_y: 5, status: "idle" },
+  { id: "vision", name: "VISION", role: "Architecture & Strategy", kind: "worker", engine: "claude-code", accent: "#E86B9A", figure: "architect", home_x: 5, home_y: 10, status: "thinking" },
+  { id: "friday", name: "FRIDAY", role: "Full-stack", kind: "worker", engine: "claude-code", accent: "#FFD166", figure: "engineer", home_x: 8, home_y: 10, status: "working" },
+  { id: "edith", name: "EDITH", role: "Recon & Research", kind: "worker", engine: "claude-code", accent: "#7CF5C4", figure: "recon", home_x: 11, home_y: 10, status: "idle" },
+  { id: "karen", name: "KAREN", role: "Frontend & UI", kind: "worker", engine: "claude-code", accent: "#C08CFF", figure: "specialist", home_x: 14, home_y: 10, status: "working" },
+  { id: "veronica", name: "VERONICA", role: "Ops & Infra", kind: "worker", engine: "claude-code", accent: "#FF9E64", figure: "operative", home_x: 8, home_y: 13, status: "blocked" },
+  { id: "dum-e", name: "DUM-E", role: "Maintenance", kind: "maintenance", engine: "claude-code", accent: "#9AA7B2", figure: "operative", home_x: 1, home_y: 13, status: "idle" },
+];
 
 function lightIcon(mode: string, size = 16) {
   const p = { size, strokeWidth: 2 };
@@ -66,7 +86,7 @@ function lightIcon(mode: string, size = 16) {
 }
 
 export default function App() {
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agents, setAgents] = useState<Agent[]>(IS_TAURI ? [] : PREVIEW_AGENTS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [openAgents, setOpenAgents] = useState<string[]>([]);
   const [assistLinks, setAssistLinks] = useState<AssistLink[]>([]);
@@ -81,6 +101,12 @@ export default function App() {
   const [phase, setPhase] = useState<LightPhase>("day");
   const [closePrompt, setClosePrompt] = useState(false);
   const [booting, setBooting] = useState(true);
+  const [activeSection, setActiveSection] = useState<AppSection>("environment");
+  // "reference" shows exactly the state the approved mockup depicts.
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("live");
+  const [comparing, setComparing] = useState(false);
+  // Visual only until the supervisor owns a power assertion.
+  const [keepAwake, setKeepAwake] = useState(false);
   const agentsRef = useRef<Agent[]>([]);
   agentsRef.current = agents;
 
@@ -168,6 +194,7 @@ export default function App() {
   }, [agents, openAgents.length, openAgent]);
 
   useEffect(() => {
+    if (!IS_TAURI) return;
     listAgents().then(setAgents).catch(() => {});
     getConfig().then(setConfig).catch(() => {});
     listProjects()
@@ -180,6 +207,7 @@ export default function App() {
 
   // Live config updates (e.g. from another window) refresh the roster.
   useEffect(() => {
+    if (!IS_TAURI) return;
     const unsub = onConfigChanged(applyConfig);
     return () => {
       unsub.then((f) => f());
@@ -188,6 +216,7 @@ export default function App() {
 
   // Guard the window close: if any agent session is live, confirm first.
   useEffect(() => {
+    if (!IS_TAURI) return;
     const win = getCurrentWindow();
     const unlisten = win.onCloseRequested((e) => {
       const running = agentsRef.current.filter((a) => a.status !== "offline").length;
@@ -203,6 +232,7 @@ export default function App() {
 
   // Live status → sprites + roster.
   useEffect(() => {
+    if (!IS_TAURI) return;
     const unsub = onAgentStatus((e) => {
       setAgents((prev) =>
         prev.map((a) => (a.id === e.agentId ? { ...a, status: e.status } : a)),
@@ -215,6 +245,7 @@ export default function App() {
 
   // Assist beams on the floor.
   useEffect(() => {
+    if (!IS_TAURI) return;
     const unsub = onAssistLink(({ from, to }) => {
       const id = ++linkCounter.current;
       setAssistLinks((prev) => [...prev, { from, to, id }]);
@@ -230,6 +261,7 @@ export default function App() {
 
   // Human-in-the-loop review requests from agents (the lavish alternative).
   useEffect(() => {
+    if (!IS_TAURI) return;
     const unsub = onReviewRequest((r) => {
       if (r.kind === "questions") {
         // normal Q&A goes inline in the agent's chat, not the overlay
@@ -248,10 +280,40 @@ export default function App() {
 
   // Periodic reconcile.
   useEffect(() => {
+    if (!IS_TAURI) return;
     const iv = window.setInterval(() => {
       listAgents().then(setAgents).catch(() => {});
     }, 4000);
     return () => window.clearInterval(iv);
+  }, []);
+
+  // ⌥R flips between the mockup's reference state and live agents (dev builds).
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || e.code !== "KeyR") return;
+      e.preventDefault();
+      setDisplayMode((m) => (m === "live" ? "reference" : "live"));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const navigate = useCallback((id: NavItemId) => {
+    switch (id) {
+      case "environment":
+        setActiveSection("environment");
+        break;
+      case "settings":
+        setSettingsOpen(true);
+        break;
+      case "agents":
+        setActiveSection("work");
+        setRosterOpen(true);
+        break;
+      default:
+        setActiveSection("work");
+    }
   }, []);
 
   const online = agents.filter((a) => a.status !== "offline").length;
@@ -260,57 +322,82 @@ export default function App() {
   ).length;
   const load = agents.length ? Math.round((active / agents.length) * 100) : 0;
 
+  // One chat per opened agent, kept mounted so switching agents keeps each thread.
+  // Shown in the Work rail or, on the Environment, in its side panel.
+  const chatStack = openAgents.map((id) => {
+    const a = agents.find((x) => x.id === id);
+    if (!a) return null;
+    return (
+      <Chat
+        key={`${id}-${reloadKeys[id] ?? 0}`}
+        agent={a}
+        active={id === selectedId}
+        projects={projects}
+        activeDir={activeProject}
+        question={questions[a.id]}
+        onAnswer={answerQuestion}
+      />
+    );
+  });
+
+  // Comparing against the mockup always shows its reference state and screen.
+  const mode: DisplayMode = comparing ? "reference" : displayMode;
+  const reference = mode === "reference";
+  const section: AppSection = comparing ? "environment" : activeSection;
+
   return (
     <div className="app">
-      <header className="top">
-        <div className="brand">
-          <span className="brand-core" />
-          <span className="brand-name">STARK&nbsp;TOWER</span>
-        </div>
-        <ProjectsBar
-          projects={projects}
-          active={activeProject}
-          onChange={(s) => {
-            setProjects(s.projects);
-            setActiveProject(s.active);
-          }}
-        />
-        <div className="top-sp" />
-        <UpdateBadge />
-        <div className="telem">
-          <div className="telem-u">
-            <span className="telem-v">
-              {online}
-              <span className="dim">/{agents.length}</span>
-            </span>
-            <span className="telem-k">online</span>
-          </div>
-          <div className="telem-u">
-            <span className="telem-v">{active}</span>
-            <span className="telem-k">active</span>
-          </div>
-          <div className="telem-u">
-            <span className="telem-v accent">{load}%</span>
-            <span className="telem-k">reactor</span>
-          </div>
-        </div>
-        <button
-          className="gear"
-          onClick={cycleLight}
-          title={`Lighting: ${LIGHT_LABEL[lightMode] ?? "Auto"} · ${phase}`}
-        >
-          {lightIcon(lightMode)}
-        </button>
-        <button
-          className="gear"
-          onClick={() => setSettingsOpen(true)}
-          title="Configuration"
-        >
-          <SettingsIcon size={16} strokeWidth={2} />
-        </button>
-      </header>
-
-      <div className="main">
+      <ReferenceShell
+        supervisor={reference ? REFERENCE_FIXTURE.supervisor : online > 0 ? "healthy" : "standby"}
+        notifications={reference ? REFERENCE_FIXTURE.notifications : reviews.length}
+        keepAwake={reference ? REFERENCE_FIXTURE.keepAwake : keepAwake}
+        activeNav={reference ? REFERENCE_FIXTURE.activeNav : section}
+        onToggleKeepAwake={() => setKeepAwake((on) => !on)}
+        onNavigate={navigate}
+      >
+        {section === "environment" ? (
+          <ReferenceEnvironment
+            agents={agents}
+            mode={mode}
+            focusId={selectedId}
+            onSelectAgent={openAgent}
+            chat={chatStack}
+          />
+        ) : (
+          <div className="work-view">
+            <div className="top work-toolbar">
+              <ProjectsBar
+                projects={projects}
+                active={activeProject}
+                onChange={(s) => {
+                  setProjects(s.projects);
+                  setActiveProject(s.active);
+                }}
+              />
+              <div className="top-sp" />
+              {IS_TAURI && <UpdateBadge />}
+              <div className="telem compact">
+                <div className="telem-u">
+                  <span className="telem-v">{active}</span>
+                  <span className="telem-k">active</span>
+                </div>
+                <div className="telem-u">
+                  <span className="telem-v accent">{load}%</span>
+                  <span className="telem-k">load</span>
+                </div>
+              </div>
+              <button
+                className="gear"
+                onClick={cycleLight}
+                title={`Lighting: ${LIGHT_LABEL[lightMode] ?? "Auto"} · ${phase}`}
+              >
+                {lightIcon(lightMode)}
+              </button>
+              <button className="gear" onClick={() => setSettingsOpen(true)} title="Configuration">
+                <SettingsIcon size={16} strokeWidth={2} />
+              </button>
+            </div>
+            <div className="main">
         <section className="floor-pane">
           <StarkFloor
             agents={agents}
@@ -380,24 +467,11 @@ export default function App() {
           )}
         </section>
 
-        <aside className="chat-rail">
-          {openAgents.map((id) => {
-            const a = agents.find((x) => x.id === id);
-            if (!a) return null;
-            return (
-              <Chat
-                key={`${id}-${reloadKeys[id] ?? 0}`}
-                agent={a}
-                active={id === selectedId}
-                projects={projects}
-                activeDir={activeProject}
-                question={questions[a.id]}
-                onAnswer={answerQuestion}
-              />
-            );
-          })}
-        </aside>
-      </div>
+        <aside className="chat-rail">{chatStack}</aside>
+            </div>
+          </div>
+        )}
+      </ReferenceShell>
 
       {settingsOpen && config && (
         <Settings
@@ -447,6 +521,12 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {MockupCompare && (
+        <Suspense fallback={null}>
+          <MockupCompare onActiveChange={setComparing} />
+        </Suspense>
       )}
     </div>
   );

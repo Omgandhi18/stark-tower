@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Plus, X } from "lucide-react";
 import type { ProjectInfo, ProjectsState } from "../lib/types";
 import { addProject, removeProject, setProject } from "../lib/api";
+import { errorMessage } from "../lib/errors";
 
 interface Props {
   projects: ProjectInfo[];
@@ -25,7 +26,7 @@ export default function ProjectsBar({ projects, active, onChange }: Props) {
       onChange(await addProject(p));
       setDraft("");
     } catch (e) {
-      setErr(typeof e === "string" ? e : "invalid path");
+      setErr(errorMessage(e, "That folder couldn't be used."));
     }
   };
 

@@ -1,0 +1,31 @@
+{
+  "$comment": "Animated characters for the After Hours R&D reference scene. Sheets are generated art (assets/), sliced by sprite_sheet.py; walks are posed from a cut-out rig (walkRig, walk_rig.py); 'seated' frames are derived from the mockup's own pixels so the resting frame stays identical to the mockup.",
+  "outDir": "src/assets/themes/after-hours-rnd/characters",
+  "characters": [
+    {
+      "id": "friday",
+      "height": 165,
+      "seated": {
+        "cutout": "src/assets/themes/after-hours-rnd/reference/cutout-buildBayOccupied.png",
+        "taps": [
+          { "rect": [82, 69, 99, 84], "dy": 1 },
+          { "rect": [89, 69, 99, 84], "dy": 1 }
+        ],
+        "fps": 7
+      },
+      "walkRig": "scripts/mockup-extract/specs/friday-walk-rig.json",
+      "sheets": [
+        {
+          "file": "assets/after-hours-rnd/characters/friday/poses-sheet.png",
+          "frames": 6,
+          "animations": {
+            "rise": { "frames": [0, 1], "fps": 6 },
+            "stand": { "frames": [2, 3], "fps": 1.5 },
+            "talk": { "frames": [4, 2], "fps": 1.2 },
+            "listen": { "frames": [5], "fps": 1 }
+          }
+        }
+      ]
+    }
+  ]
+}

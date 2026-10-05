@@ -11,7 +11,8 @@ import type {
   ProjectInfo,
   ReviewRequest,
 } from "../lib/types";
-import { chatSend, chatStop, getChat, listFiles, onChatEvent } from "../lib/api";
+import { activeConversation, chatSend, getChat, listFiles, newChat, onChatEvent } from "../lib/api";
+import { errorMessage } from "../lib/errors";
 
 /** If the caret sits inside an `@token`, return its start index and query. */
 function detectMention(
@@ -188,16 +189,35 @@ export default function Chat({
       .catch(() => {});
   }, [agent.id]);
 
-  // Default this chat's directory to the active project until the user picks one.
+  // A saved chat runs in its own folder (Claude only resumes a session from the
+  // folder it started in); a chat that never ran defaults to the active project.
+  const [dirResolved, setDirResolved] = useState(false);
   useEffect(() => {
-    if (!dir && activeDir) setDir(activeDir);
-  }, [activeDir, dir]);
+    let live = true;
+    activeConversation(agent.id)
+      .then((c) => {
+        if (live && c?.cwd) setDir(c.cwd);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (live) setDirResolved(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [agent.id]);
 
-  const reset = async () => {
+  useEffect(() => {
+    if (dirResolved && !dir && activeDir) setDir(activeDir);
+  }, [dirResolved, activeDir, dir]);
+
+  // Start over in a fresh chat; the current one stays in saved chats.
+  const startNewChat = async () => {
     try {
-      await chatStop(agent.id);
-    } catch {
-      /* ignore */
+      await newChat(agent.id);
+    } catch (err) {
+      push({ role: "error", text: errorMessage(err, "Couldn't start a new chat.") });
+      return;
     }
     setMessages([]);
     setPending(false);
@@ -233,6 +253,10 @@ export default function Chat({
           break;
         case "exit":
           push({ role: "system", text: "session ended" });
+          break;
+        case "system":
+          // Steer notes, teammate messages and session notices.
+          if (e.text) push({ role: "system", text: e.text });
           break;
       }
     });
@@ -282,7 +306,7 @@ export default function Chat({
       await chatSend(agent.id, text, dir || undefined);
     } catch (err) {
       setPending(false);
-      push({ role: "error", text: typeof err === "string" ? err : "send failed" });
+      push({ role: "error", text: errorMessage(err, "Couldn't send the message.") });
     }
   };
 
@@ -306,7 +330,7 @@ export default function Chat({
             ))}
           </select>
         </label>
-        <button className="chat-reset" onClick={reset} title="Reset session">
+        <button className="chat-reset" onClick={startNewChat} title="New chat (this one stays in saved chats)">
           <RotateCcw size={14} strokeWidth={2} />
         </button>
       </div>
