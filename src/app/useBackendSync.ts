@@ -39,6 +39,10 @@ import { useWorkspace } from "../stores/workspace";
 const AGENT_RECONCILE_MS = 10_000;
 /** Provider installs and the bridge rarely change; re-check now and then. */
 const HEALTH_REFRESH_MS = 60_000;
+/** The first reads are retried, waiting a little longer each time: a failed one would leave its screen loading for good. */
+const FIRST_LOAD_ATTEMPTS = 8;
+const FIRST_LOAD_BACKOFF_MS = 400;
+const FIRST_LOAD_BACKOFF_MAX_MS = 4_000;
 
 const report = (what: string) => (error: unknown) => {
   console.error(`[sync] couldn't load ${what}: ${errorMessage(error, "unknown error")}`);
@@ -46,27 +50,52 @@ const report = (what: string) => (error: unknown) => {
 
 const reloadAgents = () => listAgents().then(useAgents.getState().replace).catch(report("agents"));
 
+const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+/** Load something the app needs from the start, retrying until it works or `stopped` says to give up. */
+async function firstLoad(load: () => Promise<unknown>, onFailure: (error: unknown) => void, stopped: () => boolean): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await load();
+      return;
+    } catch (error) {
+      if (stopped()) return;
+      if (attempt >= FIRST_LOAD_ATTEMPTS) {
+        onFailure(error);
+        return;
+      }
+      await wait(Math.min(FIRST_LOAD_BACKOFF_MS * 2 ** (attempt - 1), FIRST_LOAD_BACKOFF_MAX_MS));
+      if (stopped()) return;
+    }
+  }
+}
+
 export function useBackendSync() {
   useEffect(() => {
     if (!IS_TAURI) return;
 
     const workspace = useWorkspace.getState();
     const system = useSystem.getState();
+    let unmounted = false;
+    const stopped = () => unmounted;
+    const first = (what: string, load: () => Promise<unknown>) => void firstLoad(load, report(what), stopped);
 
-    reloadAgents();
-    getConfig()
-      .then(useConfig.getState().apply)
-      .catch((e) => useConfig.getState().fail(errorMessage(e, "The configuration couldn't be read.")));
-    workspace.refreshProjects().catch(report("projects"));
-    workspace.refreshConversations().catch(report("saved chats"));
-    workspace.refreshTasks().catch(report("tasks"));
-    workspace.refreshBugs().catch(report("bugs"));
-    useAttention.getState().refresh().catch(report("pending reviews"));
-    useNotifications.getState().refresh().catch(report("notifications"));
-    useAutomations.getState().refresh().catch(report("automations"));
-    system.refreshHealth().catch(report("runtime health"));
-    system.refreshPower().catch(report("keep-awake state"));
-    checkUpdate().catch(report("update status"));
+    first("agents", () => listAgents().then(useAgents.getState().replace));
+    void firstLoad(
+      () => getConfig().then(useConfig.getState().apply),
+      (e) => useConfig.getState().fail(errorMessage(e, "The configuration couldn't be read.")),
+      stopped,
+    );
+    first("projects", workspace.refreshProjects);
+    first("saved chats", workspace.refreshConversations);
+    first("tasks", workspace.refreshTasks);
+    first("bugs", workspace.refreshBugs);
+    first("pending reviews", useAttention.getState().refresh);
+    first("notifications", useNotifications.getState().refresh);
+    first("automations", useAutomations.getState().refresh);
+    first("runtime health", system.refreshHealth);
+    first("keep-awake state", system.refreshPower);
+    first("update status", checkUpdate);
 
     const subscriptions: Array<Promise<UnlistenFn>> = [
       onAgentStatus((e) => useAgents.getState().setStatus(e.agentId, e.status)),
@@ -95,12 +124,13 @@ export function useBackendSync() {
     // Background checks started by the first health read may answer before their listener
     // exists; one more read once every listener is in place picks those answers up.
     Promise.all(subscriptions)
-      .then(() => useSystem.getState().refreshHealth())
+      .then(() => firstLoad(useSystem.getState().refreshHealth, report("runtime health"), stopped))
       .catch(report("runtime health"));
 
     const agentTimer = window.setInterval(reloadAgents, AGENT_RECONCILE_MS);
     const healthTimer = window.setInterval(() => useSystem.getState().refreshHealth().catch(report("runtime health")), HEALTH_REFRESH_MS);
     return () => {
+      unmounted = true;
       window.clearInterval(agentTimer);
       window.clearInterval(healthTimer);
       for (const unlisten of subscriptions) unlisten.then((off) => off()).catch(() => {});

@@ -6,6 +6,7 @@ export type {
   AgentKind,
   AgentStatus,
   AgentConfig,
+  Tone,
   AppConfig,
   AuthConfig,
   Bug,

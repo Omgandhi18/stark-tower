@@ -60,7 +60,7 @@ test.describe("conversation", () => {
     await page.getByRole("button", { name: "New chat" }).click();
     await expect(log.getByText("Start a conversation with FRIDAY")).toBeVisible();
     const earlier = page.getByRole("navigation", { name: "Conversations" });
-    await earlier.getByRole("button", { name: /Redesign the settings page/ }).click();
+    await earlier.getByRole("button", { name: /^Redesign the settings page/ }).click();
     await expect(log.getByText("Can you redesign the settings page?", { exact: false })).toBeVisible();
   });
 });

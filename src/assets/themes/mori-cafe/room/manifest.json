@@ -1,0 +1,174 @@
+{
+  "source": "docs/mockups/2026-09-16/07-environment-mori.png",
+  "viewport": [
+    1584,
+    993
+  ],
+  "plate": {
+    "file": "plate.png",
+    "rect": [
+      160,
+      60,
+      1582,
+      993
+    ]
+  },
+  "cutouts": {
+    "counterOccupied": {
+      "file": "cutout-counterOccupied.png",
+      "rect": [
+        352,
+        221,
+        452,
+        364
+      ]
+    },
+    "windowTableOccupied": {
+      "file": "cutout-windowTableOccupied.png",
+      "rect": [
+        736,
+        318,
+        868,
+        526
+      ]
+    },
+    "terraceOccupied": {
+      "file": "cutout-terraceOccupied.png",
+      "rect": [
+        1212,
+        324,
+        1302,
+        572
+      ]
+    },
+    "helper-1": {
+      "file": "cutout-helper-1.png",
+      "rect": [
+        358,
+        664,
+        432,
+        754
+      ]
+    },
+    "rackOccupied": {
+      "file": "cutout-rackOccupied.png",
+      "rect": [
+        224,
+        510,
+        312,
+        752
+      ]
+    },
+    "longTableOccupied": {
+      "file": "cutout-longTableOccupied.png",
+      "rect": [
+        620,
+        548,
+        712,
+        686
+      ]
+    },
+    "loungeOccupied": {
+      "file": "cutout-loungeOccupied.png",
+      "rect": [
+        1412,
+        600,
+        1512,
+        746
+      ],
+      "added": true
+    }
+  },
+  "intended": [
+    {
+      "id": "jarvisLabel",
+      "rect": [
+        434,
+        232,
+        552,
+        294
+      ]
+    },
+    {
+      "id": "fridayLabel",
+      "rect": [
+        826,
+        314,
+        952,
+        362
+      ]
+    },
+    {
+      "id": "visionLabel",
+      "rect": [
+        1301,
+        322,
+        1432,
+        370
+      ]
+    },
+    {
+      "id": "edithLabel",
+      "rect": [
+        308,
+        526,
+        426,
+        576
+      ]
+    },
+    {
+      "id": "karenLabel",
+      "rect": [
+        720,
+        551,
+        830,
+        599
+      ]
+    },
+    {
+      "id": "todayBoard",
+      "rect": [
+        418,
+        394,
+        540,
+        472
+      ]
+    },
+    {
+      "id": "agentCard",
+      "rect": [
+        1203,
+        106,
+        1571,
+        249
+      ]
+    },
+    {
+      "id": "clock",
+      "rect": [
+        1411,
+        61,
+        1574,
+        104
+      ]
+    },
+    {
+      "id": "caption",
+      "rect": [
+        166,
+        900,
+        504,
+        972
+      ]
+    },
+    {
+      "id": "sceneControls",
+      "rect": [
+        1317,
+        908,
+        1570,
+        965
+      ]
+    }
+  ]
+}

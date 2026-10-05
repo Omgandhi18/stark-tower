@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { CalendarClock, Play, RotateCcw, SkipForward, SquareArrowOutUpRight, X } from "lucide-react";
+import { CalendarClock, CheckCheck, Play, RotateCcw, SkipForward, SquareArrowOutUpRight, X } from "lucide-react";
 import { Button, InlineCode, Portrait, StatusPill } from "../../design";
-import { closeTask, resumeTask, runAutomationNow, skipMissedRun, startTask } from "../../lib/api";
+import { closeTask, resumeTask, reviewTask, runAutomationNow, skipMissedRun, startTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { formatRelative } from "../../lib/time";
 import type { Agent, Notification } from "../../lib/types";
@@ -130,10 +130,17 @@ export default function NotificationSummary({ notification: n, agent, now }: Not
               Start over
             </Button>
           )}
-          {open && task.status !== "closed" && (
-            <Button variant="ghost" icon={X} onClick={() => run(() => closeTask(task.id), "The task couldn't be closed.")}>
-              Close task
+          {task.status === "done" ? (
+            <Button variant="ghost" icon={CheckCheck} onClick={() => run(() => reviewTask(task.id), "The task couldn't be marked reviewed.")}>
+              Mark as reviewed
             </Button>
+          ) : (
+            open &&
+            !["closed", "reviewed"].includes(task.status) && (
+              <Button variant="ghost" icon={X} onClick={() => run(() => closeTask(task.id), "The task couldn't be closed.")}>
+                Close task
+              </Button>
+            )
           )}
         </div>
       )}

@@ -28,7 +28,12 @@ export async function openApp(page: Page, scenario: Scenario = defaultScenario()
   await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
 }
 
-/** Go to a sidebar destination. */
+const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Go to a sidebar destination (by its own label: "Work", not the nested "All work"). */
 export async function goTo(page: Page, label: string) {
-  await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: label }).click();
+  await page
+    .getByRole("navigation", { name: "Main" })
+    .getByRole("button", { name: new RegExp(`^${escaped(label)}\\b`) })
+    .click();
 }

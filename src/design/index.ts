@@ -10,7 +10,7 @@ export { SelectField, TextArea, TextField, type SelectOption } from "./component
 export { EmptyState, Kbd, SkeletonRows } from "./components/EmptyState";
 export { OverflowMenu, type MenuItem } from "./components/Menu";
 export { Portrait, type PortraitSize } from "./components/Portrait";
-export { portraitUrl } from "./portraits";
+export { PortraitOutfits, portraitUrl } from "./portraits";
 export { Markdown } from "./components/Markdown";
 export { KeepAlive } from "./components/KeepAlive";
 export { Dialog } from "./components/Dialog";

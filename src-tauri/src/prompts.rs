@@ -47,17 +47,19 @@ fn project_map(app: &tauri::AppHandle) -> String {
     s
 }
 
-/// The agent's editable personality (falls back to the built-in default).
+/// The agent's editable personality (falls back to the built-in default), then its tone dials.
 fn personality_for(app: &tauri::AppHandle, agent_id: &str) -> String {
-    if let Some(state) = app.try_state::<crate::AppState>() {
-        let cfg = state.config.lock().unwrap();
-        if let Some(a) = cfg.agent(agent_id) {
-            if !a.personality.trim().is_empty() {
-                return a.personality.clone();
-            }
+    let (personality, tone) = match app.try_state::<crate::AppState>() {
+        Some(state) => {
+            let cfg = state.config.lock().unwrap();
+            let agent = cfg.agent(agent_id);
+            let written = agent.map(|a| a.personality.clone()).filter(|p| !p.trim().is_empty());
+            (written.unwrap_or_else(|| crate::config::default_personality(agent_id)), agent.and_then(|a| a.tone))
         }
-    }
-    crate::config::default_personality(agent_id).to_string()
+        None => (crate::config::default_personality(agent_id), None),
+    };
+    let tone = tone.unwrap_or_else(|| crate::tone::default_for(agent_id));
+    format!("{personality}\n\n{}", tone.describe())
 }
 
 /// The engine an agent runs on (falls back to the built-in Claude Code engine).

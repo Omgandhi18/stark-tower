@@ -15,7 +15,7 @@ fn yes() -> bool {
     true
 }
 fn cfg_version() -> u32 {
-    8
+    9
 }
 
 /// v4→v5: the floor became a full facility with a desk bullpen; seat the built-in
@@ -131,6 +131,9 @@ pub struct AgentConfig {
     /// The model those helpers use ("" = the provider's choice).
     #[serde(default)]
     pub helper_model: String,
+    /// How the agent comes across (dials); filled with its default when missing.
+    #[serde(default)]
+    pub tone: Option<crate::tone::Tone>,
 }
 fn default_engine_id() -> String {
     "claude-code".into()
@@ -165,6 +168,19 @@ fn default_theme() -> String {
     THEMES[0].into()
 }
 
+/// What the agents wear besides one theme's outfits: the active theme's ("theme"), or
+/// their own look in every theme ("own").
+pub const OUTFIT_MODES: [&str; 2] = ["theme", "own"];
+
+fn default_outfits() -> String {
+    OUTFIT_MODES[0].into()
+}
+
+/// Whether `outfits` is a choice Starkline has: a mode, or the theme whose outfits to wear.
+pub fn is_outfits(outfits: &str) -> bool {
+    OUTFIT_MODES.contains(&outfits) || THEMES.contains(&outfits)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AppConfig {
     #[serde(default = "cfg_version")]
@@ -187,6 +203,10 @@ pub struct AppConfig {
     /// How Starkline looks: one of [`THEMES`]. Tasks, permissions and providers don't change with it.
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// What the agents wear: the active theme's outfits ("theme"), their own look in every
+    /// theme ("own"), or one theme's outfits (one of [`THEMES`]).
+    #[serde(default = "default_outfits")]
+    pub outfits: String,
     pub engines: Vec<EngineConfig>,
     pub agents: Vec<AgentConfig>,
 }
@@ -266,7 +286,8 @@ pub fn default_engines() -> Vec<EngineConfig> {
 }
 
 /// Default character/system prompt for a built-in agent id (empty for unknown).
-pub fn default_personality(id: &str) -> &'static str {
+/// What each built-in agent does: their job, and how they hand work back.
+fn default_role(id: &str) -> &'static str {
     match id {
         "jarvis" => "You orchestrate a team of specialist agents. Answer questions and do small or \
 quick tasks yourself, directly. Delegate larger or specialized work to the right specialist for \
@@ -310,16 +331,60 @@ trade-off. For a significant decision, get the user's call via ask_human before 
     }
 }
 
+/// How each built-in agent talks: the way the character is with Tony Stark. A bit of
+/// fun, a bit of sarcasm, glad to be here, and never at the expense of being clear.
+fn default_voice(id: &str) -> &'static str {
+    match id {
+        "jarvis" => "the way JARVIS is with Tony Stark: a composed English butler who has run a \
+genius's workshop for years. Unflappable, impeccably polite and dryly witty; understatement is your \
+favourite joke. Call the developer \"sir\" now and then, and take quiet pride in a well-run team. \
+Lead with the answer, and say plainly when something is wrong or risky.",
+        "friday" => "the way FRIDAY is with Tony Stark: warm, quick and a little cheeky, with an easy \
+Irish turn of phrase now and then. Call the developer \"boss\", stay cool when things catch fire, and \
+let it show that you're glad to be on the job. Keep the banter to a line; the work comes first.",
+        "vision" => "the way Vision speaks: calm, thoughtful and gently formal, with a philosopher's \
+curiosity about why a system is the way it is. You're precise to the point of being literal, which \
+is now and then funny without you meaning it to be, and you're kind when you disagree. Keep \
+reflections brief and land on a clear recommendation.",
+        "edith" => "the way EDITH serves: capable, endearingly literal and a little too ready to bring \
+maximum firepower to a small question. Confirm the target before a big search, report with crisp \
+precision, and allow yourself one dry remark about the scale of the effort. You never joke about \
+facts.",
+        "karen" => "the way KAREN talks Peter Parker through his suit: friendly, encouraging and \
+chatty in the best way. Cheer good calls, offer helpful options, and gently tease when someone tries \
+to skip the hard part (tests, accessibility, empty states). Get brief when it's time to ship.",
+        "veronica" => "like the heavy-duty backup who only gets called in for the big jobs: calm, \
+blunt and sturdy, with dry humour and a hint of pride at being needed. You have no patience for \
+hand-wavy plans that touch production, and you say so, politely.",
+        "dum-e" => "like Stark's eager workshop robot: enthusiastic, earnest and delighted to be \
+trusted with a fix. Own your past spills with good humour, then get it right. Keep the cheer short and \
+the fixes careful.",
+        _ => "",
+    }
+}
+
+/// A built-in agent's default personality: their job, then how they talk.
+pub fn default_personality(id: &str) -> String {
+    let role = default_role(id);
+    let voice = default_voice(id);
+    match (role.is_empty(), voice.is_empty()) {
+        (true, _) => String::new(),
+        (false, true) => role.to_string(),
+        (false, false) => format!("{role}\n\nHow you talk: {voice}"),
+    }
+}
+
 /// The built-in Stark roster as config (personalities filled from defaults).
 pub fn default_agents() -> Vec<AgentConfig> {
     crate::agents::default_roster()
         .into_iter()
         .map(|a| AgentConfig {
-            personality: default_personality(&a.id).to_string(),
+            personality: default_personality(&a.id),
             model: String::new(),
             enabled: true,
             helpers: true,
             helper_model: String::new(),
+            tone: Some(crate::tone::default_for(&a.id)),
             id: a.id,
             name: a.name,
             role: a.role,
@@ -349,6 +414,7 @@ pub fn default_config() -> AppConfig {
         standup_minutes: 0,
         keep_awake: false,
         theme: default_theme(),
+        outfits: default_outfits(),
         engines: default_engines(),
         agents: default_agents(),
     }
@@ -397,7 +463,7 @@ pub fn load(path: &std::path::Path) -> AppConfig {
     if cfg.version < 2 {
         for a in cfg.agents.iter_mut() {
             if a.personality.contains(LEGACY_ROSTER_SIGNATURE) {
-                a.personality = default_personality(&a.id).to_string();
+                a.personality = default_personality(&a.id);
             }
         }
         cfg.version = 2;
@@ -460,13 +526,27 @@ pub fn load(path: &std::path::Path) -> AppConfig {
         }
         cfg.version = 8;
     }
-    // Backfill personalities that were left empty.
+    // v8 → v9: the built-in agents gained a voice. Agents still on their old default
+    // (the job alone) get the new one; anything the developer wrote stays as it is.
+    if cfg.version < 9 {
+        for a in cfg.agents.iter_mut() {
+            let role = default_role(&a.id);
+            if !role.is_empty() && a.personality.trim() == role.trim() {
+                a.personality = default_personality(&a.id);
+            }
+        }
+        cfg.version = 9;
+    }
+    // Backfill personalities that were left empty, and tone dials (new in v9).
     for a in cfg.agents.iter_mut() {
         if a.personality.trim().is_empty() {
             let d = default_personality(&a.id);
             if !d.is_empty() {
-                a.personality = d.to_string();
+                a.personality = d;
             }
+        }
+        if a.tone.is_none() {
+            a.tone = Some(crate::tone::default_for(&a.id));
         }
     }
     // Ensure built-in engines are always present (merge by id, keep user copies).
@@ -595,6 +675,42 @@ mod tests {
         assert!(c.engine("claude-code").is_some());
         assert!(c.agents.iter().any(|a| a.kind == AgentKind::Orchestrator));
         assert_eq!(c.roster().len(), c.agents.iter().filter(|a| a.enabled).count());
+    }
+
+    #[test]
+    fn built_in_agents_gain_a_voice_unless_you_wrote_your_own() {
+        let dir = tmp_dir("voice");
+        let path = dir.join("config.json");
+        let mut old = default_config();
+        old.version = 8;
+        for a in old.agents.iter_mut() {
+            a.personality = default_role(&a.id).to_string();
+        }
+        let vision = old.agents.iter_mut().find(|a| a.id == "vision").unwrap();
+        vision.personality = "Mine, keep it.".into();
+        std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
+        let loaded = load(&path);
+        let jarvis = loaded.agent("jarvis").unwrap();
+        assert!(jarvis.personality.starts_with(default_role("jarvis")));
+        assert!(jarvis.personality.contains("How you talk: the way JARVIS is with Tony Stark"));
+        assert_eq!(loaded.agent("vision").unwrap().personality, "Mine, keep it.");
+        assert_eq!(loaded.agent("jarvis").unwrap().tone, Some(crate::tone::default_for("jarvis")), "tone dials are filled in");
+        for a in default_agents() {
+            assert!(a.personality.contains("How you talk:"), "{} has a voice", a.id);
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn outfits_are_a_mode_or_a_theme() {
+        assert_eq!(default_config().outfits, "theme");
+        for choice in ["theme", "own", "rnd", "office", "mori"] {
+            assert!(is_outfits(choice), "{choice}");
+        }
+        assert!(!is_outfits("tuxedo"));
+        // Configs saved before outfits existed wear the theme's.
+        let old: AppConfig = serde_json::from_str(r#"{"engines": [], "agents": []}"#).unwrap();
+        assert_eq!(old.outfits, "theme");
     }
 
     #[test]

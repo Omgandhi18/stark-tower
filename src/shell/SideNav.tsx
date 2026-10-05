@@ -1,12 +1,18 @@
+import type { ComponentType } from "react";
 import { ArrowUpCircle } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { CountBadge, cx, ICON_SIZE, ICON_STROKE } from "../design";
 import { NAV_ITEMS, navRouteFor } from "../app/routes";
+import SettingsNav from "../features/settings/SettingsNav";
+import ProjectNav from "../features/work/ProjectNav";
+import { useNavigation, type RouteId } from "../stores/navigation";
 import { selectNeedsYouCount, useNotifications } from "../stores/notifications";
-import { useNavigation } from "../stores/navigation";
 import { useSystem } from "../stores/system";
 
-/** The six destinations. Notifications carries the count of things that need you. */
+/** A destination's own places, nested under it while it's open. */
+const NESTED: Partial<Record<RouteId, ComponentType>> = { work: ProjectNav, settings: SettingsNav };
+
+/** The six destinations, with the open one's places nested under it. Notifications carries the count of things that need you. */
 export default function SideNav() {
   const current = useNavigation((s) => navRouteFor(s.route));
   const navigate = useNavigation((s) => s.navigate);
@@ -19,6 +25,7 @@ export default function SideNav() {
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           const active = item.route === current;
+          const Nested = active ? NESTED[item.route] : undefined;
           return (
             <li key={item.route}>
               <button
@@ -32,6 +39,7 @@ export default function SideNav() {
                 <span className="nav-label">{item.label}</span>
                 {item.route === "notifications" && <CountBadge count={pending} label="need you" />}
               </button>
+              {Nested && <Nested />}
             </li>
           );
         })}

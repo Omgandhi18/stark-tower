@@ -62,15 +62,16 @@ test.describe("notification centre", () => {
     await expect(list.locator(".notification-item")).toHaveCount(1);
   });
 
-  test("closing a finished task settles its notification", async ({ page }) => {
+  test("marking a finished task reviewed settles its notification", async ({ page }) => {
     await openApp(page);
     await goTo(page, "Notifications");
     await page
       .getByRole("region", { name: "Notifications" })
       .getByRole("button", { name: /Write the release notes/ })
       .click();
-    await page.getByRole("button", { name: "Close task" }).click();
-    expect(await fakeCalls(page)).toContainEqual({ cmd: "close_task", args: { id: "t-notes" } });
+    await expect(page.getByRole("button", { name: "Close task" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Mark as reviewed" }).click();
+    expect(await fakeCalls(page)).toContainEqual({ cmd: "review_task", args: { id: "t-notes" } });
     await expect(page.getByRole("region", { name: "Notifications" }).getByRole("button", { name: /Write the release notes/ })).toHaveCount(0);
   });
 

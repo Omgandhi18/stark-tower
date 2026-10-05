@@ -43,6 +43,7 @@ const chat = (agentId: string, title: string, updated: number, cwd = "/w/app"): 
   cwd,
   created: updated,
   updated,
+  delegated: false,
 });
 
 const review = (agentId: string): ReviewRequest => ({

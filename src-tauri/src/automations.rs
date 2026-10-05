@@ -349,7 +349,7 @@ pub fn task_settled(app: &tauri::AppHandle, task_id: &str) {
     }
     let Some(run) = state.ledger.run_for_task(task_id).filter(|r| r.finished.is_none()) else { return };
     let (status, summary) = match task.status.as_str() {
-        "done" => ("succeeded", crate::tasks::last_reply(app, &task).unwrap_or_else(|| "Finished".into())),
+        "done" | "reviewed" => ("succeeded", crate::tasks::last_reply(app, &task).unwrap_or_else(|| "Finished".into())),
         "closed" => ("failed", "You closed the task before it finished.".to_string()),
         "blocked" => ("failed", task.detail.clone().unwrap_or_else(|| "Stopped before it finished.".into())),
         _ => return,

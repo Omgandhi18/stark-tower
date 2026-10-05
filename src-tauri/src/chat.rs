@@ -808,12 +808,19 @@ fn failed_result(v: &serde_json::Value) -> Option<String> {
     })
 }
 
-/// Parse one Claude Code stream-json line into the events above.
-fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, sink: &Sink) {
+/// Whether a Claude Code stream-json line is its `init`, which it sends at the start of every turn.
+fn is_init(v: &serde_json::Value) -> bool {
+    v.get("type").and_then(|t| t.as_str()) == Some("system") && v.get("subtype").and_then(|s| s.as_str()) == Some("init")
+}
+
+/// Parse one Claude Code stream-json line into the events above. `new_session`: this
+/// process hasn't sent `init` before, so an `init` now starts (or resumes) a session
+/// rather than another turn of it.
+fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, sink: &Sink, new_session: bool) {
     let t = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
     match t {
         "system" => {
-            if v.get("subtype").and_then(|s| s.as_str()) == Some("init") {
+            if is_init(v) && new_session {
                 let cwd = v.get("cwd").and_then(|c| c.as_str()).map(|c| c.to_string());
                 session_ready(app, agent_id, sink, v.get("session_id").and_then(|s| s.as_str()), cwd);
             }
@@ -972,13 +979,9 @@ fn start_claude(app: &tauri::AppHandle, launch: &Launch, gen: u64) -> Result<(Ch
                 continue;
             }
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                if !saw_init
-                    && v.get("type").and_then(|t| t.as_str()) == Some("system")
-                    && v.get("subtype").and_then(|s| s.as_str()) == Some("init")
-                {
-                    saw_init = true;
-                }
-                handle_line(&app2, &id2, &v, &Sink::chat());
+                let init = is_init(&v);
+                handle_line(&app2, &id2, &v, &Sink::chat(), init && !saw_init);
+                saw_init |= init;
             }
         }
         session_finished(&app2, &id2, gen, resumed && !saw_init, orchestrator);
@@ -1138,7 +1141,8 @@ fn drive_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, child: &mut 
             continue;
         }
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-            handle_line(app, agent_id, &v, sink);
+            // A one-shot worker runs a single turn, so its only `init` starts its session.
+            handle_line(app, agent_id, &v, sink, true);
             if v.get("type").and_then(|t| t.as_str()) == Some("result") {
                 // A failed run is the delegation's failure, not its answer.
                 result = match failed_result(&v) {
@@ -1154,6 +1158,13 @@ fn drive_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, child: &mut 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognises_the_init_claude_code_sends_each_turn() {
+        assert!(is_init(&serde_json::json!({ "type": "system", "subtype": "init", "session_id": "s" })));
+        assert!(!is_init(&serde_json::json!({ "type": "system", "subtype": "compact_boundary" })));
+        assert!(!is_init(&serde_json::json!({ "type": "assistant" })));
+    }
 
     #[test]
     fn task_ids_are_unique_within_and_across_launches() {

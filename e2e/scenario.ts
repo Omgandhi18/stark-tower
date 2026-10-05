@@ -33,6 +33,8 @@ const MINUTE = 60_000;
 const ago = (minutes: number) => NOW - minutes * MINUTE;
 
 export interface Scenario {
+  /** How long after the page loads the backend starts answering (the launch race); by default at once. */
+  backendReadyAfterMs?: number;
   config: AppConfig;
   statuses: Record<string, AgentStatus>;
   projects: ProjectsState;
@@ -250,6 +252,7 @@ const conversation = (id: number, agentId: string, title: string, cwd: string, u
   cwd,
   created: ago(updatedMinutesAgo + 30),
   updated: ago(updatedMinutesAgo),
+  delegated: false,
 });
 
 const message = (id: number, role: string, fields: Partial<StoredMessage>): StoredMessage => ({

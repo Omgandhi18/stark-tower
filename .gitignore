@@ -27,3 +27,7 @@ dist-ssr
 e2e/screenshots
 test-results
 playwright-report
+
+# Rebuilt by scripts/mockup-extract (rooms.py compose, outfits.py build)
+assets/*/base.png
+assets/*/portraits/contact-sheet.png

@@ -24,7 +24,8 @@
           "y": 23
         },
         "label": "main",
-        "visible": false
+        "visible": false,
+        "create": false
       }
     ],
     "security": {

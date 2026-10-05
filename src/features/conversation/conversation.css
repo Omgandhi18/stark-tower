@@ -59,6 +59,32 @@
   background: var(--surface-hover);
 }
 
+/* A saved chat's actions show while it's hovered or focused, over its end. */
+.rail-chat-row {
+  position: relative;
+}
+
+.rail-chat-row > .menu-root {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.rail-chat-row > .rail-chat:is(:hover, :focus-visible) ~ .menu-root,
+.rail-chat-row > .menu-root:is(:hover, :focus-within),
+.rail-chat-row > .menu-root:has([aria-expanded="true"]) {
+  opacity: 1;
+}
+
+.rail-chat-row > .rail-chat:is(:hover, :focus-visible),
+.rail-chat-row:has(> .menu-root:is(:hover, :focus-within)) > .rail-chat,
+.rail-chat-row:has(> .menu-root [aria-expanded="true"]) > .rail-chat {
+  padding-right: 40px;
+}
+
 .rail-agent[aria-current],
 .rail-chat[aria-current] {
   background: var(--accent-soft);

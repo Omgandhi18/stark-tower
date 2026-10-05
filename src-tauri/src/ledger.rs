@@ -22,6 +22,24 @@ pub struct Conversation {
     pub cwd: String,
     pub created: i64,
     pub updated: i64,
+    /// A teammate's delegation ran here, not a chat the developer had.
+    pub delegated: bool,
+}
+
+/// A conversation's columns (aliased `c`), then whether a delegation ran in it.
+const CONVERSATION_COLUMNS: &str = "c.id, c.agent_id, c.title, c.cwd, c.created, c.updated, \
+    EXISTS (SELECT 1 FROM tasks t WHERE t.conversation_id = c.id AND t.parent_id IS NOT NULL)";
+
+fn conversation_row(r: &rusqlite::Row) -> rusqlite::Result<Conversation> {
+    Ok(Conversation {
+        id: r.get(0)?,
+        agent_id: r.get(1)?,
+        title: r.get(2)?,
+        cwd: r.get(3)?,
+        created: r.get(4)?,
+        updated: r.get(5)?,
+        delegated: r.get(6)?,
+    })
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -692,47 +710,59 @@ impl Ledger {
 
     pub fn conversation(&self, id: i64) -> Option<Conversation> {
         let conn = self.conn.lock().unwrap();
-        conn.query_row(
-            "SELECT id, agent_id, title, cwd, created, updated FROM conversations WHERE id = ?1",
-            [id],
-            |r| {
-                Ok(Conversation {
-                    id: r.get(0)?,
-                    agent_id: r.get(1)?,
-                    title: r.get(2)?,
-                    cwd: r.get(3)?,
-                    created: r.get(4)?,
-                    updated: r.get(5)?,
-                })
-            },
-        )
-        .ok()
+        conn.query_row(&format!("SELECT {CONVERSATION_COLUMNS} FROM conversations c WHERE c.id = ?1"), [id], conversation_row)
+            .ok()
     }
 
     /// All saved chats, most-recently-active first.
     pub fn conversations(&self, limit: i64) -> Vec<Conversation> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = match conn.prepare(
-            "SELECT id, agent_id, title, cwd, created, updated FROM conversations \
-             ORDER BY updated DESC LIMIT ?1",
-        ) {
+        let mut stmt = match conn.prepare(&format!("SELECT {CONVERSATION_COLUMNS} FROM conversations c ORDER BY c.updated DESC LIMIT ?1")) {
             Ok(s) => s,
             Err(_) => return vec![],
         };
-        let rows = stmt.query_map([limit], |r| {
-            Ok(Conversation {
-                id: r.get(0)?,
-                agent_id: r.get(1)?,
-                title: r.get(2)?,
-                cwd: r.get(3)?,
-                created: r.get(4)?,
-                updated: r.get(5)?,
-            })
-        });
+        let rows = stmt.query_map([limit], conversation_row);
         match rows {
             Ok(it) => it.filter_map(|x| x.ok()).collect(),
             Err(_) => vec![],
         }
+    }
+
+    /// Delete a conversation for good: its messages go, and tasks that ran in it keep their
+    /// history without a transcript. False when there was nothing to delete or it failed.
+    pub fn delete_conversation(&self, id: i64) -> bool {
+        let deleted = {
+            let mut conn = self.conn.lock().unwrap();
+            let Ok(tx) = conn.transaction() else { return false };
+            let done = tx.execute("DELETE FROM messages WHERE conversation_id = ?1", [id]).is_ok()
+                && tx.execute("UPDATE tasks SET conversation_id = NULL WHERE conversation_id = ?1", [id]).is_ok()
+                && tx.execute("DELETE FROM conversations WHERE id = ?1", [id]).is_ok_and(|n| n > 0);
+            // Anything short of all three rolls back when `tx` drops.
+            done && tx.commit().is_ok()
+        };
+        if deleted {
+            self.active.lock().unwrap().retain(|_, open| *open != id);
+        }
+        deleted
+    }
+
+    /// The developer's chat with an agent in a project folder: the open one if it's in
+    /// that folder, else the latest there. Chats a delegation ran in never count.
+    pub fn chat_in(&self, agent_id: &str, cwd: &str) -> Option<i64> {
+        let folder = cwd.trim_end_matches('/');
+        let open = self.current_conversation(agent_id).and_then(|id| self.conversation(id));
+        if let Some(open) = open.filter(|c| c.cwd.trim_end_matches('/') == folder && !c.delegated) {
+            return Some(open.id);
+        }
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT c.id FROM conversations c WHERE c.agent_id = ?1 AND rtrim(c.cwd, '/') = ?2 \
+             AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.conversation_id = c.id AND t.parent_id IS NOT NULL) \
+             ORDER BY c.updated DESC, c.id DESC LIMIT 1",
+            rusqlite::params![agent_id, folder],
+            |r| r.get(0),
+        )
+        .ok()
     }
 
     /// The session id to resume for a conversation, if any.
@@ -811,7 +841,7 @@ impl Ledger {
     /// The open task a conversation belongs to, if any.
     pub fn task_for_conversation(&self, conv: i64) -> Option<Task> {
         self.query_tasks(
-            &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE conversation_id = ?1 AND status != 'closed' ORDER BY updated DESC LIMIT 1"),
+            &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE conversation_id = ?1 AND status NOT IN ('closed', 'reviewed') ORDER BY updated DESC LIMIT 1"),
             &[&conv],
         )
         .into_iter()
@@ -830,10 +860,10 @@ impl Ledger {
     }
 
     /// Move a task to a new status (no-op if the id is unknown). Stopping states
-    /// (done, blocked, closed) stamp when it stopped; doing clears that again.
+    /// (done, blocked, closed, reviewed) stamp when it stopped; doing clears that again.
     pub fn set_task_status(&self, id: &str, status: &str, detail: Option<&str>) {
         let ts = now_ms();
-        let stopped = matches!(status, "done" | "blocked" | "closed");
+        let stopped = matches!(status, "done" | "blocked" | "closed" | "reviewed");
         let conn = self.conn.lock().unwrap();
         let _ = conn.execute(
             "UPDATE tasks SET status = ?2, updated = ?3, detail = COALESCE(?4, detail), \
@@ -1292,6 +1322,45 @@ impl Ledger {
         v
     }
 
+    /// A task's part of its chat: from when it started until the next task in that chat
+    /// started (a chat keeps its session across requests, so it can hold several tasks).
+    pub fn task_messages(&self, task: &Task, limit: i64) -> Vec<StoredMessage> {
+        let Some(conv) = task.conversation_id else { return vec![] };
+        let from = task.started.unwrap_or(task.ts);
+        let conn = self.conn.lock().unwrap();
+        let until: Option<i64> = conn
+            .query_row(
+                "SELECT MIN(started) FROM tasks WHERE conversation_id = ?1 AND started > ?2 AND id != ?3",
+                rusqlite::params![conv, from, task.id],
+                |r| r.get(0),
+            )
+            .ok()
+            .flatten();
+        let mut stmt = match conn.prepare(
+            "SELECT id, ts, role, text, tool, detail FROM messages \
+             WHERE conversation_id = ?1 AND ts >= ?2 AND (?3 IS NULL OR ts < ?3) ORDER BY id DESC LIMIT ?4",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        let rows = stmt.query_map(rusqlite::params![conv, from, until, limit], |r| {
+            Ok(StoredMessage {
+                id: r.get(0)?,
+                ts: r.get(1)?,
+                role: r.get(2)?,
+                text: r.get(3)?,
+                tool: r.get(4)?,
+                detail: r.get(5)?,
+            })
+        });
+        let mut v: Vec<StoredMessage> = match rows {
+            Ok(it) => it.filter_map(|x| x.ok()).collect(),
+            Err(_) => vec![],
+        };
+        v.reverse();
+        v
+    }
+
     /// Remember the Claude Code session id for (agent, cwd) so we can resume it.
     pub fn set_session(&self, agent_id: &str, cwd: &str, session_id: &str) {
         let ts = now_ms();
@@ -1463,6 +1532,103 @@ mod tests {
         assert!(l.task("t1").unwrap().finished.is_none(), "continuing clears the finish time");
         l.set_task_status("t1", "closed", None);
         assert!(l.task_for_conversation(conv).is_none(), "closed tasks no longer own their chat");
+        l.set_task_status("t1", "reviewed", None);
+        assert!(l.task_for_conversation(conv).is_none(), "nor do reviewed ones");
+        assert!(l.task("t1").unwrap().finished.is_some(), "reviewed is a finished state");
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn deleting_a_chat_removes_its_messages_and_keeps_its_tasks() {
+        let (l, p) = temp_db();
+        let conv = l.create_conversation("jarvis", "/work/app", "Chat");
+        let other = l.create_conversation("jarvis", "/work/app", "Other");
+        l.add_message_to(conv, "jarvis", "user", Some("hello"), None, None);
+        l.add_message_to(other, "jarvis", "user", Some("keep me"), None, None);
+        l.create_task(&NewTask {
+            id: "t1",
+            title: "t1",
+            assignee: "jarvis",
+            status: "todo",
+            cwd: "/work/app",
+            parent_id: None,
+            requested_by: "you",
+            prompt: "",
+        });
+        l.begin_task("t1", Some(conv), "");
+        l.open_conversation(conv);
+        assert!(l.delete_conversation(conv));
+        assert!(l.conversation(conv).is_none());
+        assert!(l.conversation_messages(conv, 10).is_empty());
+        assert_eq!(l.conversation_messages(other, 10).len(), 1, "other chats are untouched");
+        let task = l.task("t1").expect("the task stays");
+        assert_eq!(task.conversation_id, None);
+        assert_ne!(l.current_conversation("jarvis"), Some(conv), "it's no longer the open chat");
+        assert!(!l.delete_conversation(conv), "nothing left to delete");
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn a_task_shows_its_own_part_of_a_shared_chat() {
+        let (l, p) = temp_db();
+        let tick = || std::thread::sleep(std::time::Duration::from_millis(3));
+        let task = |id: &'static str| NewTask {
+            id,
+            title: id,
+            assignee: "jarvis",
+            status: "todo",
+            cwd: "/work/app",
+            parent_id: None,
+            requested_by: "you",
+            prompt: id,
+        };
+        let conv = l.create_conversation("jarvis", "/work/app", "Chat");
+        l.add_message_to(conv, "jarvis", "user", Some("before any task"), None, None);
+        tick();
+        l.create_task(&task("first"));
+        l.begin_task("first", Some(conv), "");
+        tick();
+        l.add_message_to(conv, "jarvis", "user", Some("first request"), None, None);
+        l.add_message_to(conv, "jarvis", "agent", Some("first answer"), None, None);
+        tick();
+        l.create_task(&task("second"));
+        l.begin_task("second", Some(conv), "");
+        tick();
+        l.add_message_to(conv, "jarvis", "user", Some("second request"), None, None);
+        let texts = |id: &str| l.task_messages(&l.task(id).unwrap(), 50).into_iter().filter_map(|m| m.text).collect::<Vec<_>>();
+        assert_eq!(texts("first"), vec!["first request", "first answer"]);
+        assert_eq!(texts("second"), vec!["second request"]);
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn requests_continue_the_developers_chat_in_that_project() {
+        let (l, p) = temp_db();
+        assert_eq!(l.chat_in("jarvis", "/work/app"), None, "no chat there yet");
+        let older = l.create_conversation("jarvis", "/work/app", "First");
+        let elsewhere = l.create_conversation("jarvis", "/work/api", "Other project");
+        assert_eq!(l.chat_in("jarvis", "/work/app/"), Some(older), "the latest chat in that folder");
+        // A delegation that ran in its own chat in the same folder never counts.
+        let delegated = l.create_conversation("jarvis", "/work/app", "Delegated");
+        l.create_task(&NewTask {
+            id: "child",
+            title: "Delegated",
+            assignee: "jarvis",
+            status: "doing",
+            cwd: "/work/app",
+            parent_id: Some("parent"),
+            requested_by: "vision",
+            prompt: "",
+        });
+        l.begin_task("child", Some(delegated), "");
+        assert!(l.conversation(delegated).unwrap().delegated);
+        assert_eq!(l.chat_in("jarvis", "/work/app"), Some(older));
+        // The chat the developer has open wins while it's in that folder.
+        let newer = l.create_conversation("jarvis", "/work/app", "Second");
+        l.open_conversation(older);
+        assert_eq!(l.chat_in("jarvis", "/work/app"), Some(older));
+        l.open_conversation(elsewhere);
+        assert_eq!(l.chat_in("jarvis", "/work/app"), Some(newer));
         std::fs::remove_file(&p).ok();
     }
 

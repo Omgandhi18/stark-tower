@@ -1,0 +1,36 @@
+{
+  "$comment": "Mori Cafe stations (mockup 07), in mockup pixels; same rules as office-scene.json. The helper bot stands for anyone's helpers. 'tags' are where each seated agent's name tag sits (its top-left); 'board' is where the live counts are written on the Starkline Today board. The lounge's agent (the operative) isn't in the mockup: Codex painted her in ('added'), so reference mode leaves that cushion empty.",
+  "card": { "slot": "windowTable", "anchor": "top-right", "inset": [15, 51] },
+  "frame": {
+    "clock": { "place": ["Mori Cafe", "Forest Edge"] },
+    "caption": { "title": "Mori Cafe", "subtitle": "Forest Edge Workspace", "note": ["Focus today.", "A kinder tomorrow."] }
+  },
+  "tags": { "counter": [436, 235], "windowTable": [831, 317], "terrace": [1307, 325], "rack": [312, 528], "longTable": [723, 553], "lounge": [1334, 598] },
+  "board": { "at": [425, 423], "lineHeight": 21.5, "fontSize": 13, "slant": 11, "reference": [4, 2, 0] },
+  "orchestratorSlot": "counter",
+  "slots": [
+    { "id": "counter", "figure": "commander" },
+    { "id": "windowTable", "figure": "engineer" },
+    { "id": "longTable", "figure": "specialist" },
+    { "id": "terrace", "figure": "architect" },
+    { "id": "rack", "figure": "recon" },
+    { "id": "lounge", "figure": "operative", "added": true }
+  ],
+  "stations": {
+    "counter": { "cutout": "counterOccupied", "floorY": 360 },
+    "windowTable": { "cutout": "windowTableOccupied", "floorY": 515 },
+    "longTable": { "cutout": "longTableOccupied", "floorY": 690 },
+    "terrace": { "cutout": "terraceOccupied", "floorY": 560 },
+    "rack": { "cutout": "rackOccupied", "floorY": 742 },
+    "lounge": { "cutout": "loungeOccupied", "floorY": 742 }
+  },
+  "lights": {
+    "counter": { "screen": [468, 322, 44, 26], "floor": [400, 362, 44, 10], "warm": true },
+    "windowTable": { "screen": [832, 400, 44, 24], "floor": [800, 517, 48, 11] },
+    "longTable": { "screen": [706, 640, 40, 22], "floor": [665, 693, 44, 10] },
+    "terrace": { "screen": [1440, 420, 84, 50], "floor": [1257, 562, 40, 10] },
+    "rack": { "screen": [200, 600, 40, 78], "floor": [268, 745, 40, 10] },
+    "lounge": { "screen": [1449, 688, 22, 14], "floor": [1462, 740, 40, 9] }
+  },
+  "helpers": [{ "id": "helper-1", "parts": ["helper-1"], "floorY": 745 }]
+}

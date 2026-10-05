@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { Point, Size } from "./camera";
 import { createReferenceRenderer, type ReferenceRenderer } from "./referenceRenderer";
+import type { Room } from "./rooms";
 
 interface Callbacks {
   onActorMove: (slotId: string, head: Point | null) => void;
@@ -18,7 +19,8 @@ function describe(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
-export function useReferenceRenderer(hostRef: RefObject<HTMLDivElement | null>, fallbackView: Size, callbacks: Callbacks) {
+/** The room is fixed for the hook's life: a different room needs a remount (key the view by room). */
+export function useReferenceRenderer(hostRef: RefObject<HTMLDivElement | null>, fallbackView: Size, room: Room, callbacks: Callbacks) {
   const rendererRef = useRef<ReferenceRenderer | null>(null);
   const pendingRef = useRef<Promise<ReferenceRenderer> | null>(null);
   const teardownRef = useRef<number | null>(null);
@@ -38,7 +40,7 @@ export function useReferenceRenderer(hostRef: RefObject<HTMLDivElement | null>, 
     if (host && !pendingRef.current) {
       const bounds = host.getBoundingClientRect();
       const initial = { width: bounds.width || fallbackView.width, height: bounds.height || fallbackView.height };
-      const pending = createReferenceRenderer(host, initial, (slot, head) => callbacksRef.current.onActorMove(slot, head));
+      const pending = createReferenceRenderer(host, initial, room, (slot, head) => callbacksRef.current.onActorMove(slot, head));
       pendingRef.current = pending;
       pending
         .then((renderer) => {
@@ -62,7 +64,7 @@ export function useReferenceRenderer(hostRef: RefObject<HTMLDivElement | null>, 
         pending?.then((renderer) => renderer.destroy()).catch(() => {});
       }, 0);
     };
-  }, [hostRef, fallbackView]);
+  }, [hostRef, fallbackView, room]);
 
   return { rendererRef, error };
 }

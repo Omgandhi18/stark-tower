@@ -1,0 +1,102 @@
+{
+  "source": "docs/mockups/2026-09-16/06-environment-office.png",
+  "viewport": [
+    1584,
+    993
+  ],
+  "plate": {
+    "file": "plate.png",
+    "rect": [
+      196,
+      139,
+      1582,
+      993
+    ]
+  },
+  "cutouts": {
+    "glassOfficeOccupied": {
+      "file": "cutout-glassOfficeOccupied.png",
+      "rect": [
+        482,
+        223,
+        593,
+        357
+      ]
+    },
+    "helper-1": {
+      "file": "cutout-helper-1.png",
+      "rect": [
+        614,
+        665,
+        683,
+        746
+      ]
+    },
+    "researchDeskOccupied": {
+      "file": "cutout-researchDeskOccupied.png",
+      "rect": [
+        696,
+        491,
+        804,
+        664
+      ]
+    },
+    "whiteboardOccupied": {
+      "file": "cutout-whiteboardOccupied.png",
+      "rect": [
+        788,
+        455,
+        876,
+        611
+      ]
+    },
+    "armchairOccupied": {
+      "file": "cutout-armchairOccupied.png",
+      "rect": [
+        991,
+        494,
+        1110,
+        649
+      ]
+    },
+    "serverRackOccupied": {
+      "file": "cutout-serverRackOccupied.png",
+      "rect": [
+        1412,
+        524,
+        1526,
+        712
+      ]
+    },
+    "meetingTableOccupied": {
+      "file": "cutout-meetingTableOccupied.png",
+      "rect": [
+        783,
+        624,
+        912,
+        790
+      ],
+      "added": true
+    }
+  },
+  "intended": [
+    {
+      "id": "agentCard",
+      "rect": [
+        198,
+        788,
+        494,
+        968
+      ]
+    },
+    {
+      "id": "sceneControls",
+      "rect": [
+        1278,
+        914,
+        1572,
+        970
+      ]
+    }
+  ]
+}

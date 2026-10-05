@@ -62,10 +62,13 @@ function newestFirst<T>(items: readonly T[], key: (item: T) => number): T[] {
   return [...items].sort((a, b) => key(b) - key(a));
 }
 
+/** Tasks the developer is finished with: they leave the board and stay in history. */
+const SETTLED: readonly string[] = ["closed", "reviewed"];
+
 /** Tasks shown on their own: top-level ones, and delegations whose parent isn't shown. */
 function shownOnBoard(tasks: readonly Task[]): Task[] {
-  const open = new Set(tasks.filter((t) => t.status !== "closed").map((t) => t.id));
-  return tasks.filter((t) => t.status !== "closed" && !(t.parent_id && open.has(t.parent_id)));
+  const open = new Set(tasks.filter((t) => !SETTLED.includes(t.status)).map((t) => t.id));
+  return tasks.filter((t) => !SETTLED.includes(t.status) && !(t.parent_id && open.has(t.parent_id)));
 }
 
 export function buildBoard({ agents, since, tasks, conversations, latest, pending, project, tab = "all", sort = "recent" }: BoardInput): Board {
@@ -163,11 +166,12 @@ function stateForStopped(task: Task): TaskRow["state"] {
       return { label: "Ready for review", tone: "review" };
     case "blocked":
       return { label: "Blocked", tone: "danger" };
+    case "reviewed":
+      return { label: "Reviewed", tone: "success" };
     default:
       return { label: "Closed", tone: "idle" };
   }
 }
 
 /** "2 of 5 steps" for a plan, as a fraction for the bar. */
-export const progressRatio = (progress: { done: number; total: number }) =>
-  progress.total > 0 ? Math.min(1, progress.done / progress.total) : 0;
+export const progressRatio = (progress: { done: number; total: number }) => (progress.total > 0 ? Math.min(1, progress.done / progress.total) : 0);

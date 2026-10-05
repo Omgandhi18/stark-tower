@@ -12,6 +12,7 @@ import AgentMemory from "./AgentMemory";
 import AgentPermissions from "./AgentPermissions";
 import AgentProviderFields from "./AgentProviderFields";
 import { ACCENTS, FIGURES } from "./appearance";
+import ToneDials from "./ToneDials";
 
 type EditorTab = "profile" | "provider" | "permissions" | "memory";
 
@@ -189,6 +190,11 @@ export default function AgentEditor({ saved, config, live, onRemoved }: AgentEdi
                   helper="Starkline adds its own rules for delegating, messaging teammates and asking you."
                   onChange={(e) => set("personality", e.target.value)}
                 />
+              </fieldset>
+
+              <fieldset className="form-section">
+                <legend className="form-section-title">Tone</legend>
+                <ToneDials agentId={saved.id} name={draft.name.trim() || saved.name} tone={draft.tone} onChange={(tone) => set("tone", tone)} />
               </fieldset>
 
               <fieldset className="form-section">

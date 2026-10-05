@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { themeInfo, useActiveTheme } from "../../app/theme";
+import { hasRoom, roomFor } from "../../environment/reference/rooms";
 import { useActivity } from "../../stores/activity";
 import { useAgents } from "../../stores/agents";
 import { useAttention } from "../../stores/attention";
@@ -20,9 +21,10 @@ export default function EnvironmentScreen({ comparing = false }: EnvironmentScre
   const focusId = useNavigation((s) => s.agentId);
   const focusAgent = useNavigation((s) => s.focusAgent);
   const [mode, setMode] = useState<DisplayMode>("live");
-  const theme = themeInfo(useActiveTheme());
+  const activeTheme = useActiveTheme();
+  const room = roomFor(activeTheme);
   // Until a theme's own room is built, its team works in After Hours R&D; say so rather than pretend.
-  const notice = theme.roomBuilt ? undefined : `The ${theme.name} room isn't built yet, so your team works in After Hours R&D.`;
+  const notice = hasRoom(activeTheme) ? undefined : `The ${themeInfo(activeTheme).name} room isn't built yet, so your team works in After Hours R&D.`;
 
   // Dev builds: ⌥R flips between live agents and the mockup's reference state.
   useEffect(() => {
@@ -38,9 +40,12 @@ export default function EnvironmentScreen({ comparing = false }: EnvironmentScre
 
   return (
     <EnvironmentView
+      key={room.id}
+      room={room}
       agents={agents}
       helpers={helpers}
       waitingOnYou={waitingOnYou}
+      awaitingYou={pending.length}
       mode={comparing ? "reference" : mode}
       focusId={focusId}
       onSelectAgent={focusAgent}

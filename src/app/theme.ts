@@ -1,6 +1,6 @@
 // How Starkline looks. A theme is a set of values for the design tokens (and,
-// for the themes whose rooms are built, its Environment). Tasks, permissions
-// and providers never change with it.
+// once its art is built, its Environment room). Tasks, permissions and
+// providers never change with it.
 import { create } from "zustand";
 import { useEffect } from "react";
 import { useConfig } from "../stores/config";
@@ -9,35 +9,35 @@ export type ThemeId = "rnd" | "office" | "mori";
 
 export interface ThemeInfo {
   id: ThemeId;
+  /** Where its art lives under src/assets/themes. */
+  folder: string;
   name: string;
   /** The palette in words, as the Theme Studio names it. */
   palette: string;
   description: string;
-  /** Whether this theme's own room is built; otherwise the team works in After Hours R&D. */
-  roomBuilt: boolean;
 }
 
 export const THEMES: readonly ThemeInfo[] = [
   {
     id: "rnd",
+    folder: "after-hours-rnd",
     name: "After Hours R&D",
     palette: "Graphite · Cyan · Amber",
     description: "Sleek, high-contrast workspace for deep work. Rainy tower, glowing screens, late nights.",
-    roomBuilt: true,
   },
   {
     id: "office",
+    folder: "studio-office",
     name: "Studio Office",
     palette: "Parchment · Tobacco · Oxidized Green",
     description: "Warm, comfortable workspace for collaboration. A lived-in office with natural light and character.",
-    roomBuilt: false,
   },
   {
     id: "mori",
+    folder: "mori-cafe",
     name: "Mori Cafe",
     palette: "Ink Indigo · Moss Green · Lantern Amber",
     description: "Calm, focused workspace inspired by coffee, nature and craft. A rainy cafe with a view of the forest.",
-    roomBuilt: false,
   },
 ];
 
@@ -47,6 +47,20 @@ const STORAGE_KEY = "starkline.theme";
 export const asTheme = (value: string | null | undefined): ThemeId => THEMES.find((t) => t.id === value)?.id ?? DEFAULT_THEME;
 
 export const themeInfo = (id: ThemeId): ThemeInfo => THEMES.find((t) => t.id === id) ?? THEMES[0];
+
+/** What the agents wear: the active theme's outfits, their own look in every theme, or one theme's outfits. */
+export type Outfits = "theme" | "own" | ThemeId;
+
+export const DEFAULT_OUTFITS: Outfits = "theme";
+
+export const asOutfits = (value: string | null | undefined): Outfits =>
+  value === "theme" || value === "own" ? value : (THEMES.find((t) => t.id === value)?.id ?? DEFAULT_OUTFITS);
+
+/** The theme whose outfits are worn, or null for the agents' own look (which After Hours R&D's outfits are). */
+export function outfitTheme(outfits: Outfits, active: ThemeId): ThemeId | null {
+  const theme = outfits === "own" ? null : outfits === "theme" ? active : outfits;
+  return theme === DEFAULT_THEME ? null : theme;
+}
 
 /** The theme saved on this Mac last time, so the first paint already wears it. */
 export function storedTheme(): ThemeId {
@@ -71,12 +85,15 @@ export function applyTheme(id: ThemeId, remember = true): void {
 interface ThemePreviewState {
   /** A theme being tried on in the Theme Studio, before it's applied. */
   preview: ThemeId | null;
-  setPreview: (id: ThemeId | null) => void;
+  /** The outfits tried on with it. */
+  outfits: Outfits | null;
+  setPreview: (id: ThemeId | null, outfits?: Outfits) => void;
 }
 
 export const useThemePreview = create<ThemePreviewState>((set) => ({
   preview: null,
-  setPreview: (preview) => set({ preview }),
+  outfits: null,
+  setPreview: (preview, outfits) => set({ preview, outfits: preview === null ? null : (outfits ?? null) }),
 }));
 
 /** The theme on screen: one being previewed, else the saved one. */
@@ -84,6 +101,19 @@ export function useActiveTheme(): ThemeId {
   const saved = useConfig((s) => s.config?.theme);
   const preview = useThemePreview((s) => s.preview);
   return preview ?? (saved === undefined ? storedTheme() : asTheme(saved));
+}
+
+/** The outfits in effect: being previewed, else saved. */
+export function useOutfits(): Outfits {
+  const saved = useConfig((s) => s.config?.outfits);
+  const preview = useThemePreview((s) => s.outfits);
+  return preview ?? asOutfits(saved);
+}
+
+/** The asset folder of the outfits portraits wear now, or null for the agents' own look. */
+export function useOutfitsFolder(): string | null {
+  const theme = outfitTheme(useOutfits(), useActiveTheme());
+  return theme ? themeInfo(theme).folder : null;
 }
 
 /** Keep the document dressed in the active theme. */

@@ -1,0 +1,62 @@
+{
+  "$comment": "Studio Office (mockup 06). 'crop' is the context Codex sees; each target's 'box' bounds what it removes. Agents and helpers become cut-outs of the mockup's own pixels; 'interface' targets are the mockup's UI painted over the room, removed for good. 'floorY' orders overlapping agents (front first). Every rect is [x0, y0, x1, y1) in mockup pixels.",
+  "source": "docs/mockups/2026-09-16/06-environment-office.png",
+  "viewport": [1584, 993],
+  "plate": [196, 139, 1582, 993],
+  "fillDir": "assets/studio-office/fills",
+  "outDir": "src/assets/themes/studio-office/room",
+  "regions": [
+    {
+      "id": "meeting-table",
+      "kind": "add",
+      "crop": [690, 600, 1010, 920],
+      "targets": [
+        { "id": "meetingTableOccupied", "kind": "added", "box": [784, 624, 908, 800], "floorY": 790, "describe": "one more person: a young woman with light skin and straight black hair pulled back, with side-swept bangs and no glasses, wearing a cream blouse under a soft brown cardigan. She sits in the green chair at the far side of the big wooden table, facing the viewer, typing on an open laptop on the table in front of her" }
+      ]
+    },
+    {
+      "id": "glass-office",
+      "crop": [400, 150, 720, 470],
+      "targets": [
+        { "id": "glassOfficeOccupied", "kind": "agent", "box": [486, 222, 600, 362], "floorY": 355, "describe": "the man with curly hair and glasses sitting at the desk inside the glass office, typing on a laptop (keep his chair, empty)" }
+      ]
+    },
+    {
+      "id": "research-desk",
+      "crop": [560, 400, 940, 780],
+      "targets": [
+        { "id": "researchDeskOccupied", "kind": "agent", "box": [700, 495, 800, 660], "floorY": 650, "describe": "the woman with her hair in a bun sitting at the desk working on a laptop (keep her desk chair, empty)" },
+        { "id": "whiteboardOccupied", "kind": "agent", "box": [788, 452, 878, 615], "floorY": 612, "describe": "the woman in the green jacket standing behind the desk and pointing at the whiteboard" },
+        { "id": "helper-1", "kind": "helper", "box": [612, 660, 684, 750], "floorY": 745, "describe": "the small round white helper robot standing on the floor" }
+      ]
+    },
+    {
+      "id": "lounge",
+      "crop": [920, 430, 1240, 750],
+      "targets": [
+        { "id": "armchairOccupied", "kind": "agent", "box": [968, 498, 1106, 652], "floorY": 645, "describe": "the man with glasses sitting in the green armchair with a laptop (keep the armchair, empty)" }
+      ]
+    },
+    {
+      "id": "server-corner",
+      "crop": [1264, 420, 1584, 740],
+      "targets": [
+        { "id": "serverRackOccupied", "kind": "agent", "box": [1416, 528, 1522, 708], "floorY": 700, "describe": "the woman with her hair in a bun, in a green jacket, standing at the server rack and typing" }
+      ]
+    },
+    {
+      "id": "card",
+      "crop": [195, 653, 535, 993],
+      "targets": [
+        { "id": "agentCard", "kind": "interface", "box": [198, 788, 494, 968], "describe": "the white rounded information card overlay in the lower left (it shows a portrait, the name FRIDAY and a progress bar), painting the floor, rug, bookshelves and furniture it covered" }
+      ]
+    },
+    {
+      "id": "controls",
+      "crop": [1264, 673, 1584, 993],
+      "targets": [
+        { "id": "sceneControls", "kind": "interface", "box": [1278, 914, 1572, 970], "describe": "the dark rounded control buttons in the lower right (a map icon, minus, 100%, plus and a full-screen icon), painting the floor and furniture they covered" }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import { fakeCalls } from "./fakeBackend";
 import { expect, goTo, openApp, test } from "./fixtures";
+import { defaultScenario } from "./scenario";
 
 test.describe("shell", () => {
   test("top bar reports the runtime, what needs you and Keep Awake", async ({ page }) => {
@@ -62,5 +63,14 @@ test.describe("focus", () => {
     await openApp(page);
     const runtime = page.getByRole("button", { name: /Agent runtime: Ready/ });
     await expect(runtime).toHaveAttribute("title", /Agents can run.*Open Diagnostics/);
+  });
+
+  test("loads everything even when the backend answers after the page", async ({ page }) => {
+    await openApp(page, { ...defaultScenario(), backendReadyAfterMs: 1_000 });
+    const running = page.getByRole("region", { name: "Running" });
+    await expect(running.getByRole("button", { name: "Redesign the settings page", exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("list", { name: "Projects" }).getByRole("button", { name: /^checkout-web/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Agent runtime/ })).toContainText("Ready");
+    await expect(page.getByRole("switch", { name: "Keep Awake" })).toBeEnabled();
   });
 });

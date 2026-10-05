@@ -19,11 +19,42 @@ async getTasks(limit: number | null) : Promise<Task[]> {
     return await TAURI_INVOKE("get_tasks", { limit });
 },
 /**
- * Close a task card once it's been reviewed: it leaves the Work board but stays
- * in history.
+ * Close a task card without reviewing it (cancel it, or set aside a blocked one): it
+ * leaves the Work board but stays in history.
  */
 async closeTask(id: string) : Promise<void> {
     await TAURI_INVOKE("close_task", { id });
+},
+/**
+ * Mark a task that's ready for review as reviewed: it leaves the Work board and stays in
+ * history as reviewed.
+ */
+async reviewTask(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("review_task", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete a chat for good: its messages go, and tasks that ran in it stay in history without
+ * their transcript. The chat an agent is working in can't be deleted until they finish; the
+ * open chat, once deleted, gives way to a fresh one in the same folder.
+ */
+async deleteConversation(conversationId: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_conversation", { conversationId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Where an agent's tone dials start: a built-in agent's character, else neutral.
+ */
+async defaultTone(agentId: string) : Promise<Tone> {
+    return await TAURI_INVOKE("default_tone", { agentId });
 },
 /**
  * Hand work to an agent as a task: it starts in a conversation of its own, or
@@ -360,10 +391,11 @@ async listConversations() : Promise<Conversation[]> {
 },
 /**
  * Start a fresh conversation with an agent (ends the live session so the next
- * message begins a genuinely new chat). Returns the new conversation id.
+ * message begins a genuinely new chat), in `cwd` (a project folder) or where the
+ * agent works now. Returns the new conversation id.
  */
-async newChat(agentId: string) : Promise<number> {
-    return await TAURI_INVOKE("new_chat", { agentId });
+async newChat(agentId: string, cwd: string | null) : Promise<number> {
+    return await TAURI_INVOKE("new_chat", { agentId, cwd });
 },
 /**
  * Reopen a saved conversation: make it active, end the live session, and point
@@ -442,11 +474,11 @@ async setLighting(mode: string) : Promise<AppConfig> {
     return await TAURI_INVOKE("set_lighting", { mode });
 },
 /**
- * Change how Starkline looks; nothing about the work changes with it.
+ * Change how Starkline looks and what the agents wear; nothing about the work changes with it.
  */
-async setTheme(theme: string) : Promise<Result<AppConfig, string>> {
+async setTheme(theme: string, outfits: string) : Promise<Result<AppConfig, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("set_theme", { theme }) };
+    return { status: "ok", data: await TAURI_INVOKE("set_theme", { theme, outfits }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -514,7 +546,11 @@ helpers?: boolean;
 /**
  * The model those helpers use ("" = the provider's choice).
  */
-helper_model?: string }
+helper_model?: string; 
+/**
+ * How the agent comes across (dials); filled with its default when missing.
+ */
+tone?: Tone | null }
 export type AgentKind = "orchestrator" | "worker" | 
 /**
  * Fixes bugs in THIS app that agents report — not a normal delegation target.
@@ -547,7 +583,12 @@ keep_awake?: boolean;
 /**
  * How Starkline looks: one of [`THEMES`]. Tasks, permissions and providers don't change with it.
  */
-theme?: string; engines: EngineConfig[]; agents: AgentConfig[] }
+theme?: string; 
+/**
+ * What the agents wear: the active theme's outfits ("theme"), their own look in every
+ * theme ("own"), or one theme's outfits (one of [`THEMES`]).
+ */
+outfits?: string; engines: EngineConfig[]; agents: AgentConfig[] }
 /**
  * How an engine authenticates. `cli-login` = whatever the CLI is already logged
  * into on this machine; `api-key-env` = inject `env` vars (e.g. an API key) into
@@ -630,7 +671,11 @@ export type CheckRun = { kind: string; command: string; passed: boolean; at: num
 /**
  * A saved chat — one continuous conversation with an agent, resumable later.
  */
-export type Conversation = { id: number; agent_id: string; title: string; cwd: string; created: number; updated: number }
+export type Conversation = { id: number; agent_id: string; title: string; cwd: string; created: number; updated: number; 
+/**
+ * A teammate's delegation ran here, not a chat the developer had.
+ */
+delegated: boolean }
 export type DispatchResult = { agent_id: string; name: string; spawned: boolean }
 /**
  * A backend an agent can run on. `kind` selects the adapter (how we build the
@@ -966,7 +1011,7 @@ changes: FileChange[];
  */
 branch: string | null; 
 /**
- * The owner's conversation for this task.
+ * The task's part of its owner's chat.
  */
 messages: StoredMessage[] }
 /**
@@ -985,6 +1030,27 @@ summary: string;
  * Kind-specific details as JSON ("" when there are none).
  */
 data: string }
+export type Tone = { 
+/**
+ * Serious (0) to playful.
+ */
+humour: number; 
+/**
+ * Earnest (0) to sarcastic.
+ */
+sarcasm: number; 
+/**
+ * Casual (0) to formal.
+ */
+formality: number; 
+/**
+ * Reserved (0) to upbeat.
+ */
+enthusiasm: number; 
+/**
+ * Brief (0) to thorough.
+ */
+detail: number }
 
 /** tauri-specta globals **/
 

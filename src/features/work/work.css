@@ -5,124 +5,6 @@
   min-height: 0;
 }
 
-/* ---- Projects ------------------------------------------------------------------ */
-.project-rail {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  width: 220px;
-  flex: none;
-  min-height: 0;
-  padding: var(--space-4) var(--space-3);
-  border-right: 1px solid var(--border-subtle);
-  background: var(--surface-sunken);
-  overflow-y: auto;
-}
-
-.project-rail .section-header {
-  padding: 0 var(--space-2);
-}
-
-.project-list {
-  display: grid;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.project-row {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.project-row .menu-root {
-  position: absolute;
-  right: 4px;
-  opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease-out);
-}
-
-.project-row:hover .menu-root,
-.project-row:focus-within .menu-root {
-  opacity: 1;
-}
-
-.project-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 44px;
-  padding: 6px 38px 6px 10px;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  text-align: left;
-  transition: background-color var(--duration-fast) var(--ease-out);
-}
-
-.project-item:hover {
-  background: var(--surface-hover);
-}
-
-.project-item.is-selected {
-  background: var(--accent-soft);
-}
-
-.project-item.is-selected .project-name {
-  color: var(--accent-text);
-}
-
-.project-glyph {
-  display: grid;
-  place-items: center;
-  width: 16px;
-  color: var(--text-secondary);
-}
-
-.project-item.is-selected .project-glyph {
-  color: var(--accent-text);
-}
-
-.project-default {
-  color: var(--accent-text);
-}
-
-.project-text {
-  display: grid;
-  flex: 1;
-  min-width: 0;
-  line-height: var(--leading-tight);
-}
-
-.project-name {
-  font-weight: var(--weight-medium);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-path {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-add {
-  justify-content: flex-start;
-  margin-top: var(--space-1);
-}
-
-.rail-error {
-  padding: 0 var(--space-2);
-  color: var(--state-danger);
-  font-size: var(--text-sm);
-}
-
 /* ---- Canvas -------------------------------------------------------------------- */
 .work-canvas {
   display: flex;
@@ -535,10 +417,6 @@
 
 /* Narrow windows: tighter rails, and the provider moves out of the row. */
 @media (max-width: 1360px) {
-  .project-rail {
-    width: 188px;
-  }
-
   .attention-rail {
     width: 280px;
   }

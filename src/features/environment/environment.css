@@ -1,13 +1,24 @@
 /* The room is pixel art; everything laid over it is ordinary app UI. */
 .env {
   --env-drawer-width: 420px;
+  /* Panels over the room: the theme's overlay surface, letting a little of the room through. */
+  --env-panel: color-mix(in srgb, var(--surface-overlay) 94%, transparent);
   position: relative;
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   background: var(--surface-app);
   user-select: none;
+}
+
+/* The room and its conversation panel, under the room's title bar where it has one. */
+.env-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
 }
 
 /* Everything that belongs to the scene; it narrows while a conversation is open. */
@@ -67,7 +78,7 @@
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  background: rgb(24 33 42 / 0.94);
+  background: var(--env-panel);
   box-shadow: var(--shadow-overlay);
   pointer-events: none;
 }
@@ -108,6 +119,37 @@
   color: var(--state-review);
 }
 
+/* Docked in the room's corner: the agent's portrait, role and what they're doing. */
+.scene-card.is-docked {
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.scene-card.is-docked .scene-card-text {
+  gap: var(--space-1);
+}
+
+.scene-card.is-docked .scene-card-name {
+  font-size: var(--text-md);
+}
+
+.scene-card-role {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.scene-card.is-docked .scene-card-line {
+  display: -webkit-box;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.scene-card.is-docked .scene-card-line:not(.is-waiting) {
+  color: var(--text);
+}
+
 /* ---- Camera controls ----------------------------------------------------------- */
 .scene-controls {
   position: absolute;
@@ -120,7 +162,7 @@
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  background: rgb(24 33 42 / 0.94);
+  background: var(--env-panel);
   box-shadow: var(--shadow-overlay);
 }
 
@@ -230,4 +272,239 @@
   text-align: center;
   transform: translateX(-50%);
   pointer-events: none;
+}
+
+/* ---- A room's title bar (Studio Office) ------------------------------------------ */
+.room-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-8) var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-sunken);
+}
+
+.room-header-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: var(--space-10);
+  height: var(--space-10);
+  border-radius: var(--radius-control);
+  background: var(--surface-selected);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  color: var(--text);
+}
+
+.room-header-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.room-header-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+  line-height: var(--leading-tight);
+}
+
+.room-header-description {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--text-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Two staggered italic lines, each led by a rule, as the mockup signs the room. */
+.room-header-motto {
+  display: grid;
+  flex-shrink: 0;
+  justify-items: end;
+  color: var(--text-secondary);
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-style: italic;
+  line-height: var(--leading-tight);
+}
+
+.room-header-motto-line:first-child {
+  margin-right: var(--space-10);
+}
+
+.room-header-motto-line::before {
+  content: "";
+  display: inline-block;
+  width: var(--space-5);
+  height: 1px;
+  margin-right: var(--space-3);
+  background: currentColor;
+  vertical-align: middle;
+  opacity: 0.55;
+}
+
+/* ---- Name tags beside each agent (Mori Cafe) -------------------------------------- */
+.scene-tag {
+  position: absolute;
+  z-index: var(--z-sticky);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: var(--space-2);
+  max-width: 132px;
+  padding: 6px 10px 7px;
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-sunken) 88%, transparent);
+  box-shadow: var(--shadow-raised);
+  line-height: var(--leading-tight);
+  pointer-events: none;
+}
+
+.scene-tag-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tone);
+}
+
+.scene-tag-name {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.02em;
+}
+
+.scene-tag-role {
+  grid-column: 2;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* ---- The "Starkline Today" board (Mori Cafe): live counts painted on parchment ----- */
+.today-board {
+  /* The board's own paint, sampled from mockup 07: it's part of the room, whatever the theme. */
+  --board-ink: #4f4136;
+  --board-running: #5eaf65;
+  --board-waiting: #f99426;
+  --board-clear: #918a81;
+  --board-blocked: #d0574a;
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  color: var(--board-ink);
+  font-weight: var(--weight-regular);
+  line-height: 1;
+  list-style: none;
+  white-space: nowrap;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+.today-board-line {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+}
+
+.today-board-dot {
+  width: 0.85em;
+  height: 0.85em;
+  border-radius: 50%;
+}
+
+.today-board-dot.is-running {
+  background: var(--board-running);
+}
+
+.today-board-dot.is-waiting {
+  background: var(--board-waiting);
+}
+
+.today-board-dot.is-clear {
+  background: var(--board-clear);
+}
+
+.today-board-dot.is-blocked {
+  background: var(--board-blocked);
+}
+
+/* ---- The cafe's clock and caption ------------------------------------------------ */
+.room-clock {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-3);
+  z-index: var(--z-sticky);
+  display: grid;
+  justify-items: end;
+  color: var(--text);
+  line-height: var(--leading-tight);
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.7);
+  pointer-events: none;
+}
+
+.room-clock-time {
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+}
+
+.room-clock-place {
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+}
+
+.room-caption {
+  position: absolute;
+  bottom: var(--space-5);
+  left: var(--space-3);
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6) var(--space-3) var(--space-5);
+  border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--surface-sunken) 90%, transparent);
+  box-shadow: var(--shadow-overlay);
+  pointer-events: none;
+}
+
+.room-caption-icon {
+  color: var(--accent);
+}
+
+.room-caption-name {
+  display: grid;
+  gap: 2px;
+  line-height: var(--leading-tight);
+}
+
+.room-caption-title {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.room-caption-subtitle {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.room-caption-divider {
+  align-self: stretch;
+  width: 1px;
+  margin: 0 var(--space-1);
+  background: color-mix(in srgb, var(--text) 18%, transparent);
+}
+
+.room-caption-note {
+  display: grid;
+  color: var(--text-secondary);
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  font-style: italic;
+  line-height: var(--leading-tight);
 }

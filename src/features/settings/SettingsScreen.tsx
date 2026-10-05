@@ -1,7 +1,7 @@
-import { Activity, Moon, Palette, Plug, ShieldCheck, SlidersHorizontal, type LucideIcon } from "lucide-react";
-import { EmptyState, SkeletonRows, cx, ICON_SIZE, ICON_STROKE } from "../../design";
+import { Plug } from "lucide-react";
+import { EmptyState, SkeletonRows } from "../../design";
 import { useConfig } from "../../stores/config";
-import { useNavigation, type SettingsSection } from "../../stores/navigation";
+import { useNavigation } from "../../stores/navigation";
 import DiagnosticsSettings from "./DiagnosticsSettings";
 import GeneralSettings from "./GeneralSettings";
 import PermissionsSettings from "./PermissionsSettings";
@@ -10,18 +10,9 @@ import ProviderSettings from "./ProviderSettings";
 import ThemeStudio from "./ThemeStudio";
 import "./settings.css";
 
-const SECTIONS: ReadonlyArray<{ id: SettingsSection; label: string; icon: LucideIcon }> = [
-  { id: "general", label: "General", icon: SlidersHorizontal },
-  { id: "providers", label: "Providers", icon: Plug },
-  { id: "permissions", label: "Permissions", icon: ShieldCheck },
-  { id: "power", label: "Power", icon: Moon },
-  { id: "themes", label: "Theme Studio", icon: Palette },
-  { id: "diagnostics", label: "Diagnostics", icon: Activity },
-];
-
+/** The settings section chosen in the sidebar. */
 export default function SettingsScreen() {
   const section = useNavigation((s) => s.settingsSection);
-  const openSettings = useNavigation((s) => s.openSettings);
   const config = useConfig((s) => s.config);
   const configError = useConfig((s) => s.error);
 
@@ -49,20 +40,6 @@ export default function SettingsScreen() {
 
   return (
     <div className="settings-screen">
-      <nav className="settings-nav" aria-label="Settings">
-        {SECTIONS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            className={cx("settings-nav-item", id === section && "is-current")}
-            aria-current={id === section ? "page" : undefined}
-            onClick={() => openSettings(id)}
-          >
-            <Icon aria-hidden size={ICON_SIZE.md} strokeWidth={ICON_STROKE} />
-            {label}
-          </button>
-        ))}
-      </nav>
       <div className="settings-content">{content}</div>
     </div>
   );

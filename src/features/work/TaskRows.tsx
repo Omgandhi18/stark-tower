@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { CalendarClock, CornerDownRight, Hourglass, MessageSquareText, Play, RotateCcw, Square, SquareArrowOutUpRight, X } from "lucide-react";
+import { CalendarClock, CheckCheck, CornerDownRight, Hourglass, MessageSquareText, Play, RotateCcw, Square, SquareArrowOutUpRight, X } from "lucide-react";
 import { Button, OverflowMenu, Portrait, StatusPill, Tag, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
-import { chatStop, closeTask, resumeTask, startTask } from "../../lib/api";
+import { chatStop, closeTask, resumeTask, reviewTask, startTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { automationOf } from "../../lib/requester";
 import { AGENT_STATUS } from "../../lib/status";
@@ -89,12 +89,21 @@ export function TaskRowView({ row, now }: TaskRowViewProps) {
   if (status === "doing" && !task.parent_id) {
     items.push({ id: "stop", label: "Stop", icon: Square, danger: true, onSelect: () => void chatStop(task.assignee).catch(report("stop the task")) });
   }
-  items.push({
-    id: "close",
-    label: status === "todo" ? "Cancel" : "Close task",
-    icon: X,
-    onSelect: () => void closeTask(task.id).catch(report("close the task")),
-  });
+  if (status === "done") {
+    items.push({
+      id: "reviewed",
+      label: "Mark as reviewed",
+      icon: CheckCheck,
+      onSelect: () => void reviewTask(task.id).catch((e) => setError(errorMessage(e, "The task couldn't be marked reviewed."))),
+    });
+  } else {
+    items.push({
+      id: "close",
+      label: status === "todo" ? "Cancel" : "Close task",
+      icon: X,
+      onSelect: () => void closeTask(task.id).catch(report("close the task")),
+    });
+  }
 
   return (
     <li className="work-row">

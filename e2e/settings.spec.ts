@@ -5,7 +5,7 @@ test.describe("settings and automations", () => {
   test("diagnostics says what works and what doesn't", async ({ page }) => {
     await openApp(page);
     await goTo(page, "Settings");
-    await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Diagnostics" }).click();
+    await page.getByRole("list", { name: "Settings sections" }).getByRole("button", { name: "Diagnostics" }).click();
     await expect(page.getByText("Keep running with the window closed")).toBeVisible();
     await expect(page.getByText("Installed, v22.11.0")).toBeVisible();
     await expect(page.getByText("Listening")).toBeVisible();
@@ -17,7 +17,7 @@ test.describe("settings and automations", () => {
   test("edits a provider's sign-in", async ({ page }) => {
     await openApp(page);
     await goTo(page, "Settings");
-    await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Providers" }).click();
+    await page.getByRole("list", { name: "Settings sections" }).getByRole("button", { name: "Providers" }).click();
     await page.getByRole("button", { name: /Codex/ }).click();
     await page.getByRole("combobox", { name: "Sign-in" }).selectOption("api-key-env");
     await page.getByLabel("OPENAI_API_KEY").fill("sk-test-123");
@@ -57,7 +57,7 @@ test.describe("permissions", () => {
   test("lists granted rules and revokes one", async ({ page }) => {
     await openApp(page);
     await goTo(page, "Settings");
-    await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Permissions" }).click();
+    await page.getByRole("list", { name: "Settings sections" }).getByRole("button", { name: "Permissions" }).click();
     await expect(page.getByText("Never on its own")).toBeVisible();
     const rule = page.getByText("Allow npm install commands");
     await expect(rule).toBeVisible();
@@ -72,7 +72,7 @@ test.describe("themes", () => {
   test("previews a theme across the app, then applies it", async ({ page }) => {
     await openApp(page);
     await goTo(page, "Settings");
-    await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Theme Studio" }).click();
+    await page.getByRole("list", { name: "Settings sections" }).getByRole("button", { name: "Theme Studio" }).click();
     const html = page.locator("html");
     await expect(html).toHaveAttribute("data-theme", "rnd");
     await page.getByRole("radio", { name: /Studio Office/ }).click();
@@ -85,9 +85,24 @@ test.describe("themes", () => {
     await page.getByRole("radio", { name: /Mori Cafe/ }).click();
     await page.getByRole("button", { name: "Apply theme" }).click();
     await expect(html).toHaveAttribute("data-theme", "mori");
-    expect(await fakeCalls(page)).toContainEqual({ cmd: "set_theme", args: { theme: "mori" } });
+    expect(await fakeCalls(page)).toContainEqual({ cmd: "set_theme", args: { theme: "mori", outfits: "theme" } });
     await expect(page.getByRole("radio", { name: /Mori Cafe/ })).toContainText("In use");
     await goTo(page, "Environment");
-    await expect(page.getByRole("note")).toHaveText("The Mori Cafe room isn't built yet, so your team works in After Hours R&D.");
+    await expect(page.getByRole("list", { name: "Starkline today" })).toBeVisible();
+  });
+
+  test("dresses the agents in another theme's outfits", async ({ page }) => {
+    await openApp(page);
+    await goTo(page, "Settings");
+    await page.getByRole("list", { name: "Settings sections" }).getByRole("button", { name: "Theme Studio" }).click();
+    const appearance = page.getByRole("radiogroup", { name: "Agent appearance" });
+    await expect(appearance.getByRole("radio", { name: /Use theme outfits/ })).toHaveAttribute("aria-checked", "true");
+    await appearance.getByRole("radio", { name: /Choose other outfits/ }).click();
+    const sets = page.getByRole("radiogroup", { name: "Outfits" });
+    await expect(sets.getByRole("radio", { name: /After Hours R&D/ })).toBeDisabled();
+    await sets.getByRole("radio", { name: /Mori Cafe/ }).click();
+    await page.getByRole("button", { name: "Apply theme" }).click();
+    expect(await fakeCalls(page)).toContainEqual({ cmd: "set_theme", args: { theme: "rnd", outfits: "mori" } });
+    await expect(page.getByRole("button", { name: "Applied" })).toBeDisabled();
   });
 });

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { History, UsersRound } from "lucide-react";
-import { Portrait, SectionHeader, SkeletonRows, Tag, cx } from "../../design";
+import { History, Trash2, UsersRound } from "lucide-react";
+import { OverflowMenu, Portrait, SectionHeader, SkeletonRows, Tag, cx } from "../../design";
 import { errorMessage } from "../../lib/errors";
 import { AGENT_STATUS } from "../../lib/status";
 import { formatRelative } from "../../lib/time";
@@ -12,7 +12,9 @@ import { isQuestion, useAttention } from "../../stores/attention";
 import { selectThread, useChats } from "../../stores/chats";
 import { useNavigation } from "../../stores/navigation";
 import { folderName, useWorkspace } from "../../stores/workspace";
+import type { Conversation } from "../../lib/types";
 import { reopenChat } from "./chatActions";
+import DeleteChatDialog from "./DeleteChatDialog";
 
 const CLOCK_MS = 60_000;
 const UNTITLED = "Untitled chat";
@@ -48,6 +50,7 @@ export default function ConversationRail({ agentId }: { agentId: string | null }
   const conversations = useWorkspace((s) => s.conversations);
   const currentChat = useChats((s) => (agentId ? selectThread(agentId)(s).conversationId : null));
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<Conversation | null>(null);
   const now = useNow(CLOCK_MS);
   const agent = agents.find((a) => a.id === agentId);
   const earlier = conversations.filter((c) => c.agent_id === agentId);
@@ -90,21 +93,27 @@ export default function ConversationRail({ agentId }: { agentId: string | null }
             <ul className="rail-list">
               {earlier.map((c) => {
                 const current = c.id === currentChat;
+                const title = c.title.trim() || UNTITLED;
                 return (
-                  <li key={c.id}>
+                  <li key={c.id} className="rail-chat-row">
                     <button
                       type="button"
                       className="rail-chat"
                       aria-current={current ? "true" : undefined}
                       onClick={() => !current && reopen(c.id)}
                     >
-                      <span className="rail-chat-title">{c.title.trim() || UNTITLED}</span>
+                      <span className="rail-chat-title">{title}</span>
                       <span className="rail-chat-meta">
                         {c.cwd ? `${folderName(c.cwd)}, ` : ""}
                         {formatRelative(c.updated, now)}
                       </span>
                       {current && <Tag tone="accent">Open</Tag>}
                     </button>
+                    <OverflowMenu
+                      label={`More actions for ${title}`}
+                      align="start"
+                      items={[{ id: "delete", label: "Delete chat", icon: Trash2, danger: true, onSelect: () => setDeleting(c) }]}
+                    />
                   </li>
                 );
               })}
@@ -112,6 +121,7 @@ export default function ConversationRail({ agentId }: { agentId: string | null }
           )}
         </>
       )}
+      <DeleteChatDialog key={deleting?.id ?? "none"} chat={deleting} onClose={() => setDeleting(null)} />
     </nav>
   );
 }

@@ -1,7 +1,9 @@
-import { ArrowLeft, Clock, Folder, FolderOpen, GitBranch, MessageSquareText, Play, ShieldCheck, Square, X } from "lucide-react";
+import { useState } from "react";
+import { ArrowLeft, CheckCheck, Clock, Folder, FolderOpen, GitBranch, MessageSquareText, Play, ShieldCheck, Square, X } from "lucide-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Button, OverflowMenu, Portrait, StatusPill, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
-import { chatStop, closeTask, resumeTask } from "../../lib/api";
+import { chatStop, closeTask, resumeTask, reviewTask } from "../../lib/api";
+import { errorMessage } from "../../lib/errors";
 import { formatElapsed } from "../../lib/time";
 import type { Agent, TaskDetail } from "../../lib/types";
 import { useConfig } from "../../stores/config";
@@ -30,6 +32,11 @@ export default function TaskHeader({ detail, owner, requester, state, now }: Tas
   const started = task.started ?? task.ts;
   const elapsed = formatElapsed((task.finished ?? now) - started);
   const name = owner?.name ?? task.assignee;
+  const [error, setError] = useState<string | null>(null);
+  const markReviewed = () => {
+    setError(null);
+    reviewTask(task.id).catch((e) => setError(errorMessage(e, "The task couldn't be marked reviewed.")));
+  };
 
   const items: MenuItem[] = [];
   if (task.cwd) {
@@ -46,8 +53,14 @@ export default function TaskHeader({ detail, owner, requester, state, now }: Tas
   if (task.status === "doing" && !task.parent_id) {
     items.push({ id: "stop", label: "Stop", icon: Square, danger: true, onSelect: () => void chatStop(task.assignee).catch(report("stop the task")) });
   }
-  if (task.status !== "closed") {
-    items.push({ id: "close", label: task.status === "todo" ? "Cancel task" : "Close task", icon: X, onSelect: () => void closeTask(task.id).catch(report("close the task")) });
+  // A finished task is marked reviewed (below); anything else still open can be closed.
+  if (!["closed", "reviewed", "done"].includes(task.status)) {
+    items.push({
+      id: "close",
+      label: task.status === "todo" ? "Cancel task" : "Close task",
+      icon: X,
+      onSelect: () => void closeTask(task.id).catch(report("close the task")),
+    });
   }
 
   return (
@@ -60,9 +73,19 @@ export default function TaskHeader({ detail, owner, requester, state, now }: Tas
           <Button icon={MessageSquareText} onClick={() => openConversation(task.assignee)}>
             Talk to {name}
           </Button>
+          {task.status === "done" && (
+            <Button variant="review" icon={CheckCheck} onClick={markReviewed}>
+              Mark as reviewed
+            </Button>
+          )}
           {items.length > 0 && <OverflowMenu label={`More actions for ${task.title}`} items={items} />}
         </div>
       </div>
+      {error && (
+        <p className="task-header-error" role="alert">
+          {error}
+        </p>
+      )}
       <h1 className="task-title">{task.title}</h1>
       <dl className="task-facts">
         <div className="task-fact">
@@ -113,7 +136,10 @@ export default function TaskHeader({ detail, owner, requester, state, now }: Tas
           <dt>Asked by</dt>
           <dd>{requester}</dd>
         </div>
-        <div className="task-fact" title="Project work runs on its own; installs, branches and files outside the project need you; publishing never runs on its own.">
+        <div
+          className="task-fact"
+          title="Project work runs on its own; installs, branches and files outside the project need you; publishing never runs on its own."
+        >
           <dt>Permissions</dt>
           <dd>
             <ShieldCheck aria-hidden size={ICON_SIZE.sm} strokeWidth={ICON_STROKE} />

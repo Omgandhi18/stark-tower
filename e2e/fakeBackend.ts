@@ -22,6 +22,24 @@ function install(scenario: Scenario) {
   let nextConversation = 100;
   let nextMessage = 1_000;
   const REPLY_DELAY_MS = 60;
+  // Tests fix the clock (Date), so the launch race is timed on the page's own monotonic clock.
+  const readyAt = performance.now() + (scenario.backendReadyAfterMs ?? 0);
+
+  // Tone dials as the backend starts them, filled in at load as it does.
+  const usualTone = (agentId: string) => {
+    const dials: Record<string, [number, number, number, number, number]> = {
+      jarvis: [2, 3, 4, 1, 1],
+      friday: [3, 2, 1, 3, 1],
+      vision: [1, 0, 3, 1, 2],
+      edith: [1, 1, 2, 3, 1],
+      karen: [2, 1, 1, 4, 3],
+      veronica: [1, 2, 2, 1, 0],
+      "dum-e": [3, 0, 0, 4, 1],
+    };
+    const [humour, sarcasm, formality, enthusiasm, detail] = dials[agentId] ?? [1, 1, 2, 2, 2];
+    return { humour, sarcasm, formality, enthusiasm, detail };
+  };
+  for (const a of state.config.agents) a.tone ??= usualTone(a.id);
 
   const emit = (event: string, payload: unknown) => {
     for (const id of listeners.get(event) ?? []) callbacks.get(id)?.({ event, id, payload });
@@ -77,6 +95,7 @@ function install(scenario: Scenario) {
         cwd: state.projects.active,
         created: Date.now(),
         updated: Date.now(),
+        delegated: false,
       });
       state.transcripts[id] = [];
       emit("conversations://changed", null);
@@ -171,9 +190,16 @@ function install(scenario: Scenario) {
       };
       state.tasks.unshift(task);
       if (!busy) {
-        const conversationId = nextConversation++;
-        state.conversations.unshift({ id: conversationId, agent_id: agentId, title: task.title, cwd, created: now, updated: now });
-        state.transcripts[conversationId] = [];
+        // Like the app: the request continues the developer's chat with that agent in the project.
+        const folder = (path: string) => path.replace(/\/+$/, "");
+        const inFolder = (c: (typeof state.conversations)[number]) => c.agent_id === agentId && !c.delegated && folder(c.cwd) === folder(cwd);
+        const open = conversationOf(agentId);
+        const chat = open && inFolder(open) ? open : [...state.conversations].filter(inFolder).sort((a, b) => b.updated - a.updated)[0];
+        const conversationId = chat?.id ?? nextConversation++;
+        if (!chat) {
+          state.conversations.unshift({ id: conversationId, agent_id: agentId, title: task.title, cwd, created: now, updated: now, delegated: false });
+          state.transcripts[conversationId] = [];
+        }
         state.current[agentId] = conversationId;
         task.conversation_id = conversationId;
         emit("chat://switched", { agentId, conversationId });
@@ -202,6 +228,17 @@ function install(scenario: Scenario) {
       const diff = state.diffs[String(args.path)];
       if (diff === undefined) throw "There is no change to show for that file.";
       return diff;
+    },
+    review_task: (args) => {
+      const task = state.tasks.find((t) => t.id === args.id);
+      if (task?.status !== "done") throw "Only a task that's ready for review can be marked reviewed.";
+      state.tasks = state.tasks.map((t) => (t.id === args.id ? { ...t, status: "reviewed" } : t));
+      state.notifications = state.notifications.map((n) =>
+        n.task_id === args.id && n.handled === null && n.kind === "task_ready" ? { ...n, handled: Date.now(), outcome: "Reviewed", read: true } : n,
+      );
+      emit("tasks://changed", null);
+      emit("notifications://changed", null);
+      return null;
     },
     close_task: (args) => {
       state.tasks = state.tasks.map((t) => (t.id === args.id ? { ...t, status: "closed" } : t));
@@ -328,13 +365,37 @@ function install(scenario: Scenario) {
     new_chat: (args) => {
       const agentId = String(args.agentId);
       const id = nextConversation++;
-      const cwd = conversationOf(agentId)?.cwd ?? state.projects.active;
-      state.conversations.unshift({ id, agent_id: agentId, title: "", cwd, created: Date.now(), updated: Date.now() });
+      const cwd = typeof args.cwd === "string" && args.cwd ? args.cwd : (conversationOf(agentId)?.cwd ?? state.projects.active);
+      state.conversations.unshift({ id, agent_id: agentId, title: "", cwd, created: Date.now(), updated: Date.now(), delegated: false });
       state.transcripts[id] = [];
       state.current[agentId] = id;
       setStatus(agentId, "offline");
       emit("conversations://changed", null);
       return id;
+    },
+    delete_conversation: (args) => {
+      const id = Number(args.conversationId);
+      const chat = state.conversations.find((c) => c.id === id);
+      if (!chat) throw "That chat doesn't exist any more.";
+      const agentId = chat.agent_id;
+      const wasOpen = state.current[agentId] === id;
+      if (wasOpen && ["working", "thinking", "blocked"].includes(state.statuses[agentId] ?? "offline")) {
+        const name = state.config.agents.find((a) => a.id === agentId)?.name ?? agentId;
+        throw `${name} is working in this chat. Delete it once they've finished.`;
+      }
+      state.conversations = state.conversations.filter((c) => c.id !== id);
+      delete state.transcripts[id];
+      state.tasks = state.tasks.map((t) => (t.conversation_id === id ? { ...t, conversation_id: null } : t));
+      if (wasOpen) {
+        const fresh = nextConversation++;
+        state.conversations.unshift({ id: fresh, agent_id: agentId, title: "", cwd: chat.cwd, created: Date.now(), updated: Date.now(), delegated: false });
+        state.transcripts[fresh] = [];
+        state.current[agentId] = fresh;
+        emit("chat://switched", { agentId, conversationId: fresh });
+      }
+      emit("conversations://changed", null);
+      emit("tasks://changed", null);
+      return null;
     },
     open_conversation: (args) => {
       const conversation = state.conversations.find((c) => c.id === args.conversationId);
@@ -404,8 +465,10 @@ function install(scenario: Scenario) {
       state.power = { ...state.power, enabled, holding: enabled && state.power.holding, reason: enabled ? state.power.reason : "Keep Awake is off." };
       return state.power;
     },
+    default_tone: (args) => usualTone(String(args.agentId)),
     update_agent: (args) => {
       const next = args.agent as Scenario["config"]["agents"][number];
+      next.tone ??= usualTone(next.id);
       const index = state.config.agents.findIndex((a) => a.id === next.id);
       if (index >= 0) state.config.agents[index] = next;
       else state.config.agents.push(next);
@@ -429,9 +492,13 @@ function install(scenario: Scenario) {
       return commitConfig();
     },
     set_theme: (args) => {
+      const themes = ["rnd", "office", "mori"];
       const theme = String(args.theme);
-      if (!["rnd", "office", "mori"].includes(theme)) throw "That theme isn't one Starkline has.";
+      const outfits = String(args.outfits);
+      if (!themes.includes(theme)) throw "That theme isn't one Starkline has.";
+      if (![...themes, "theme", "own"].includes(outfits)) throw "Those outfits aren't ones Starkline has.";
       state.config.theme = theme;
+      state.config.outfits = outfits;
       return commitConfig();
     },
     set_standup_minutes: (args) => {
@@ -479,6 +546,10 @@ function install(scenario: Scenario) {
       convertFileSrc: (path: string) => path,
       invoke: async (cmd: string, args: Json = {}) => {
         calls.push({ cmd, args });
+        // Until the backend is ready, app commands fail the way Tauri's do before setup has run.
+        if (!cmd.startsWith("plugin:") && performance.now() < readyAt) {
+          throw `state not managed for field \`state\` on command \`${cmd}\`. You must call \`.manage()\` before using this command`;
+        }
         const handler = commands[cmd];
         if (!handler) {
           console.warn(`[fake backend] unhandled command ${cmd}`);

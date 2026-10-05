@@ -42,11 +42,11 @@ export async function stopChat(agentId: string): Promise<void> {
   chats.push(agentId, { role: "system", text: "Stopped. Your next message continues this chat." });
 }
 
-/** Start over in a fresh chat; the current one stays in earlier chats. */
-export async function startNewChat(agentId: string): Promise<void> {
-  await newChat(agentId);
+/** Start over in a fresh chat (in `inFolder`, else where the agent works now); the current one stays in earlier chats. */
+export async function startNewChat(agentId: string, inFolder?: string): Promise<void> {
+  await newChat(agentId, inFolder);
   const chats = useChats.getState();
-  const { folder } = selectThread(agentId)(chats);
+  const folder = inFolder ?? selectThread(agentId)(chats).folder;
   chats.reset(agentId);
   if (folder) chats.setFolder(agentId, folder);
   await chats.hydrate(agentId);

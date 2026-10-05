@@ -1,0 +1,32 @@
+{
+  "$comment": "Studio Office stations (mockup 06), in mockup pixels. Each slot's character is the station's cut-out (scripts/mockup-extract/specs/office-room.json); its hit area and head default to that cut-out. Lights are [cx, cy, rx, ry] ellipses: 'screen' glows while the agent works, 'floor' pools amber while it waits on you. The one helper bot stands by the research desk. The meeting table's agent (the operative) isn't in the mockup: Codex painted her in ('added'), so reference mode leaves that seat empty.",
+  "card": { "slot": "researchDesk", "anchor": "bottom-left", "inset": [7, 30] },
+  "frame": { "header": { "motto": ["Good Ideas", "Better People"] } },
+  "orchestratorSlot": "glassOffice",
+  "slots": [
+    { "id": "glassOffice", "figure": "commander" },
+    { "id": "researchDesk", "figure": "engineer" },
+    { "id": "whiteboard", "figure": "specialist" },
+    { "id": "armchair", "figure": "architect" },
+    { "id": "serverRack", "figure": "recon" },
+    { "id": "meetingTable", "figure": "operative", "added": true }
+  ],
+  "stations": {
+    "glassOffice": { "cutout": "glassOfficeOccupied", "floorY": 355 },
+    "researchDesk": { "cutout": "researchDeskOccupied", "floorY": 650 },
+    "whiteboard": { "cutout": "whiteboardOccupied", "floorY": 612 },
+    "armchair": { "cutout": "armchairOccupied", "floorY": 645 },
+    "serverRack": { "cutout": "serverRackOccupied", "floorY": 700 },
+    "meetingTable": { "cutout": "meetingTableOccupied", "floorY": 790 }
+  },
+  "lights": {
+    "glassOffice": { "screen": [598, 266, 66, 30], "floor": [540, 350, 50, 11] },
+    "researchDesk": { "screen": [702, 566, 58, 30], "floor": [748, 652, 48, 11] },
+    "whiteboard": { "screen": [728, 492, 106, 48], "floor": [833, 612, 38, 9] },
+    "armchair": { "screen": [1150, 500, 92, 68], "floor": [1030, 648, 54, 12] },
+    "serverRack": { "screen": [1515, 600, 52, 44], "floor": [1468, 703, 44, 10] },
+    "meetingTable": { "screen": [873, 748, 34, 20], "floor": [848, 786, 50, 10] }
+  },
+  "helpers": [{ "id": "helper-1", "parts": ["helper-1"], "floorY": 745 }],
+  "helperSlot": "researchDesk"
+}

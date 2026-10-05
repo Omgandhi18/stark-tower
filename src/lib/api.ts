@@ -22,6 +22,7 @@ export const getTasks = (limit?: number) => commands.getTasks(limit ?? null);
 
 /** Close a reviewed task: it leaves the Work board but stays in history. */
 export const closeTask = (id: string) => commands.closeTask(id);
+export const reviewTask = (id: string) => ok(commands.reviewTask(id));
 
 export const onTasksChanged = (cb: () => void): Promise<UnlistenFn> => listen("tasks://changed", () => cb());
 
@@ -134,7 +135,10 @@ export const listConversations = () => commands.listConversations();
 /** The agent's current saved chat (if any), including the folder it runs in. */
 export const activeConversation = (agentId: string) => commands.activeConversation(agentId);
 
-export const newChat = (agentId: string) => commands.newChat(agentId);
+/** Delete a chat for good (its messages); tasks that ran in it stay in history. */
+export const deleteConversation = (conversationId: number) => ok(commands.deleteConversation(conversationId));
+/** A fresh chat with an agent, in a project folder or where the agent works now. */
+export const newChat = (agentId: string, cwd?: string) => commands.newChat(agentId, cwd ?? null);
 
 export const openConversation = (conversationId: number) => commands.openConversation(conversationId);
 
@@ -182,6 +186,8 @@ export const removeProject = (path: string) => commands.removeProject(path);
 export const getConfig = () => commands.getConfig();
 
 export const updateAgent = (agent: Parameters<typeof commands.updateAgent>[0]) => commands.updateAgent(agent);
+/** Where an agent's tone dials start (a built-in agent's character, else neutral). */
+export const defaultTone = (agentId: string) => commands.defaultTone(agentId);
 
 export const removeAgent = (id: string) => commands.removeAgent(id);
 
@@ -197,7 +203,7 @@ export const setStandupMinutes = (minutes: number) => commands.setStandupMinutes
 export const setLighting = (mode: string) => commands.setLighting(mode);
 
 /** Change how Starkline looks (rnd | office | mori). */
-export const setTheme = (theme: string) => ok(commands.setTheme(theme));
+export const setTheme = (theme: string, outfits: string) => ok(commands.setTheme(theme, outfits));
 
 export const resetConfig = () => commands.resetConfig();
 

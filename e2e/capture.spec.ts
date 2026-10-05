@@ -1,6 +1,7 @@
 // Captures every screen for visual review: `npx playwright test e2e/capture.spec.ts`.
 // Images land in e2e/screenshots (ignored by git).
 import { expect, goTo, openApp, test } from "./fixtures";
+import { defaultScenario } from "./scenario";
 
 const shot = (name: string) => ({ path: `e2e/screenshots/${name}.png`, animations: "disabled" as const });
 
@@ -8,6 +9,25 @@ test("capture every screen", async ({ page }) => {
   await openApp(page);
   await expect(page.getByRole("heading", { name: "Running" })).toBeVisible();
   await page.screenshot(shot("01-work"));
+  await page
+    .getByRole("list", { name: "Projects" })
+    .getByRole("button", { name: /^checkout-web/ })
+    .click();
+  await page.screenshot(shot("01b-work-project-chats"));
+  await page.getByRole("list", { name: "Projects" }).getByRole("button", { name: "More actions for checkout-web" }).click();
+  await page.screenshot(shot("01d-work-project-menu"));
+  await page.keyboard.press("Escape");
+  const chats = page.getByRole("list", { name: "Chats in checkout-web" });
+  await chats.getByRole("button", { name: "Fix flaky checkout test", exact: true }).hover();
+  await chats.getByRole("button", { name: "More actions for Fix flaky checkout test" }).click();
+  await page.screenshot(shot("01e-work-chat-menu"));
+  await page.getByRole("menuitem", { name: "Delete chat" }).click();
+  await page.screenshot(shot("01f-delete-chat"));
+  await page.getByRole("button", { name: "Keep it" }).click();
+  await page.getByRole("region", { name: "Ready for review" }).getByRole("button", { name: "Write the release notes for 2.4", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Mark as reviewed" })).toBeVisible();
+  await page.screenshot(shot("01c-task-ready-for-review"));
+  await page.getByRole("list", { name: "Projects" }).getByRole("button", { name: "All work" }).click();
 
   await page.getByRole("region", { name: "Running" }).getByRole("button", { name: "Redesign the settings page", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Redesign the settings page", level: 1 })).toBeVisible();
@@ -35,6 +55,10 @@ test("capture every screen", async ({ page }) => {
 
   await goTo(page, "Agents");
   await page.screenshot(shot("05-agents"));
+  await page.getByRole("slider", { name: "Detail" }).scrollIntoViewIfNeeded();
+  await page.mouse.move(900, 600);
+  await page.mouse.wheel(0, 600);
+  await page.screenshot(shot("05d-agent-tone"));
   await page.getByRole("tab", { name: "Provider" }).click();
   await expect(page.getByText("models from Claude Code", { exact: false })).toBeVisible();
   await page.screenshot(shot("05b-agent-provider"));
@@ -73,13 +97,13 @@ test("capture every screen", async ({ page }) => {
 
   await goTo(page, "Settings");
   await page.screenshot(shot("09-settings-general"));
-  await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Providers" }).click();
+  await page.getByRole("list", { name: "Settings sections" }).getByRole("button", { name: "Providers" }).click();
   await page.screenshot(shot("10-settings-providers"));
-  await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Permissions" }).click();
+  await page.getByRole("list", { name: "Settings sections" }).getByRole("button", { name: "Permissions" }).click();
   await page.screenshot(shot("10b-settings-permissions"));
-  await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Power" }).click();
+  await page.getByRole("list", { name: "Settings sections" }).getByRole("button", { name: "Power" }).click();
   await page.screenshot(shot("11-settings-power"));
-  await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Diagnostics" }).click();
+  await page.getByRole("list", { name: "Settings sections" }).getByRole("button", { name: "Diagnostics" }).click();
   await page.screenshot(shot("12-settings-diagnostics"));
 });
 
@@ -128,7 +152,7 @@ test("capture a missed automation run", async ({ page }) => {
 test("capture the themes", async ({ page }) => {
   await openApp(page);
   await goTo(page, "Settings");
-  await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Theme Studio" }).click();
+  await page.getByRole("list", { name: "Settings sections" }).getByRole("button", { name: "Theme Studio" }).click();
   await page.screenshot(shot("19-theme-studio"));
   for (const [name, slug] of [
     ["Studio Office", "office"],
@@ -155,3 +179,20 @@ test("capture the themes", async ({ page }) => {
     await page.screenshot(shot(`23-${slug}-automations`));
   }
 });
+
+for (const slug of ["office", "mori"] as const) {
+  test(`capture the ${slug} room`, async ({ page }) => {
+    const scenario = defaultScenario();
+    await openApp(page, { ...scenario, config: { ...scenario.config, theme: slug } });
+    await expect(page.locator("html")).toHaveAttribute("data-theme", slug);
+    await goTo(page, "Environment");
+    await expect(page.locator(".env-canvas canvas")).toBeVisible();
+    await page.waitForTimeout(800);
+    await page.screenshot(shot(`24-${slug}-environment`));
+    await page.getByRole("button", { name: "Talk to FRIDAY, Full-stack" }).hover();
+    await page.screenshot(shot(`25-${slug}-environment-hover`));
+    await page.getByRole("button", { name: "Talk to FRIDAY, Full-stack" }).click();
+    await page.waitForTimeout(400);
+    await page.screenshot(shot(`26-${slug}-environment-chat`));
+  });
+}

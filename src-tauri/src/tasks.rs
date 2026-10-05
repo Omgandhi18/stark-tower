@@ -305,7 +305,7 @@ pub fn current(app: &tauri::AppHandle, agent_id: &str) -> Option<String> {
     engine(app)?.tasks.current.lock().unwrap().get(agent_id).cloned()
 }
 
-fn is_busy(app: &tauri::AppHandle, agent_id: &str) -> bool {
+pub(crate) fn is_busy(app: &tauri::AppHandle, agent_id: &str) -> bool {
     let Some(state) = engine(app) else { return false };
     let status = state.statuses.lock().unwrap().get(agent_id).copied();
     let working = matches!(status, Some(AgentStatus::Working | AgentStatus::Thinking | AgentStatus::Blocked));
@@ -423,13 +423,24 @@ pub fn start_for(app: &tauri::AppHandle, agent_id: &str, prompt: &str, dir: Opti
     Ok(state.ledger.task(&id).unwrap_or(task))
 }
 
-/// Start a task in a fresh conversation of its own.
+/// Start a task in the developer's chat with the agent in that project, so a chat keeps
+/// its session until the developer starts a new one. The first request there opens one.
 fn begin(app: &tauri::AppHandle, task: &Task) -> Result<(), String> {
     let state = engine(app).ok_or("Starkline isn't ready yet.")?;
     let agent = task.assignee.as_str();
-    // The next message starts a new session for this task's conversation.
-    crate::chat::stop(app, agent);
-    let conversation = state.ledger.new_titled_conversation(agent, &task.cwd, &task.title);
+    let conversation = match state.ledger.chat_in(agent, &task.cwd) {
+        Some(chat) if state.ledger.current_conversation(agent) == Some(chat) => chat,
+        Some(chat) => {
+            // Another chat was open: its session ends, and this one's resumes with the request.
+            crate::chat::stop(app, agent);
+            state.ledger.open_conversation(chat);
+            chat
+        }
+        None => {
+            crate::chat::stop(app, agent);
+            state.ledger.new_titled_conversation(agent, &task.cwd, &task.title)
+        }
+    };
     let branch = current_branch(&task.cwd).unwrap_or_default();
     state.ledger.begin_task(&task.id, Some(conversation), &branch);
     state.tasks.current.lock().unwrap().insert(agent.to_string(), task.id.clone());
@@ -532,6 +543,21 @@ pub fn session_ended(app: &tauri::AppHandle, agent_id: &str, why: Ended) {
     if matches!(why, Ended::Unexpectedly) {
         start_next(app, agent_id);
     }
+}
+
+/// The developer reviewed a finished task: it leaves the board and stays in history as reviewed.
+pub fn review(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
+    let state = engine(app).ok_or("Starkline isn't ready yet.")?;
+    let task = state.ledger.task(id).ok_or("That task doesn't exist.")?;
+    if task.status != "done" {
+        return Err("Only a task that's ready for review can be marked reviewed.".into());
+    }
+    state.ledger.set_task_status(id, "reviewed", None);
+    event(app, id, &task.assignee, "status", "Reviewed by you", "");
+    crate::notify::task_settled(app, id, "Reviewed");
+    settled(app, id);
+    emit_changed(app);
+    Ok(())
 }
 
 /// The developer closes a task: it leaves the board and stays in history.
@@ -749,7 +775,7 @@ pub struct TaskDetail {
     pub changes: Vec<FileChange>,
     /// The branch checked out in the task's folder right now.
     pub branch: Option<String>,
-    /// The owner's conversation for this task.
+    /// The task's part of its owner's chat.
     pub messages: Vec<StoredMessage>,
 }
 
@@ -783,7 +809,7 @@ pub fn detail(app: &tauri::AppHandle, id: &str) -> Option<TaskDetail> {
         .and_then(|e| serde_json::from_str::<Vec<PlanItem>>(&e.data).ok())
         .unwrap_or_default();
     let checks = latest_checks(&events);
-    let messages = task.conversation_id.map(|c| state.ledger.conversation_messages(c, MESSAGE_LIMIT)).unwrap_or_default();
+    let messages = state.ledger.task_messages(&task, MESSAGE_LIMIT);
     Some(TaskDetail {
         changes: changes(&task.cwd),
         branch: current_branch(&task.cwd),

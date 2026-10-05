@@ -24,6 +24,16 @@ pub fn launched_in_background() -> bool {
     std::env::args().any(|a| a == BACKGROUND_ARG)
 }
 
+/// Create the main window from its configuration. Setup calls this once the app's state
+/// exists: Tauri would otherwise build the window before setup runs, and a page that
+/// loaded first would ask for data with nothing there to answer it.
+pub fn create_main(app: &tauri::App) -> tauri::Result<()> {
+    if let Some(config) = app.config().app.windows.iter().find(|w| w.label == MAIN_WINDOW) {
+        tauri::WebviewWindowBuilder::from_config(app.handle(), config)?.build()?;
+    }
+    Ok(())
+}
+
 pub fn show_main(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.show();

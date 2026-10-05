@@ -6,8 +6,10 @@ import { errorMessage } from "../../lib/errors";
 import rndPreview from "../../assets/themes/after-hours-rnd/preview.webp";
 import officePreview from "../../assets/themes/studio-office/preview.webp";
 import moriPreview from "../../assets/themes/mori-cafe/preview.webp";
-import { THEMES, asTheme, themeInfo, useActiveTheme, useThemePreview, type ThemeId } from "../../app/theme";
+import { THEMES, asOutfits, asTheme, themeInfo, useActiveTheme, useOutfits, useThemePreview, type Outfits, type ThemeId } from "../../app/theme";
+import { hasRoom } from "../../environment/reference/rooms";
 import { useConfig } from "../../stores/config";
+import OutfitChooser from "./OutfitChooser";
 
 const PREVIEWS: Record<ThemeId, string> = { rnd: rndPreview, office: officePreview, mori: moriPreview };
 
@@ -25,23 +27,28 @@ export default function ThemeStudio() {
   const preview = useThemePreview((s) => s.preview);
   const setPreview = useThemePreview((s) => s.setPreview);
   const active = useActiveTheme();
+  const wearing = useOutfits();
   const saved = asTheme(config?.theme);
+  const savedOutfits = asOutfits(config?.outfits);
   const [chosen, setChosen] = useState<ThemeId>(active);
+  const [chosenOutfits, setChosenOutfits] = useState<Outfits>(wearing);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isSaved = chosen === saved && chosenOutfits === savedOutfits;
 
-  const choose = (id: ThemeId) => {
+  const choose = (id: ThemeId, outfits: Outfits) => {
     setChosen(id);
+    setChosenOutfits(outfits);
     setError(null);
     // While previewing, the preview follows the selection.
-    if (preview) setPreview(id === saved ? null : id);
+    if (preview) setPreview(id === saved && outfits === savedOutfits ? null : id, outfits);
   };
 
   const save = async () => {
     setSaving(true);
     setError(null);
     try {
-      apply(await setTheme(chosen));
+      apply(await setTheme(chosen, chosenOutfits));
       setPreview(null);
     } catch (e) {
       setError(errorMessage(e, "The theme couldn't be applied."));
@@ -85,7 +92,7 @@ export default function ThemeStudio() {
               role="radio"
               aria-checked={selected}
               className={cx("theme-card", selected && "is-selected")}
-              onClick={() => choose(theme.id)}
+              onClick={() => choose(theme.id, chosenOutfits)}
             >
               <span className="theme-card-head">
                 <span className="theme-card-name">{theme.name}</span>
@@ -103,22 +110,13 @@ export default function ThemeStudio() {
               <span className="theme-card-preview">
                 <img src={PREVIEWS[theme.id]} alt="" loading="lazy" />
               </span>
-              <span className="theme-card-room">
-                {theme.roomBuilt ? "Its room is the one on Environment." : "Its room isn't built yet: the team keeps working in After Hours R&D."}
-              </span>
+              {!hasRoom(theme.id) && <span className="theme-card-room">Its room isn't built yet: the team keeps working in After Hours R&D.</span>}
             </button>
           );
         })}
       </div>
 
-      <section className="settings-card theme-appearance" aria-labelledby="theme-appearance-title">
-        <h2 id="theme-appearance-title" className="settings-card-title">
-          Agent appearance
-        </h2>
-        <p className="settings-card-text">
-          Agents keep their own look in every theme. Outfits made for each theme come with its room. You can change an agent's look on Agents.
-        </p>
-      </section>
+      <OutfitChooser theme={chosen} outfits={chosenOutfits} agents={config?.agents ?? []} onChange={(outfits) => choose(chosen, outfits)} />
 
       {error && (
         <p className="settings-error" role="alert">
@@ -126,11 +124,11 @@ export default function ThemeStudio() {
         </p>
       )}
       <footer className="theme-studio-actions">
-        <Button icon={Eye} disabled={chosen === active} onClick={() => setPreview(chosen === saved ? null : chosen)}>
+        <Button icon={Eye} disabled={chosen === active && chosenOutfits === wearing} onClick={() => setPreview(isSaved ? null : chosen, chosenOutfits)}>
           Preview theme
         </Button>
-        <Button variant="primary" icon={Palette} disabled={saving || chosen === saved} onClick={() => void save()}>
-          {chosen === saved ? "Applied" : "Apply theme"}
+        <Button variant="primary" icon={Palette} disabled={saving || isSaved} onClick={() => void save()}>
+          {isSaved ? "Applied" : "Apply theme"}
         </Button>
       </footer>
     </div>

@@ -61,11 +61,27 @@ export function validateAgent(draft: AgentConfig, config: AppConfig): AgentProbl
 export const hasProblems = (problems: AgentProblems) => Object.keys(problems).length > 0;
 
 /** The fields the editor changes; anything else is carried through untouched. */
-const EDITABLE: ReadonlyArray<keyof AgentConfig> = ["name", "role", "accent", "figure", "engine", "model", "personality", "enabled", "helpers", "helper_model"];
+const EDITABLE: ReadonlyArray<keyof AgentConfig> = [
+  "name",
+  "role",
+  "accent",
+  "figure",
+  "engine",
+  "model",
+  "personality",
+  "enabled",
+  "helpers",
+  "helper_model",
+  "tone",
+];
 
 /** Unset switches read as on, as the backend defaults them. */
 const DEFAULT_ON: ReadonlyArray<keyof AgentConfig> = ["enabled", "helpers"];
 
-const valueOf = (agent: AgentConfig, key: keyof AgentConfig) => agent[key] ?? (DEFAULT_ON.includes(key) ? true : "");
+/** A field's value for comparing drafts; structured ones (the tone dials) compare by content. */
+const valueOf = (agent: AgentConfig, key: keyof AgentConfig) => {
+  const value = agent[key] ?? (DEFAULT_ON.includes(key) ? true : "");
+  return typeof value === "object" ? JSON.stringify(value) : value;
+};
 
 export const isDirty = (draft: AgentConfig, saved: AgentConfig | undefined) => !saved || EDITABLE.some((key) => valueOf(draft, key) !== valueOf(saved, key));

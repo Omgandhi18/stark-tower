@@ -49,6 +49,8 @@
   place-items: center;
   width: 32px;
   height: 32px;
+  /* WebKit gives buttons 2px 6px 3px of padding, which pushes the icon off-centre. */
+  padding: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   background: transparent;
@@ -276,9 +278,12 @@
 
 /* ---- Menus ----------------------------------------------------------------------- */
 .menu-root { position: relative; display: inline-flex; }
+/* Drawn over the page and placed from its trigger once measured (see Menu.tsx). */
 .menu {
-  position: absolute;
-  top: calc(100% + 4px);
+  position: fixed;
+  top: 0;
+  left: 0;
+  visibility: hidden;
   z-index: var(--z-popover);
   display: grid;
   min-width: 200px;
@@ -288,8 +293,6 @@
   background: var(--surface-overlay);
   box-shadow: var(--shadow-overlay);
 }
-.menu-end { right: 0; }
-.menu-start { left: 0; }
 .menu-item {
   display: flex;
   align-items: center;
@@ -428,6 +431,12 @@
   min-height: 0;
   padding: 0 var(--space-5) var(--space-3);
   overflow-y: auto;
+}
+
+.dialog-error {
+  margin: 0;
+  color: var(--state-danger);
+  font-size: var(--text-sm);
 }
 
 .dialog-actions {

@@ -77,4 +77,30 @@ test.describe("agents", () => {
     await page.getByRole("dialog").getByRole("button", { name: "Remove" }).click();
     await expect(page.getByRole("navigation", { name: "Agents" }).getByText("New agent")).toHaveCount(0);
   });
+
+  test("tunes how an agent comes across with the tone dials", async ({ page }) => {
+    await openApp(page);
+    await goTo(page, "Agents");
+    await page
+      .getByRole("navigation", { name: "Agents" })
+      .getByRole("button", { name: /JARVIS/ })
+      .click();
+    const humour = page.getByRole("slider", { name: "Humour" });
+    await expect(humour).toHaveAttribute("aria-valuetext", "Now and then");
+    await expect(page.getByRole("slider", { name: "Formality" })).toHaveAttribute("aria-valuetext", "Very formal");
+    const usual = page.getByRole("button", { name: "Use JARVIS's usual tone" });
+    await expect(usual).toBeDisabled();
+
+    await humour.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(humour).toHaveAttribute("aria-valuetext", "Playful");
+    await expect(usual).toBeEnabled();
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByRole("button", { name: "Saved" })).toBeVisible();
+    const update = (await fakeCalls(page)).find((c) => c.cmd === "update_agent");
+    expect(update?.args.agent).toMatchObject({ id: "jarvis", tone: { humour: 3, sarcasm: 3, formality: 4, enthusiasm: 1, detail: 1 } });
+
+    await usual.click();
+    await expect(humour).toHaveAttribute("aria-valuetext", "Now and then");
+  });
 });

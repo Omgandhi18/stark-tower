@@ -1,23 +1,22 @@
-// Pixi scene for the reference environment: the mockup plate (every station
-// empty) plus the parts of it that can change — each station's character and
-// light, the build-bay seat with FRIDAY when she gets up, and her helper bots —
-// in a camera-driven world. The ticker only runs while something is animating.
+// Pixi scene for a theme's room: its plate (every station empty) plus the parts
+// that can change — each station's character and light, helper bots and, in
+// After Hours R&D, FRIDAY getting up from the build bay — in a camera-driven
+// world. The ticker only runs while something is animating.
 import { Application, Assets, Container, Sprite, Texture } from "pixi.js";
 import type { Camera, Point, Size } from "./camera";
 import { CHARACTERS, allFrameUrls, frameUrl } from "./characterAssets";
-import { ENVIRONMENT_RECT, assetUrl, reference } from "./referenceAssets";
+import type { LightJson, Room } from "./rooms";
 import { VisitRoutine, type ActorFrame } from "./visitRoutine";
-import scene from "./rnd-scene.json";
 
 /** What a station's light says: its agent is working, or waiting on the developer. */
 export type StationLight = "working" | "waiting";
 
 export interface SceneState {
-  /** Temporary helpers the build-bay agent has running: the room draws up to three, then "+1". */
+  /** Temporary helpers running for the room's helper bots: up to three are drawn, then "+1". */
   helpers: number;
   /** Stations whose character is in place, by slot id; the rest show their station empty. */
   occupied: Readonly<Record<string, boolean>>;
-  /** Whether the build-bay character is typing right now. */
+  /** Whether the character who can get up (R&D's build bay) is typing right now. */
   buildBayTyping: boolean;
   /** Each station's light, by slot id; a station without one is unlit (as the mockup paints it). */
   lights: Readonly<Record<string, StationLight>>;
@@ -30,16 +29,13 @@ export interface ReferenceRenderer {
   setCamera(camera: Camera): void;
   resize(view: Size): void;
   setState(state: SceneState): void;
-  /** Send the build-bay character to visit a colleague; false if nobody is seated there. */
+  /** Send the character who can get up to visit a colleague; false if there's none, or nobody's seated. */
   startVisit(): boolean;
   /** Put everyone back where the mockup shows them. */
   resetActors(): void;
   destroy(): void;
 }
 
-const ORIGIN = { x: ENVIRONMENT_RECT[0], y: ENVIRONMENT_RECT[1] };
-const toWorld = (p: readonly number[]): Point => ({ x: p[0] - ORIGIN.x, y: p[1] - ORIGIN.y });
-const BUILD_BAY = "buildBay";
 const SECONDS_PER_MS = 1 / 1000;
 /** The painted helper bots, before the "+1" badge takes over. */
 const DRAWN_HELPERS = 3;
@@ -71,7 +67,7 @@ function glowTexture(): Texture {
 }
 
 /** A light over an ellipse given in mockup px as [cx, cy, rx, ry]. */
-function lightSprite(glow: Texture, ellipse: readonly number[], look: { tint: number; alpha: number }): Sprite {
+function lightSprite(glow: Texture, ellipse: readonly number[], look: { tint: number; alpha: number }, toWorld: (p: readonly number[]) => Point): Sprite {
   const [cx, cy, rx, ry] = ellipse;
   const sprite = new Sprite(glow);
   const at = toWorld([cx - rx, cy - ry]);
@@ -85,8 +81,11 @@ function lightSprite(glow: Texture, ellipse: readonly number[], look: { tint: nu
   return sprite;
 }
 
-export async function createReferenceRenderer(host: HTMLElement, initialView: Size, onActorMove: ActorMoveListener): Promise<ReferenceRenderer> {
+export async function createReferenceRenderer(host: HTMLElement, initialView: Size, room: Room, onActorMove: ActorMoveListener): Promise<ReferenceRenderer> {
   let view = initialView;
+  const origin = { x: room.rect[0], y: room.rect[1] };
+  const toWorld = (p: readonly number[]): Point => ({ x: p[0] - origin.x, y: p[1] - origin.y });
+  const scene = room.scene;
   const app = new Application();
   await app.init({
     width: view.width,
@@ -100,15 +99,16 @@ export async function createReferenceRenderer(host: HTMLElement, initialView: Si
   });
   app.ticker.stop();
 
-  const actor = scene.actors.buildBay;
-  const character = CHARACTERS[actor.character];
-  const cutoutUrl = (id: string) => assetUrl(reference.cutouts[id].file);
+  // The one character who can get up and walk, where the room has one.
+  const [mobileSlot, actor] = Object.entries(scene.actors ?? {})[0] ?? [null, null];
+  const character = actor ? CHARACTERS[actor.character] : null;
+  const cutoutUrl = (id: string) => room.url(room.cutouts[id].file);
   const stations = Object.entries(scene.stations);
   const urls = [
-    assetUrl(reference.plates.environment.file),
+    room.url(room.plate),
     ...stations.map(([, station]) => cutoutUrl(station.cutout)),
     ...scene.helpers.flatMap((h) => h.parts.map(cutoutUrl)),
-    ...allFrameUrls(character),
+    ...(character ? allFrameUrls(character) : []),
   ];
   let loaded: Record<string, Texture>;
   try {
@@ -139,9 +139,9 @@ export async function createReferenceRenderer(host: HTMLElement, initialView: Si
   // Each station's character, depth-sorted with anyone walking past.
   const stationSprites = stations.map(([slotId, station]) => {
     const sprite = new Sprite(texture(cutoutUrl(station.cutout)));
-    const at = toWorld(reference.cutouts[station.cutout].rect);
+    const at = toWorld(room.cutouts[station.cutout].rect);
     sprite.position.set(at.x, at.y);
-    sprite.zIndex = station.floorY - ORIGIN.y;
+    sprite.zIndex = station.floorY - origin.y;
     actors.addChild(sprite);
     return { slotId, sprite };
   });
@@ -149,11 +149,10 @@ export async function createReferenceRenderer(host: HTMLElement, initialView: Si
   // Each station's light: screens (or a lamp) while its agent works, amber underfoot while it waits.
   const glow = glowTexture();
   const stationLights = Object.entries(scene.lights)
-    .filter(([slotId]) => slotId !== "$comment")
-    .map(([slotId, spec]) => {
-      const light = spec as { screen: number[]; floor: number[]; warm?: boolean };
-      const screen = lightSprite(glow, light.screen, light.warm ? LIGHT.lamp : LIGHT.screen);
-      const floor = lightSprite(glow, light.floor, LIGHT.waiting);
+    .filter((entry): entry is [string, LightJson] => typeof entry[1] !== "string")
+    .map(([slotId, light]) => {
+      const screen = lightSprite(glow, light.screen, light.warm ? LIGHT.lamp : LIGHT.screen, toWorld);
+      const floor = lightSprite(glow, light.floor, LIGHT.waiting, toWorld);
       lights.addChild(screen);
       pools.addChild(floor);
       return { slotId, screen, floor };
@@ -166,38 +165,44 @@ export async function createReferenceRenderer(host: HTMLElement, initialView: Si
     helperParts.push({ sprites, overflow: Boolean(helper.overlay) });
     for (const part of helper.parts) {
       const sprite = new Sprite(texture(cutoutUrl(part)));
-      const at = toWorld(reference.cutouts[part].rect);
+      const at = toWorld(room.cutouts[part].rect);
       sprite.position.set(at.x, at.y);
       const isGround = part.endsWith("-ground");
       if (isGround) ground.addChild(sprite);
       else if (helper.overlay) overlay.addChild(sprite);
       else {
-        sprite.zIndex = helper.floorY - ORIGIN.y;
+        sprite.zIndex = helper.floorY - origin.y;
         actors.addChild(sprite);
       }
       sprites.push(sprite);
     }
   }
 
-  const seated = character.animations.seated;
-  const seatFrames = seated.frames.map((file) => texture(frameUrl(character.id, file)));
+  // The mobile character's seat (typing frames) and their walking self.
+  const seated = character?.animations.seated;
+  const seatFrames = character && seated ? seated.frames.map((file) => texture(frameUrl(character.id, file))) : [];
   const seat = new Sprite(seatFrames[0]);
-  const seatAt = toWorld(reference.cutouts[actor.seatCutout].rect);
-  seat.position.set(seatAt.x, seatAt.y);
-  seat.zIndex = actor.seatFloorY - ORIGIN.y;
   const walker = new Sprite();
+  seat.visible = false;
   walker.visible = false;
-  actors.addChild(seat, walker);
-
-  const routine = new VisitRoutine(
-    {
-      risePoint: toWorld(actor.risePoint),
-      standPoint: toWorld(actor.standPoint),
-      route: actor.visitRoute.map(toWorld),
-      pause: actor.visitPause,
-    },
-    character,
-  );
+  if (actor) {
+    const seatAt = toWorld(room.cutouts[actor.seatCutout].rect);
+    seat.position.set(seatAt.x, seatAt.y);
+    seat.zIndex = actor.seatFloorY - origin.y;
+    actors.addChild(seat, walker);
+  }
+  const routine =
+    actor && character
+      ? new VisitRoutine(
+          {
+            risePoint: toWorld(actor.risePoint),
+            standPoint: toWorld(actor.standPoint),
+            route: actor.visitRoute.map(toWorld),
+            pause: actor.visitPause,
+          },
+          character,
+        )
+      : null;
 
   let camera: Camera = { zoom: 1, cx: 0, cy: 0 };
   let state: SceneState = { helpers: DRAWN_HELPERS + 1, occupied: {}, buildBayTyping: false, lights: {} };
@@ -216,33 +221,35 @@ export async function createReferenceRenderer(host: HTMLElement, initialView: Si
   };
 
   const showSeated = (frame: number) => {
+    if (!mobileSlot) return;
     seat.texture = seatFrames[frame];
-    seat.visible = isOccupied(BUILD_BAY);
+    seat.visible = isOccupied(mobileSlot);
     walker.visible = false;
   };
 
   const showWalking = (frame: ActorFrame) => {
+    if (!character || !mobileSlot) return;
     const spec = character.animations[frame.animation];
     walker.texture = texture(frameUrl(character.id, spec.frames[frame.frame]));
     walker.position.set(frame.x - spec.anchor[0], frame.y - spec.anchor[1]);
     walker.zIndex = frame.y;
     walker.visible = true;
     seat.visible = false;
-    onActorMove(BUILD_BAY, { x: frame.x, y: frame.y - character.height });
+    onActorMove(mobileSlot, { x: frame.x, y: frame.y - character.height });
   };
 
-  const typing = () => isOccupied(BUILD_BAY) && state.buildBayTyping;
-  const animating = () => routine.active || typing();
+  const typing = () => mobileSlot !== null && isOccupied(mobileSlot) && state.buildBayTyping;
+  const animating = () => Boolean(routine?.active) || typing();
 
   const tick = () => {
     const dt = app.ticker.deltaMS * SECONDS_PER_MS;
-    if (routine.active) {
+    if (routine?.active) {
       const frame = routine.update(dt);
       if (frame.seated) {
         showSeated(0);
-        onActorMove(BUILD_BAY, null);
+        if (mobileSlot) onActorMove(mobileSlot, null);
       } else showWalking(frame);
-    } else if (typing()) {
+    } else if (typing() && seated) {
       typingClock += dt;
       const frame = Math.floor(typingClock * seated.fps) % seatFrames.length;
       if (frame === lastSeatFrame) return; // typing is slow; skip renders until the frame changes
@@ -269,7 +276,7 @@ export async function createReferenceRenderer(host: HTMLElement, initialView: Si
       const show = overflow ? state.helpers > DRAWN_HELPERS : painted++ < Math.min(state.helpers, DRAWN_HELPERS);
       for (const sprite of sprites) sprite.visible = show;
     }
-    if (!routine.active) showSeated(0);
+    if (!routine?.active) showSeated(0);
     draw();
     wake();
   };
@@ -286,20 +293,20 @@ export async function createReferenceRenderer(host: HTMLElement, initialView: Si
     },
     setState(next) {
       state = next;
-      if (!isOccupied(BUILD_BAY)) routine.stop();
+      if (mobileSlot && !isOccupied(mobileSlot)) routine?.stop();
       applyState();
     },
     startVisit() {
-      if (!isOccupied(BUILD_BAY) || routine.active) return false;
+      if (!routine || !mobileSlot || !isOccupied(mobileSlot) || routine.active) return false;
       routine.start();
       wake();
       return true;
     },
     resetActors() {
-      routine.stop();
+      routine?.stop();
       typingClock = 0;
       lastSeatFrame = 0;
-      onActorMove(BUILD_BAY, null);
+      if (mobileSlot) onActorMove(mobileSlot, null);
       applyState();
     },
     destroy() {

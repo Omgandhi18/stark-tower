@@ -60,4 +60,68 @@ test.describe("work", () => {
     await expect(log.getByText("summarise the refund incidents", { exact: true })).toBeVisible();
     await expect(log.getByText(/Got it: "summarise the refund incidents"/)).toBeVisible();
   });
+
+  test("keeps each project's chats under it, and starts a new one there", async ({ page }) => {
+    await openApp(page);
+    const rail = page.getByRole("list", { name: "Projects" });
+    await rail.getByRole("button", { name: /^checkout-web/ }).click();
+    const chats = rail.getByRole("list", { name: "Chats in checkout-web" });
+    await expect(chats.getByRole("button", { name: "Redesign the settings page", exact: true })).toBeVisible();
+    await expect(chats.getByRole("button", { name: "Accessible colour tokens", exact: true })).toBeVisible();
+    await expect(chats.getByRole("button", { name: /Plan the refunds launch/ })).toHaveCount(0);
+    await rail.getByRole("button", { name: "New chat" }).click();
+    await expect(page.getByRole("textbox", { name: "Message JARVIS…" })).toBeVisible();
+    expect(await fakeCalls(page)).toContainEqual({ cmd: "new_chat", args: { agentId: "jarvis", cwd: "/Users/dev/code/checkout-web" } });
+  });
+
+  test("marks a finished task as reviewed", async ({ page }) => {
+    await openApp(page);
+    const ready = page.getByRole("region", { name: "Ready for review" });
+    await ready.getByRole("button", { name: "Write the release notes for 2.4", exact: true }).click();
+    await page.getByRole("button", { name: "Mark as reviewed" }).click();
+    expect(await fakeCalls(page)).toContainEqual({ cmd: "review_task", args: { id: "t-notes" } });
+    await page.getByRole("list", { name: "Projects" }).getByRole("button", { name: "All work" }).click();
+    await expect(ready.getByText("Write the release notes for 2.4")).toHaveCount(0);
+  });
+
+  test("deletes a chat, but not one an agent is working in", async ({ page }) => {
+    await openApp(page);
+    const projects = page.getByRole("list", { name: "Projects" });
+    await projects.getByRole("button", { name: /^checkout-web/ }).click();
+    const chats = page.getByRole("list", { name: "Chats in checkout-web" });
+
+    await chats.getByRole("button", { name: "Fix flaky checkout test", exact: true }).hover();
+    await chats.getByRole("button", { name: "More actions for Fix flaky checkout test" }).click();
+    await page.getByRole("menuitem", { name: "Delete chat" }).click();
+    const confirm = page.getByRole("dialog", { name: /Delete “Fix flaky checkout test”/ });
+    await confirm.getByRole("button", { name: "Delete chat" }).click();
+    await expect(confirm).toBeHidden();
+    await expect(chats.getByRole("button", { name: "Fix flaky checkout test", exact: true })).toHaveCount(0);
+    expect(await fakeCalls(page)).toContainEqual({ cmd: "delete_conversation", args: { conversationId: 10 } });
+
+    // FRIDAY is working in her open chat, so it stays until she's done.
+    await chats.getByRole("button", { name: "More actions for Redesign the settings page" }).click();
+    await page.getByRole("menuitem", { name: "Delete chat" }).click();
+    const busy = page.getByRole("dialog", { name: /Delete “Redesign the settings page”/ });
+    await busy.getByRole("button", { name: "Delete chat" }).click();
+    await expect(busy.getByRole("alert")).toHaveText("FRIDAY is working in this chat. Delete it once they've finished.");
+    await busy.getByRole("button", { name: "Keep it" }).click();
+    await expect(chats.getByRole("button", { name: "Redesign the settings page", exact: true })).toBeVisible();
+  });
+
+  test("opens a project's menu in full, past the sidebar's edge", async ({ page }) => {
+    await openApp(page);
+    await page.getByRole("list", { name: "Projects" }).getByRole("button", { name: "More actions for checkout-web" }).click();
+    const item = page.getByRole("menuitem", { name: "Use as default" });
+    await expect(item).toBeVisible();
+    const box = await page.getByRole("menu", { name: "More actions for checkout-web" }).boundingBox();
+    const viewport = page.viewportSize();
+    expect(box && viewport && box.x >= 0 && box.x + box.width <= viewport.width && box.y + box.height <= viewport.height).toBe(true);
+    // Nothing clips or covers it: the item's own left edge is what's under the pointer there.
+    const hit = await item.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return el.contains(document.elementFromPoint(r.left + 4, r.top + r.height / 2));
+    });
+    expect(hit).toBe(true);
+  });
 });

@@ -57,6 +57,12 @@ describe("isDirty", () => {
     expect(isDirty(agent({}), undefined)).toBe(true);
   });
 
+  it("compares the tone dials by their values", () => {
+    const tone = { humour: 2, sarcasm: 3, formality: 4, enthusiasm: 1, detail: 1 };
+    expect(isDirty(agent({ tone: { ...tone } }), agent({ tone }))).toBe(false);
+    expect(isDirty(agent({ tone: { ...tone, humour: 3 } }), agent({ tone }))).toBe(true);
+  });
+
   it("counts helper settings, with unset meaning on", () => {
     expect(isDirty(agent({ helpers: false }), agent({}))).toBe(true);
     expect(isDirty(agent({ helpers: true }), agent({}))).toBe(false);

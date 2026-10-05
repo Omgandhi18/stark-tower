@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { KeepAlive, SkeletonRows } from "../design";
+import { KeepAlive, PortraitOutfits, SkeletonRows } from "../design";
 import { IS_TAURI } from "../lib/platform";
 import AgentsScreen from "../features/agents/AgentsScreen";
 import AutomationsScreen from "../features/automations/AutomationsScreen";
@@ -13,7 +13,7 @@ import AppShell from "../shell/AppShell";
 import { useConfig } from "../stores/config";
 import { useNavigation, type RouteId } from "../stores/navigation";
 import CloseGuard from "./CloseGuard";
-import { useThemeSync } from "./theme";
+import { useOutfitsFolder, useThemeSync } from "./theme";
 import { useBackendSync } from "./useBackendSync";
 import { useShortcuts } from "./useShortcuts";
 
@@ -63,6 +63,7 @@ export default function App() {
   useBackendSync();
   useThemeSync();
   useShortcuts();
+  const outfits = useOutfitsFolder();
   const route = useNavigation((s) => s.route);
   const visited = useNavigation((s) => s.visited);
   const navigate = useNavigation((s) => s.navigate);
@@ -75,7 +76,7 @@ export default function App() {
   }, [comparing, navigate]);
 
   return (
-    <>
+    <PortraitOutfits.Provider value={outfits}>
       <AppShell>
         {visited.map((id) => (
           <KeepAlive key={id} active={id === route} label={ROUTE_LABEL[id]}>
@@ -95,6 +96,6 @@ export default function App() {
           <MockupCompare onActiveChange={setComparing} />
         </Suspense>
       )}
-    </>
+    </PortraitOutfits.Provider>
   );
 }

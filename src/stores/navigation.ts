@@ -12,6 +12,8 @@ interface NavigationState {
   /** The agent in focus: the open conversation, or the selection on Agents and the Environment. */
   agentId: string | null;
   settingsSection: SettingsSection;
+  /** The project Work is showing (its tasks, its chats in the sidebar); null for all work. */
+  workProject: string | null;
   /** The review open in the Notification Centre. */
   reviewId: string | null;
   /** The task open on the task screen. */
@@ -29,6 +31,8 @@ interface NavigationState {
   /** Focus an agent without leaving the current screen. */
   focusAgent: (agentId: string) => void;
   openSettings: (section: SettingsSection) => void;
+  /** Show one project's work (null: all work) on Work. */
+  showProject: (path: string | null) => void;
   /** Open a pending review in the Notification Centre. */
   focusReview: (reviewId: string | null) => void;
   /** Open a task's screen. */
@@ -47,6 +51,7 @@ export const useNavigation = create<NavigationState>((set) => ({
   route: "work",
   agentId: null,
   settingsSection: "general",
+  workProject: null,
   reviewId: null,
   taskId: null,
   notificationId: null,
@@ -64,6 +69,7 @@ export const useNavigation = create<NavigationState>((set) => ({
   focusAgent: (agentId) => set((s) => ({ agentId, openChats: remember(s.openChats, agentId) })),
   openSettings: (section) =>
     set((s) => ({ route: "settings", settingsSection: section, visited: markVisited(s.visited, "settings") })),
+  showProject: (workProject) => set((s) => ({ route: "work", workProject, visited: markVisited(s.visited, "work") })),
   focusReview: (reviewId) =>
     set((s) => ({ route: "notifications", reviewId, notificationId: null, visited: markVisited(s.visited, "notifications") })),
   focusNotification: (notificationId) =>

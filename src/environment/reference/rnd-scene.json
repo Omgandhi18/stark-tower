@@ -1,5 +1,8 @@
 {
   "$comment": "Character stations painted into mockup 04, in mockup pixels. 'hit' covers the painted character; 'head' anchors the status card. 'figure' is the appearance key each agent carries in config. The left glass pod is intentionally unassigned: the roster has six humans. 'stations' are characters lifted out of the plate into their own layer: 'cutout' is them in place, and the plate under it shows the station empty. 'actors' are stations whose character can leave their seat; 'helpers' are FRIDAY's temporary-helper bots. 'floorY' is where something touches the floor, for depth sorting.",
+  "card": { "slot": "buildBay", "anchor": "head", "offset": [-83, -91] },
+  "orchestratorSlot": "commandDeck",
+  "helperSlot": "buildBay",
   "controls": {
     "$comment": "Clickable halves of the zoom panel, in mockup pixels.",
     "zoomOut": [1361, 937, 1401, 974],

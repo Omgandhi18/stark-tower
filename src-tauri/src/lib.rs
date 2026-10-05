@@ -24,6 +24,7 @@ mod rpc;
 mod schedule;
 mod secrets;
 mod tasks;
+mod tone;
 mod update;
 
 use agents::{Agent, AgentKind, AgentStatus};
@@ -629,22 +630,49 @@ fn emit_chat_switched(app: &tauri::AppHandle, agent_id: &str, conversation_id: i
 }
 
 /// Start a fresh conversation with an agent (ends the live session so the next
-/// message begins a genuinely new chat). Returns the new conversation id.
+/// message begins a genuinely new chat), in `cwd` (a project folder) or where the
+/// agent works now. Returns the new conversation id.
 #[tauri::command]
 #[specta::specta]
-fn new_chat(app: tauri::AppHandle, state: tauri::State<AppState>, agent_id: String) -> i64 {
+fn new_chat(app: tauri::AppHandle, state: tauri::State<AppState>, agent_id: String, cwd: Option<String>) -> i64 {
     stop_by_developer(&app, &agent_id);
-    let cwd = state
-        .workdirs
-        .lock()
-        .unwrap()
-        .get(&agent_id)
-        .cloned()
+    let cwd = cwd
+        .filter(|c| !c.trim().is_empty())
+        .or_else(|| state.workdirs.lock().unwrap().get(&agent_id).cloned())
         .unwrap_or_else(|| current_project(&state));
+    state.workdirs.lock().unwrap().insert(agent_id.clone(), cwd.clone());
     let id = state.ledger.new_conversation(&agent_id, &cwd);
     emit_chat_switched(&app, &agent_id, id);
     let _ = app.emit("conversations://changed", ());
     id
+}
+
+/// Delete a chat for good: its messages go, and tasks that ran in it stay in history without
+/// their transcript. The chat an agent is working in can't be deleted until they finish; the
+/// open chat, once deleted, gives way to a fresh one in the same folder.
+#[tauri::command]
+#[specta::specta]
+fn delete_conversation(app: tauri::AppHandle, state: tauri::State<AppState>, conversation_id: i64) -> Result<(), String> {
+    let chat = state.ledger.conversation(conversation_id).ok_or("That chat doesn't exist any more.")?;
+    let agent = chat.agent_id.clone();
+    let was_open = state.ledger.current_conversation(&agent) == Some(conversation_id);
+    if was_open {
+        if tasks::is_busy(&app, &agent) {
+            let name = prompts::agent_name(&app, &agent);
+            return Err(format!("{name} is working in this chat. Delete it once they've finished."));
+        }
+        stop_by_developer(&app, &agent);
+    }
+    if !state.ledger.delete_conversation(conversation_id) {
+        return Err("The chat couldn't be deleted.".into());
+    }
+    if was_open {
+        let fresh = state.ledger.new_conversation(&agent, &chat.cwd);
+        emit_chat_switched(&app, &agent, fresh);
+    }
+    let _ = app.emit("conversations://changed", ());
+    let _ = app.emit("tasks://changed", ());
+    Ok(())
 }
 
 /// Reopen a saved conversation: make it active, end the live session, and point
@@ -840,8 +868,10 @@ fn get_config(state: tauri::State<AppState>) -> AppConfig {
 fn update_agent(
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
-    agent: AgentConfig,
+    mut agent: AgentConfig,
 ) -> AppConfig {
+    // A new agent starts at its default tone; the dials always stay in range.
+    agent.tone = Some(agent.tone.unwrap_or_else(|| tone::default_for(&agent.id)).clamped());
     // Turning an agent off ends its live session; its chats are kept.
     if !agent.enabled {
         stop_by_developer(&app, &agent.id);
@@ -921,14 +951,21 @@ fn set_lighting(app: tauri::AppHandle, state: tauri::State<AppState>, mode: Stri
     commit_config(&app, &state)
 }
 
-/// Change how Starkline looks; nothing about the work changes with it.
+/// Change how Starkline looks and what the agents wear; nothing about the work changes with it.
 #[tauri::command]
 #[specta::specta]
-fn set_theme(app: tauri::AppHandle, state: tauri::State<AppState>, theme: String) -> Result<AppConfig, String> {
+fn set_theme(app: tauri::AppHandle, state: tauri::State<AppState>, theme: String, outfits: String) -> Result<AppConfig, String> {
     if !config::THEMES.contains(&theme.as_str()) {
         return Err("That theme isn't one Starkline has.".into());
     }
-    state.config.lock().unwrap().theme = theme;
+    if !config::is_outfits(&outfits) {
+        return Err("Those outfits aren't ones Starkline has.".into());
+    }
+    {
+        let mut cfg = state.config.lock().unwrap();
+        cfg.theme = theme;
+        cfg.outfits = outfits;
+    }
     Ok(commit_config(&app, &state))
 }
 
@@ -965,12 +1002,27 @@ fn get_tasks(state: tauri::State<AppState>, limit: Option<i64>) -> Vec<ledger::T
     state.ledger.tasks(limit.unwrap_or(50))
 }
 
-/// Close a task card once it's been reviewed: it leaves the Work board but stays
-/// in history.
+/// Close a task card without reviewing it (cancel it, or set aside a blocked one): it
+/// leaves the Work board but stays in history.
 #[tauri::command]
 #[specta::specta]
 fn close_task(app: tauri::AppHandle, id: String) {
     tasks::close(&app, &id);
+}
+
+/// Where an agent's tone dials start: a built-in agent's character, else neutral.
+#[tauri::command]
+#[specta::specta]
+fn default_tone(agent_id: String) -> tone::Tone {
+    tone::default_for(&agent_id)
+}
+
+/// Mark a task that's ready for review as reviewed: it leaves the Work board and stays in
+/// history as reviewed.
+#[tauri::command]
+#[specta::specta]
+fn review_task(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    tasks::review(&app, &id)
 }
 
 /// An agent's durable memory (the markdown it curates across sessions).
@@ -1318,6 +1370,9 @@ fn specta_builder() -> tauri_specta::Builder {
             get_ledger,
             get_tasks,
             close_task,
+            review_task,
+            delete_conversation,
+            default_tone,
             start_task,
             resume_task,
             quit_app,
@@ -1484,6 +1539,8 @@ pub fn run() {
                 let enabled = state.config.lock().unwrap().keep_awake;
                 state.power.set_enabled(enabled);
             }
+            // Only now is there anything for the page to talk to.
+            lifecycle::create_main(app)?;
             start_power_monitor(app.handle().clone());
 
             pty::start_idle_monitor(app.handle().clone());
@@ -1599,14 +1656,18 @@ mod tests {
         let fallback = bridge_socket_path(&deep, &private_tmp, random);
         assert!(fallback.starts_with(&private_tmp) && fallback.as_os_str().len() <= MAX_SOCKET_PATH);
 
-        // And a socket really listens at a path chosen this way.
+        // And a socket really listens at a path chosen this way. The name is this run's own
+        // (a socket file outlives its listener, so a fixed name would collide with the last run).
         let dir = private_tmp.join(format!("starkline-bridge-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = bridge_socket_path(&dir, &private_tmp, random);
+        let unique = format!("{:08x}{random}", std::process::id());
+        let path = bridge_socket_path(&dir, &private_tmp, &unique);
         let listener = std::os::unix::net::UnixListener::bind(&path);
-        assert!(listener.is_ok(), "{path:?}: {:?}", listener.err());
-        drop(listener);
+        let bound = listener.is_ok();
+        let error = listener.err();
+        let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir_all(&dir);
+        assert!(bound, "{path:?}: {error:?}");
     }
 
     use super::*;

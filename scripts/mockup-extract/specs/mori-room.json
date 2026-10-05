@@ -1,0 +1,88 @@
+{
+  "$comment": "Mori Cafe (mockup 07). Same rules as office-room.json; the floating name labels, the card, the clock, the caption pill, the controls and the board's three status lines (live counts are drawn over it) are the mockup's interface, removed for good.",
+  "source": "docs/mockups/2026-09-16/07-environment-mori.png",
+  "viewport": [1584, 993],
+  "plate": [160, 60, 1582, 993],
+  "fillDir": "assets/mori-cafe/fills",
+  "outDir": "src/assets/themes/mori-cafe/room",
+  "regions": [
+    {
+      "id": "lounge",
+      "kind": "add",
+      "crop": [1262, 500, 1582, 820],
+      "targets": [
+        { "id": "loungeOccupied", "kind": "added", "box": [1416, 604, 1508, 742], "floorY": 748, "describe": "one more person: a young woman with light skin and straight black hair pulled back, with side-swept bangs and no glasses, wearing a moss green shirt under a dark navy cafe apron. She sits on the cream floor cushion beside the low wooden table, facing the viewer, typing on an open laptop on her lap" }
+      ]
+    },
+    {
+      "id": "counter",
+      "crop": [270, 160, 590, 480],
+      "targets": [
+        { "id": "counterOccupied", "kind": "agent", "box": [352, 225, 448, 368], "floorY": 360, "describe": "the bearded man with glasses and an apron standing behind the counter, working on a laptop" },
+        { "id": "jarvisLabel", "kind": "interface", "box": [434, 232, 552, 294], "describe": "the dark floating name label that reads JARVIS, Systems Orchestration" }
+      ]
+    },
+    {
+      "id": "window-table",
+      "crop": [680, 260, 1000, 580],
+      "targets": [
+        { "id": "windowTableOccupied", "kind": "agent", "box": [738, 322, 864, 522], "floorY": 515, "describe": "the woman with her hair in a bun sitting at the table by the window, working on a laptop (keep her chair, empty)" },
+        { "id": "fridayLabel", "kind": "interface", "box": [826, 314, 952, 362], "describe": "the dark floating name label that reads FRIDAY, Data & Research" }
+      ]
+    },
+    {
+      "id": "terrace",
+      "crop": [1120, 280, 1440, 600],
+      "targets": [
+        { "id": "terraceOccupied", "kind": "agent", "box": [1216, 328, 1298, 568], "floorY": 560, "describe": "the man with glasses and an apron standing on the terrace, holding a tablet" },
+        { "id": "visionLabel", "kind": "interface", "box": [1301, 322, 1432, 370], "describe": "the dark floating name label that reads VISION, Design & Assets" }
+      ]
+    },
+    {
+      "id": "rack",
+      "crop": [150, 440, 470, 760],
+      "targets": [
+        { "id": "rackOccupied", "kind": "agent", "box": [228, 512, 308, 748], "floorY": 742, "describe": "the woman with her hair tied back, in an apron, standing at the server rack and holding a tablet" },
+        { "id": "edithLabel", "kind": "interface", "box": [308, 526, 426, 576], "describe": "the dark floating name label that reads EDITH, Infrastructure" },
+        { "id": "helper-1", "kind": "helper", "box": [362, 662, 430, 750], "floorY": 745, "describe": "the small round white helper robot on wheels" }
+      ]
+    },
+    {
+      "id": "long-table",
+      "crop": [560, 480, 880, 800],
+      "targets": [
+        { "id": "longTableOccupied", "kind": "agent", "box": [622, 552, 708, 698], "floorY": 690, "describe": "the woman with brown hair sitting at the long table, working on a laptop (keep her chair, empty)" },
+        { "id": "karenLabel", "kind": "interface", "box": [720, 551, 830, 599], "describe": "the dark floating name label that reads KAREN, Operations" }
+      ]
+    },
+    {
+      "id": "board",
+      "crop": [330, 300, 650, 620],
+      "targets": [
+        { "id": "todayBoard", "kind": "interface", "box": [418, 394, 540, 472], "describe": "the three status lines on the parchment board, each a coloured dot followed by handwriting (4 agents running, 2 awaiting review, 0 blocked). Leave blank parchment there; keep the Starkline Today heading, the line under it, the handwritten note at the bottom and the leaf drawing" }
+      ]
+    },
+    {
+      "id": "card",
+      "crop": [1200, 58, 1584, 442],
+      "targets": [
+        { "id": "agentCard", "kind": "interface", "box": [1203, 106, 1571, 249], "describe": "the large dark rounded information card in the upper right (it shows a portrait, the name FRIDAY and four small tags)" },
+        { "id": "clock", "kind": "interface", "box": [1411, 61, 1574, 104], "describe": "the small text in the top right corner that reads Rainy 16:24 and Mori Cafe, Forest Edge" }
+      ]
+    },
+    {
+      "id": "caption",
+      "crop": [130, 603, 520, 993],
+      "targets": [
+        { "id": "caption", "kind": "interface", "box": [166, 900, 504, 972], "describe": "the dark rounded caption panel at the bottom left that reads Mori Cafe, Forest Edge Workspace" }
+      ]
+    },
+    {
+      "id": "controls",
+      "crop": [1264, 673, 1584, 993],
+      "targets": [
+        { "id": "sceneControls", "kind": "interface", "box": [1317, 908, 1570, 965], "describe": "the dark rounded control buttons in the lower right (a frame icon, minus, 85%, plus and a person icon)" }
+      ]
+    }
+  ]
+}

@@ -1,9 +1,10 @@
+import { useContext } from "react";
 import { cx } from "../cx";
-import { portraitUrl } from "../portraits";
+import { PortraitOutfits, portraitUrl } from "../portraits";
 import { AGENT_STATUS } from "../../lib/status";
 import type { AgentStatus } from "../../lib/types";
 
-export type PortraitSize = 24 | 32 | 40 | 48 | 64;
+export type PortraitSize = 20 | 24 | 32 | 40 | 48 | 64;
 
 interface PortraitProps {
   name: string;
@@ -13,6 +14,8 @@ interface PortraitProps {
   status?: AgentStatus;
   /** The agent's own colour, used for the initials fallback. */
   accent?: string | null;
+  /** Dress them in this theme folder's outfits rather than the app's current ones (Theme Studio's previews). */
+  outfits?: string | null;
   className?: string;
 }
 
@@ -24,8 +27,9 @@ const initialsOf = (name: string) =>
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("");
 
-export function Portrait({ name, figure, size = 40, status, accent, className }: PortraitProps) {
-  const url = portraitUrl(figure);
+export function Portrait({ name, figure, size = 40, status, accent, outfits, className }: PortraitProps) {
+  const current = useContext(PortraitOutfits);
+  const url = portraitUrl(figure, outfits === undefined ? current : outfits);
   return (
     <span
       className={cx("portrait", className)}
