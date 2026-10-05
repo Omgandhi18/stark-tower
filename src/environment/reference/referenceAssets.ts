@@ -27,29 +27,9 @@ interface ReferenceManifest {
     inkInactive: string;
     inkActive: string;
   };
-  colors: Record<
-    | "statusOk"
-    | "statusDot"
-    | "badgeFill"
-    | "badgeText"
-    | "cardName"
-    | "cardStatus"
-    | "cardTask"
-    | "cardDot"
-    | "controlText",
-    string
-  >;
+  colors: Record<"statusOk" | "statusDot" | "badgeFill" | "badgeText" | "cardName" | "cardStatus" | "cardTask" | "cardDot" | "controlText", string>;
   text: Record<
-    | "statusValue"
-    | "notificationsBadge"
-    | "bellBadge"
-    | "statusDot"
-    | "cardDot"
-    | "cardName"
-    | "cardStatus"
-    | "cardTask"
-    | "focusLabel"
-    | "zoomLabel",
+    "statusValue" | "notificationsBadge" | "bellBadge" | "statusDot" | "cardDot" | "cardName" | "cardStatus" | "cardTask" | "focusLabel" | "zoomLabel",
     { rect: Rect }
   >;
 }

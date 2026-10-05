@@ -1,0 +1,81 @@
+import { useState } from "react";
+import { ArrowLeft, FolderOpen, MessageSquarePlus } from "lucide-react";
+import { Button, IconButton, Portrait, SelectField, StatusPill } from "../../design";
+import { errorMessage } from "../../lib/errors";
+import { formatCost, formatTokens } from "../../lib/format";
+import { AGENT_STATUS } from "../../lib/status";
+import type { Agent } from "../../lib/types";
+import { selectThread, useChats } from "../../stores/chats";
+import { useConfig } from "../../stores/config";
+import { useNavigation } from "../../stores/navigation";
+import { useUsage } from "../../stores/usage";
+import { useWorkspace } from "../../stores/workspace";
+import { engineLabel } from "../agents/display";
+import { startNewChat } from "./chatActions";
+import { folderOptions } from "./folders";
+
+/** Who you're talking to, where they work, and a fresh start. */
+export default function ConversationHeader({ agent }: { agent: Agent }) {
+  const navigate = useNavigation((s) => s.navigate);
+  const config = useConfig((s) => s.config);
+  const projects = useWorkspace((s) => s.projects);
+  const activeProject = useWorkspace((s) => s.activeProject);
+  const chatFolder = useChats((s) => selectThread(agent.id)(s).folder);
+  const usage = useUsage((s) => s.byAgent[agent.id]);
+  const [error, setError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  const status = AGENT_STATUS[agent.status];
+  const folder = chatFolder || activeProject;
+
+  const newChat = async () => {
+    setStarting(true);
+    setError(null);
+    try {
+      await startNewChat(agent.id);
+    } catch (e) {
+      setError(errorMessage(e, "A new chat couldn't be started."));
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  return (
+    <header className="conversation-header">
+      <IconButton icon={ArrowLeft} label="Back to Work" onClick={() => navigate("work")} />
+      <Portrait name={agent.name} figure={agent.figure} accent={agent.accent} size={40} status={agent.status} />
+      <div className="conversation-who">
+        <h1 className="conversation-name">{agent.name}</h1>
+        <p className="conversation-role">
+          {agent.role}
+          <span aria-hidden> · </span>
+          {engineLabel(agent.engine, config)}
+        </p>
+      </div>
+      <StatusPill label={status.label} tone={status.tone} icon={status.icon} live={status.busy} />
+      <div className="conversation-tools">
+        {error && (
+          <span className="conversation-error" role="alert">
+            {error}
+          </span>
+        )}
+        {usage && (
+          <span className="conversation-usage" title="Reported by the provider after the last reply">
+            {formatCost(usage.costUsd)} spent, {formatTokens(usage.contextTokens)} context
+          </span>
+        )}
+        <SelectField
+          label="Works in"
+          hideLabel
+          icon={FolderOpen}
+          value={folder}
+          options={folderOptions(projects, folder)}
+          onChange={(path) => useChats.getState().setFolder(agent.id, path)}
+          className="conversation-folder"
+        />
+        <Button icon={MessageSquarePlus} disabled={starting} onClick={newChat}>
+          New chat
+        </Button>
+      </div>
+    </header>
+  );
+}

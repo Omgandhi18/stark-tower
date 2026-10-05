@@ -5,7 +5,6 @@
 //! out of chat.rs; the worker runner (run_task_blocking) stays there.
 
 use crate::agents::{AgentKind, AgentStatus};
-use std::io::Write;
 use tauri::{Emitter, Manager};
 
 /// Register a newly-dispatched worker into JARVIS's current delegation batch.
@@ -87,12 +86,12 @@ fn try_flush(app: &tauri::AppHandle) {
 
     let mut body = String::from(
         "[DELEGATION RESULTS] The worker(s) you dispatched have finished. Synthesize these into \
-ONE clear reply for Om — call out anything that needs his decision. Don't re-delegate unless \
+ONE clear reply for the user, and call out anything that needs their decision. Don't re-delegate unless \
 something is genuinely incomplete.\n\n",
     );
     for (agent, task, result) in &batch.results {
         body.push_str(&format!(
-            "## {} — {}\n{}\n\n---\n\n",
+            "## {}: {}\n{}\n\n---\n\n",
             agent.to_uppercase(),
             crate::chat::truncate(task, 80),
             result
@@ -122,12 +121,7 @@ fn inject_user_turn(app: &tauri::AppHandle, agent_id: &str, text: &str) -> bool 
     let Some(state) = app.try_state::<crate::AppState>() else { return false };
     let mut map = state.chat.sessions.lock().unwrap();
     let Some(s) = map.get_mut(agent_id) else { return false };
-    let msg = serde_json::json!({
-        "type": "user",
-        "message": { "role": "user", "content": text }
-    });
-    if s.stdin.write_all(format!("{}\n", msg).as_bytes()).is_ok() {
-        let _ = s.stdin.flush();
+    if s.send_turn(text).is_ok() {
         drop(map);
         crate::pty::emit_status(app, agent_id, AgentStatus::Thinking);
         true
@@ -141,8 +135,7 @@ fn inject_user_turn(app: &tauri::AppHandle, agent_id: &str, text: &str) -> bool 
 pub(crate) fn deliver_message(app: &tauri::AppHandle, agent_id: &str, from: &str, body: &str) -> bool {
     let text = format!("[MESSAGE from {}] {}", from.to_uppercase(), body);
     if inject_user_turn(app, agent_id, &text) {
-        crate::chat::simple(app, agent_id, "system", Some(text.clone()));
-        crate::chat::persist(app, agent_id, "system", Some(&text), None, None);
+        crate::chat::note(app, agent_id, &text);
         true
     } else {
         false
@@ -154,7 +147,7 @@ pub(crate) fn deliver_message(app: &tauri::AppHandle, agent_id: &str, from: &str
 fn inject_to_orchestrator(app: &tauri::AppHandle, text: &str) -> bool {
     let oid = orchestrator_id(app);
     if inject_user_turn(app, &oid, text) {
-        crate::chat::persist(app, &oid, "system", Some("Worker results received — synthesizing."), None, None);
+        crate::chat::note(app, &oid, "Worker results received. Summarizing them now.");
         true
     } else {
         false
@@ -168,10 +161,10 @@ pub fn run_standup(app: &tauri::AppHandle) {
     let oid = orchestrator_id(app);
     let msg = "[STANDUP] Floor check. Review the in-flight tasks and each worker's status: \
 re-engage anyone stalled or blocked, close or reassign tasks that are done, and keep the board \
-accurate. If everything in-flight is on track and nothing needs Om, say so briefly. Do NOT start \
-new work Om didn't ask for.";
+accurate. If everything in-flight is on track and nothing needs the user, say so briefly. Do NOT \
+start new work the user didn't ask for.";
     if inject_user_turn(app, &oid, msg) {
-        crate::chat::persist(app, &oid, "system", Some("Standup — reviewing the floor."), None, None);
+        crate::chat::note(app, &oid, "Standup: reviewing the board.");
         if let Some(state) = app.try_state::<crate::AppState>() {
             let e = state.ledger.record(&oid, "standup", "floor check", 1);
             let _ = app.emit("ledger://entry", e);
@@ -189,13 +182,11 @@ fn dead_letter(app: &tauri::AppHandle, batch: &crate::chat::DelegationState) {
         "[delegation] orchestrator offline at flush — dead-lettering {} result(s)",
         batch.results.len()
     );
-    let note = "Delegation results arrived while the orchestrator was offline — delivered here so they aren't lost. Reopen the chat to have them synthesized.";
-    crate::chat::simple(app, &oid, "system", Some(note.to_string()));
-    crate::chat::persist(app, &oid, "system", Some(note), None, None);
+    let note = "Delegation results arrived while the orchestrator was offline, so they are delivered here instead. Reopen the chat to have them summarized.";
+    crate::chat::note(app, &oid, note);
     for (agent, task, result) in &batch.results {
-        let text = format!("## {} — {}\n{}", agent.to_uppercase(), crate::chat::truncate(task, 80), result);
-        crate::chat::simple(app, &oid, "text", Some(text.clone()));
-        crate::chat::persist(app, &oid, "agent", Some(&text), None, None);
+        let text = format!("## {}: {}\n{}", agent.to_uppercase(), crate::chat::truncate(task, 80), result);
+        crate::chat::record_in(app, &crate::chat::Sink::chat(), &oid, "text", "agent", Some(&text), None, None);
     }
     if let Some(state) = app.try_state::<crate::AppState>() {
         let e = state.ledger.record(

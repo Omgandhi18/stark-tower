@@ -18,6 +18,26 @@ export type {
   ProjectInfo,
   ProjectsState,
   PathEntry,
+  ReviewRequest,
+  RuntimeHealth,
+  EngineHealth,
+  PowerState,
+  TaskDetail,
+  TaskEvent,
+  PlanItem,
+  CheckRun,
+  FileChange,
+  Notification,
+  PermissionRule,
+  PolicyRule,
+  ProviderCapabilities,
+  ModelChoice,
+  Capability,
+  Support,
+  Automation,
+  AutomationInput,
+  AutomationRun,
+  Schedule,
 } from "./bindings";
 
 import type { AgentStatus } from "./bindings";
@@ -55,17 +75,11 @@ export interface UpdateStatus {
   latest: string | null;
   current: string;
   error: string | null;
+  /** The release page on GitHub. */
+  url?: string;
 }
 
-export type ChatEventKind =
-  | "init"
-  | "text"
-  | "thinking"
-  | "tool"
-  | "result"
-  | "error"
-  | "exit"
-  | "system";
+export type ChatEventKind = "init" | "text" | "thinking" | "tool" | "result" | "error" | "exit" | "system";
 
 export interface ChatEvent {
   agentId: string;
@@ -74,24 +88,25 @@ export interface ChatEvent {
   tool?: string;
   detail?: string;
   cwd?: string;
+  /** The transcript row this event was stored as, if it was stored. */
+  messageId?: number;
+  /** The conversation it belongs to; views of other conversations ignore it. */
+  conversationId?: number;
+  /** The task it belongs to, when the agent is on one. */
+  taskId?: string;
+}
+
+/** An agent now talks in a different conversation (chat://switched). */
+export interface ChatSwitch {
+  agentId: string;
+  conversationId: number;
 }
 
 /** Resolved floor lighting phase (what StarkFloor actually renders). */
 export type LightPhase = "morning" | "day" | "evening" | "night";
 
-export type ReviewKind =
-  | "plan"
-  | "diff"
-  | "findings"
-  | "questions"
-  | "choice"
-  | "mockup";
+/** What a pending review is about (ReviewRequest.kind). */
+export type ReviewKind = "plan" | "diff" | "findings" | "questions" | "choice" | "mockup" | "command" | "permission";
 
-export interface ReviewRequest {
-  id: string;
-  agentId: string;
-  title: string;
-  body: string;
-  kind: ReviewKind;
-  choices: string[];
-}
+/** A command or tool call the permission gate stopped (as opposed to a review an agent asked for). */
+export const isPermissionRequest = (review: { kind: string }) => review.kind === "command" || review.kind === "permission";

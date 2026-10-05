@@ -59,6 +59,7 @@ fn emit(app: &tauri::AppHandle, available: bool, latest: Option<&str>, error: Op
             "latest": latest,
             "current": env!("CARGO_PKG_VERSION"),
             "error": error,
+            "url": format!("https://github.com/{REPO}/releases/latest"),
         }),
     );
 }

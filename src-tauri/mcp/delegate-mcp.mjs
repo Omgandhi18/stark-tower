@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// MCP stdio server bridging a headless Claude Code agent to the Stark Tower app
+// MCP stdio server bridging a headless Claude Code agent to the Starkline app
 // over a Unix socket. Two tools:
 //   • delegate   — hand a task to a worker agent (JARVIS only)
 //   • ask_human  — the lavish alternative: render a review in-app and block for
@@ -59,11 +59,11 @@ function buildDelegateTool(workers) {
 const ASK_HUMAN_TOOL = {
   name: "ask_human",
   description:
-    "Show Om a review and BLOCK until he decides — the human-in-the-loop surface " +
+    "Show the developer a review and BLOCK until they decide — the human-in-the-loop surface " +
     "(use this instead of any lavish/browser step). Use it to get sign-off on a plan, " +
     "approval of a diff, Fix/Defer/Decline decisions on review findings, an answer to " +
     "questions, a choice between options, or to show a rendered UI mockup. It renders in the " +
-    "app as a review card from you and returns Om's decision (plus any notes). For most kinds " +
+    "app as a review card from you and returns their decision (plus any notes). For most kinds " +
     "put the content in `body` as markdown (code fences and tables render). For kind 'mockup' " +
     "put a COMPLETE self-contained HTML document in `body` (inline CSS, no external network/CDN) " +
     "and the app renders it as a live screen preview. Keep `title` short.",
@@ -95,40 +95,6 @@ const ASK_HUMAN_TOOL = {
     required: ["title", "body"],
   },
 };
-
-// ---- command permission gate (auto-run safe, route risky) ----
-const SAFE_CMDS = new Set([
-  "npm", "pnpm", "yarn", "bun", "npx", "node", "deno", "tsc", "tsx", "ts-node",
-  "vite", "next", "expo", "jest", "vitest", "mocha", "cypress", "playwright",
-  "eslint", "prettier", "biome", "cargo", "rustc", "rustup", "go", "python",
-  "python3", "pip", "pip3", "poetry", "uv", "pytest", "ruff", "black", "mypy",
-  "ruby", "bundle", "rails", "rake", "mvn", "gradle", "make", "cmake", "git",
-  "gh", "ls", "cat", "head", "tail", "grep", "rg", "ag", "find", "fd", "mkdir",
-  "touch", "echo", "pwd", "wc", "sed", "awk", "sort", "uniq", "cut", "tr",
-  "diff", "cp", "mv", "which", "type", "env", "date", "whoami", "du", "df",
-  "tree", "jq", "yq", "stat", "basename", "dirname", "readlink", "realpath",
-  "xargs", "true", "test", "printf", "cd", "export", "source", "nvm", "fnm",
-]);
-const RISKY = [
-  /\brm\s+-\w*[rf]/, /\bsudo\b/, /(^|\s)su\s/,
-  /\|\s*(sudo\s+)?(sh|bash|zsh|fish)\b/,
-  /\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(sh|bash)/,
-  /\bdd\b/, /\bmkfs\w*/, /\bfdisk\b/, /\bdiskutil\b/, /\bchmod\b/, /\bchown\b/,
-  /git\s+push\b.*(--force|-f\b)/, /git\s+reset\s+--hard/, /git\s+clean\s+-\w*f/,
-  /\b(npm|pnpm|yarn)\s+(publish|unpublish)\b/,
-  /\b(kill|pkill|killall)\b/, /\b(shutdown|reboot|halt)\b/,
-  /\blaunchctl\b/, /\bsystemctl\b/, /\bcrontab\b/, /:\(\)\s*\{/,
-  />\s*\/(etc|dev|sys|System|usr|bin|sbin|boot|Library)\b/,
-];
-function classifyBash(cmd) {
-  const c = String(cmd || "");
-  for (const r of RISKY) if (r.test(c)) return "route";
-  const tokens = c.trim().split(/\s+/);
-  let i = 0;
-  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
-  const first = (tokens[i] || "").replace(/^.*\//, "");
-  return SAFE_CMDS.has(first) ? "allow" : "route";
-}
 
 const APPROVE_TOOL = {
   name: "approve",
@@ -180,7 +146,7 @@ const MESSAGE_TOOL = {
   description:
     "Send a short message to a teammate by their agent id — a question, a heads-up, or a hand-off " +
     "note. It's delivered to them when they're next free (you don't get a reply on this call). Use " +
-    "it to coordinate directly with another specialist; use `ask_human` for anything that needs Om.",
+    "it to coordinate directly with another specialist; use `ask_human` for anything that needs the developer.",
   inputSchema: {
     type: "object",
     properties: {
@@ -297,23 +263,15 @@ rl.on("line", async (raw) => {
       if (res.error) result(id, "report_bug failed: " + res.error, true);
       else result(id, res.result || "(filed)");
     } else if (name === "approve") {
+      // Every permission request goes to the app, which decides what may run on
+      // its own. Nothing is decided here: this script lives where agents can edit it.
       const toolName = args.tool_name || args.toolName || "";
       const input = args.input || args.tool_input || {};
-      let decision;
-      if (toolName === "Bash") {
-        const cmd = String((input && input.command) || "");
-        if (classifyBash(cmd) === "allow") {
-          decision = { behavior: "allow", updatedInput: input };
-        } else {
-          log("gate ->", cmd.slice(0, 60));
-          const res = await bridge({ type: "approve", agentId: AGENT_ID, command: cmd });
-          decision = res.approved
-            ? { behavior: "allow", updatedInput: input }
-            : { behavior: "deny", message: res.reason || "Om denied this command." };
-        }
-      } else {
-        decision = { behavior: "allow", updatedInput: input };
-      }
+      log("gate ->", toolName);
+      const res = await bridge({ type: "approve", agentId: AGENT_ID, tool_name: toolName, input });
+      const decision = res.approved
+        ? { behavior: "allow", updatedInput: input }
+        : { behavior: "deny", message: res.reason || res.error || "The developer didn't allow this." };
       result(id, JSON.stringify(decision));
     } else {
       result(id, "unknown tool", true);

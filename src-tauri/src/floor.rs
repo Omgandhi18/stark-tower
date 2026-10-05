@@ -225,8 +225,8 @@ fn git_init(floor: &Path) {
         return;
     }
     if git(floor, &["init", "-q"]) {
-        let _ = git(floor, &["config", "user.email", "floor@stark-tower.local"]);
-        let _ = git(floor, &["config", "user.name", "Stark Tower"]);
+        let _ = git(floor, &["config", "user.email", "floor@starkline.local"]);
+        let _ = git(floor, &["config", "user.name", "Starkline"]);
     }
 }
 

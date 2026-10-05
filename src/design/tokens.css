@@ -1,0 +1,231 @@
+/*
+ * Semantic design tokens. Components only ever use these names; a theme is a
+ * set of values for them. After Hours R&D (dark, teal accent) is the default.
+ *
+ * Shape rule: controls (buttons, inputs, selects) use --radius-control, cards
+ * and panels use --radius-card, pills, badges and switches use --radius-pill.
+ * Z-index scale: --z-* below; nothing else sets z-index.
+ */
+:root,
+[data-theme="rnd"] {
+  color-scheme: dark;
+
+  /* Surfaces, back to front */
+  --surface-app: #0b1015;
+  --surface-sunken: #0d1319;
+  --surface: #10161d;
+  --surface-raised: #141b23;
+  --surface-overlay: #18212a;
+  --surface-hover: #1a232d;
+  --surface-pressed: #1e2833;
+  --surface-selected: #10303a;
+
+  --border-subtle: #1b2530;
+  --border: #23303d;
+  --border-strong: #2f3e4d;
+
+  /* Text */
+  --text: #e6ecf2;
+  --text-secondary: #a2afbc;
+  --text-muted: #758391;
+  --text-on-accent: #031a1e;
+  --text-on-strong: #ffffff;
+
+  /* The one accent */
+  --accent: #2cc6d9;
+  --accent-hover: #4dd3e3;
+  --accent-text: #5fd9e8;
+  --accent-soft: rgb(44 198 217 / 0.12);
+  --accent-ring: rgb(44 198 217 / 0.55);
+
+  /* Task and agent states: each has a strong tone and a soft wash */
+  --state-running: #34b6f0;
+  --state-running-soft: rgb(52 182 240 / 0.13);
+  --state-review: #3a8cf5;
+  --state-review-soft: rgb(58 140 245 / 0.14);
+  --state-attention: #f3b03e;
+  --state-attention-soft: rgb(243 176 62 / 0.13);
+  --state-danger: #ef4f4f;
+  --state-danger-soft: rgb(239 79 79 / 0.13);
+  --state-success: #34c17b;
+  --state-success-soft: rgb(52 193 123 / 0.13);
+  --state-idle: #7c8996;
+  --state-idle-soft: rgb(124 137 150 / 0.14);
+
+  /* Type */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  --text-2xs: 10.5px;
+  --text-xs: 11.5px;
+  --text-sm: 12.5px;
+  --text-base: 13.5px;
+  --text-md: 14.5px;
+  --text-lg: 16px;
+  --text-xl: 19px;
+  --text-2xl: 25px;
+  --leading-tight: 1.25;
+  --leading: 1.45;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* Space (4 px scale) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* Shape */
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-pill: 999px;
+
+  /* Elevation (tinted to the surface hue, never pure black) */
+  --shadow-raised: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 6px 18px rgb(2 8 12 / 0.28);
+  --shadow-overlay: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 18px 44px rgb(2 8 12 / 0.55);
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 110ms;
+  --duration: 180ms;
+  --duration-slow: 280ms;
+
+  /* Shell: the sidebar and top bar (a theme may give them their own colours) */
+  --nav-surface: var(--surface-sunken);
+  --nav-border: var(--border-subtle);
+  --nav-text: var(--text-secondary);
+  --nav-text-strong: var(--text);
+  --nav-muted: var(--text-muted);
+  --nav-hover: var(--surface-hover);
+  --nav-active: var(--accent-soft);
+  --nav-active-text: var(--accent-text);
+  --nav-active-bar: var(--accent);
+  --topbar-surface: var(--surface-sunken);
+
+  /* Layout */
+  --topbar-height: 56px;
+  --sidenav-width: 184px;
+
+  /* Layers */
+  --z-sticky: 10;
+  --z-drawer: 20;
+  --z-popover: 30;
+  --z-overlay: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+}
+
+/*
+ * Studio Office: parchment, tobacco and oxidized green. A light theme: warm
+ * paper for the work, a dark tobacco sidebar, burgundy for where you are.
+ */
+[data-theme="office"] {
+  color-scheme: light;
+
+  --surface-app: #f1eadf;
+  --surface-sunken: #ebe3d6;
+  --surface: #f5efe5;
+  --surface-raised: #fbf7f0;
+  --surface-overlay: #fffcf7;
+  --surface-hover: #e9dfcf;
+  --surface-pressed: #e1d5c2;
+  --surface-selected: #f3e2c2;
+
+  --border-subtle: #e2d7c5;
+  --border: #d4c5ae;
+  --border-strong: #bcaa8f;
+
+  --text: #2a211b;
+  --text-secondary: #5c5046;
+  --text-muted: #85786b;
+  --text-on-accent: #ffffff;
+  --text-on-strong: #ffffff;
+
+  --accent: #3b7558;
+  --accent-hover: #32664c;
+  --accent-text: #2f6a4e;
+  --accent-soft: rgb(59 117 88 / 0.12);
+  --accent-ring: rgb(59 117 88 / 0.45);
+
+  --state-running: #2a74b8;
+  --state-running-soft: rgb(42 116 184 / 0.12);
+  --state-review: #2d68c8;
+  --state-review-soft: rgb(45 104 200 / 0.12);
+  --state-attention: #c98516;
+  --state-attention-soft: rgb(222 155 46 / 0.18);
+  --state-danger: #c23f37;
+  --state-danger-soft: rgb(194 63 55 / 0.12);
+  --state-success: #2e8a55;
+  --state-success-soft: rgb(46 138 85 / 0.12);
+  --state-idle: #877a6d;
+  --state-idle-soft: rgb(135 122 109 / 0.14);
+
+  --font-display: "New York", ui-serif, Georgia, serif;
+
+  --shadow-raised: 0 1px 0 rgb(255 255 255 / 0.6) inset, 0 6px 18px rgb(74 52 30 / 0.1);
+  --shadow-overlay: 0 1px 0 rgb(255 255 255 / 0.7) inset, 0 18px 44px rgb(74 52 30 / 0.22);
+
+  --nav-surface: #2b201a;
+  --nav-border: #3a2c23;
+  --nav-text: #d8ccbc;
+  --nav-text-strong: #fff7ec;
+  --nav-muted: #a7998a;
+  --nav-hover: #3a2c23;
+  --nav-active: #7d2c2b;
+  --nav-active-text: #fff7ec;
+  --nav-active-bar: #d6644a;
+  --topbar-surface: #efe8dc;
+}
+
+/*
+ * Mori Cafe: ink indigo, moss green and lantern amber. Dark and calm, with
+ * cream text and green for what's on.
+ */
+[data-theme="mori"] {
+  color-scheme: dark;
+
+  --surface-app: #0c161a;
+  --surface-sunken: #0e191e;
+  --surface: #111f25;
+  --surface-raised: #15252c;
+  --surface-overlay: #1a2c34;
+  --surface-hover: #1b2f37;
+  --surface-pressed: #20373f;
+  --surface-selected: #133628;
+
+  --border-subtle: #1b2d34;
+  --border: #243a42;
+  --border-strong: #304b54;
+
+  --text: #ebe5d6;
+  --text-secondary: #b0ad9e;
+  --text-muted: #7f877d;
+  --text-on-accent: #04200f;
+  --text-on-strong: #ffffff;
+
+  --accent: #3cbd78;
+  --accent-hover: #58cd8e;
+  --accent-text: #6bd697;
+  --accent-soft: rgb(60 189 120 / 0.13);
+  --accent-ring: rgb(60 189 120 / 0.5);
+
+  --state-attention: #f1a43a;
+  --state-attention-soft: rgb(241 164 58 / 0.14);
+
+  --shadow-raised: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 6px 18px rgb(2 10 8 / 0.3);
+  --shadow-overlay: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 18px 44px rgb(2 10 8 / 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration: 0ms;
+    --duration-slow: 0ms;
+  }
+}

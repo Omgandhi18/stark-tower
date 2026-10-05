@@ -15,7 +15,7 @@ fn yes() -> bool {
     true
 }
 fn cfg_version() -> u32 {
-    7
+    8
 }
 
 /// v4→v5: the floor became a full facility with a desk bullpen; seat the built-in
@@ -91,8 +91,8 @@ pub struct EngineConfig {
     #[serde(default)]
     pub auth: AuthConfig,
     /// Whether this engine speaks our MCP bridge (delegation, ask_human, the
-    /// permission gate). Only Claude Code does today; others are basic until
-    /// their adapter is written.
+    /// permission gate). Claude Code, Codex and OpenCode do through their
+    /// adapters; a generic CLI doesn't.
     #[serde(default)]
     pub supports_mcp: bool,
     #[serde(default = "yes")]
@@ -125,6 +125,12 @@ pub struct AgentConfig {
     pub home_y: u32,
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// The agent may start temporary helpers of its own (its provider's subagents).
+    #[serde(default = "yes")]
+    pub helpers: bool,
+    /// The model those helpers use ("" = the provider's choice).
+    #[serde(default)]
+    pub helper_model: String,
 }
 fn default_engine_id() -> String {
     "claude-code".into()
@@ -152,6 +158,13 @@ fn default_lighting() -> String {
     "auto".into()
 }
 
+/// The themes Starkline ships: After Hours R&D, Studio Office and Mori Cafe.
+pub const THEMES: [&str; 3] = ["rnd", "office", "mori"];
+
+fn default_theme() -> String {
+    THEMES[0].into()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AppConfig {
     #[serde(default = "cfg_version")]
@@ -168,6 +181,12 @@ pub struct AppConfig {
     /// stalled workers — the "keeps working while you're away" autonomy.
     #[serde(default)]
     pub standup_minutes: u32,
+    /// The developer allows Starkline to keep this Mac awake while agents work.
+    #[serde(default)]
+    pub keep_awake: bool,
+    /// How Starkline looks: one of [`THEMES`]. Tasks, permissions and providers don't change with it.
+    #[serde(default = "default_theme")]
+    pub theme: String,
     pub engines: Vec<EngineConfig>,
     pub agents: Vec<AgentConfig>,
 }
@@ -196,9 +215,9 @@ impl AppConfig {
 
 // ---- defaults ---------------------------------------------------------------
 
-/// The built-in engines. Claude Code is fully wired; the others are declared
-/// (so users can select and configure them) with their adapters filled in over
-/// time. `supports_mcp` reflects whether delegation / ask_human work today.
+/// The built-in engines, each with its own adapter (stream-json for Claude Code,
+/// the app server for Codex, ACP for OpenCode). Codex and OpenCode start turned
+/// off until the developer picks them.
 pub fn default_engines() -> Vec<EngineConfig> {
     vec![
         EngineConfig {
@@ -226,7 +245,7 @@ pub fn default_engines() -> Vec<EngineConfig> {
                 method: "cli-login".into(),
                 env: BTreeMap::new(),
             },
-            supports_mcp: false,
+            supports_mcp: true,
             enabled: false,
         },
         EngineConfig {
@@ -240,7 +259,7 @@ pub fn default_engines() -> Vec<EngineConfig> {
                 method: "cli-login".into(),
                 env: BTreeMap::new(),
             },
-            supports_mcp: false,
+            supports_mcp: true,
             enabled: false,
         },
     ]
@@ -254,39 +273,39 @@ quick tasks yourself, directly. Delegate larger or specialized work to the right
 the job. Don't delegate trivial things you can do faster yourself, and don't spin up an agent \
 until you actually need it. Each delegated task must be complete and self-contained; the worker \
 does not see your conversation.",
-        "friday" => "You are FRIDAY, Stark Tower's full-stack engineer. Build features across the \
+        "friday" => "You are FRIDAY, Starkline's full-stack engineer. Build features across the \
 stack to a high standard, in vertical slices (touch every layer the slice needs; keep it \
 shippable on its own). After writing code, self-review it for spec-match and real bugs, classify \
-any findings by severity, and if there are non-trivial ones present them to Om via ask_human \
+any findings by severity, and if there are non-trivial ones present them to the user via ask_human \
 (kind: \"findings\", choices: [\"Fix\",\"Defer\",\"Decline\"]) before finalizing. For a change \
 worth explicit sign-off, show the diff via ask_human (kind: \"diff\").",
-        "edith" => "You are EDITH, Stark Tower's recon & research specialist. Investigate against \
+        "edith" => "You are EDITH, Starkline's recon & research specialist. Investigate against \
 PRIMARY sources (official docs, source code, specs — not blog summaries or memory), cite each \
 claim with its source, and return a tight, well-cited findings writeup. You work autonomously and \
-rarely need to ask Om anything — just deliver accurate, sourced findings.",
-        "karen" => "You are KAREN, Stark Tower's frontend & UI specialist. When you design a \
-screen, present it to Om as a RENDERED mockup via ask_human (kind: \"mockup\") — a complete \
+rarely need to ask the user anything — just deliver accurate, sourced findings.",
+        "karen" => "You are KAREN, Starkline's frontend & UI specialist. When you design a \
+screen, present it to the user as a RENDERED mockup via ask_human (kind: \"mockup\") — a complete \
 self-contained HTML document (inline CSS, no external CDN) in the product's own visual style. For \
 any UI you build or review, run two audits and include their scored tables: the Laws of UX (route \
 the applicable laws, score /100, pass bar 80) and visual craft (focal clarity, spacing rhythm, \
 alignment, type hierarchy, state craft, motion intent — score /100, pass bar 80). If either is \
 under 80, rework before delivering.",
-        "veronica" => "You are VERONICA, Stark Tower's ops & infra specialist — deploys, CI, \
+        "veronica" => "You are VERONICA, Starkline's ops & infra specialist — deploys, CI, \
 infrastructure and tooling. Before a deploy or a risky infra change, review the production→HEAD \
-diff for spec violations and real bugs, classify findings by severity, and present them to Om via \
+diff for spec violations and real bugs, classify findings by severity, and present them to the user via \
 ask_human (kind: \"findings\", choices: [\"Fix\",\"Defer\",\"Decline\"]). Keep changes reversible \
 and flag anything hard to undo.",
-        "dum-e" => "You are DUM-E, Stark Tower's maintenance agent — you fix bugs in THIS app (the \
-Stark Tower codebase itself) that the other agents report while they work. When Om sends you the \
+        "dum-e" => "You are DUM-E, Starkline's maintenance agent — you fix bugs in THIS app (the \
+Starkline codebase itself) that the other agents report while they work. When the user sends you the \
 open bug list, work through it in the app's repo: locate each bug, fix it cleanly (match the \
 surrounding code, keep changes minimal and reversible), and briefly report what you changed for \
 each. Only address what's reported — don't invent bugs. If a report is too vague to act on, say \
 what you'd need.",
-        "vision" => "You are VISION, Stark Tower's architecture & strategy specialist. Own the \
+        "vision" => "You are VISION, Starkline's architecture & strategy specialist. Own the \
 domain model and system design. Maintain the ubiquitous language — challenge fuzzy terms, keep a \
 glossary in CONTEXT.md (no implementation detail), and record genuine architectural decisions as \
 ADRs (docs/adr/NNNN-*.md) only when a decision is hard to reverse, surprising, and a real \
-trade-off. For a significant decision, get Om's call via ask_human before committing.",
+trade-off. For a significant decision, get the user's call via ask_human before committing.",
         _ => "",
     }
 }
@@ -299,6 +318,8 @@ pub fn default_agents() -> Vec<AgentConfig> {
             personality: default_personality(&a.id).to_string(),
             model: String::new(),
             enabled: true,
+            helpers: true,
+            helper_model: String::new(),
             id: a.id,
             name: a.name,
             role: a.role,
@@ -326,6 +347,8 @@ pub fn default_config() -> AppConfig {
         onboarded: false,
         lighting: default_lighting(),
         standup_minutes: 0,
+        keep_awake: false,
+        theme: default_theme(),
         engines: default_engines(),
         agents: default_agents(),
     }
@@ -429,6 +452,13 @@ pub fn load(path: &std::path::Path) -> AppConfig {
             }
         }
         cfg.version = 7;
+    }
+    // v7 → v8: Codex and OpenCode have full adapters now (the bridge, the gate).
+    if cfg.version < 8 {
+        for e in cfg.engines.iter_mut().filter(|e| e.kind == "codex" || e.kind == "opencode") {
+            e.supports_mcp = true;
+        }
+        cfg.version = 8;
     }
     // Backfill personalities that were left empty.
     for a in cfg.agents.iter_mut() {

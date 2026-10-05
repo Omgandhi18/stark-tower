@@ -66,6 +66,8 @@ pub fn emit_status(app: &tauri::AppHandle, agent_id: &str, status: AgentStatus) 
             status,
         },
     );
+    crate::power::sync(app);
+    crate::lifecycle::refresh_tray(app);
 }
 
 /// Spawn an engine process in a pty, stream its output to the frontend, and
@@ -192,7 +194,7 @@ fn on_activity(app: &tauri::AppHandle, agent_id: &str, gen: u64) {
         let entry = state.ledger.record(
             agent_id,
             "containment",
-            "Ultron containment: runaway output — agent paused",
+            "Contained: runaway output, so the agent was paused",
             9,
         );
         let _ = app.emit("ledger://entry", entry);

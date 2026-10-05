@@ -87,5 +87,14 @@
       "floorY": 677,
       "overlay": true
     }
-  ]
+  ],
+  "lights": {
+    "$comment": "Light that tells each station's state, in mockup px: [cx, cy, rx, ry]. 'screen' glows while the agent works ('warm' for a lamp instead of screens); 'floor' glows amber while it waits on you.",
+    "commandDeck": { "screen": [805, 120, 175, 70], "floor": [769, 284, 52, 13] },
+    "buildBay": { "screen": [500, 478, 190, 50], "floor": [471, 616, 72, 15] },
+    "reviewWall": { "screen": [1092, 430, 145, 105], "floor": [940, 579, 50, 13] },
+    "rightDesk": { "screen": [1150, 575, 80, 55], "floor": [1232, 726, 50, 13] },
+    "rightPod": { "screen": [1395, 222, 48, 38], "floor": [1396, 356, 56, 13], "warm": true },
+    "bottomDesk": { "screen": [782, 818, 110, 45], "floor": [795, 956, 66, 14] }
+  }
 }

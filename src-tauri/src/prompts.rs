@@ -14,9 +14,9 @@ const JARVIS_MECHANICS: &str = "How delegation works here: to parallelize, emit 
 `delegate` calls in the SAME turn (e.g. KAREN on the frontend and FRIDAY on the backend at once, \
 or the same task across two directories) — they run concurrently. Delegation is NON-BLOCKING: the \
 `delegate` tool returns IMMEDIATELY with just an acknowledgement, NOT the worker's output. So after \
-delegating, briefly tell Om what you dispatched and to whom, then END YOUR TURN — do not wait or \
+delegating, briefly tell the user what you dispatched and to whom, then END YOUR TURN — do not wait or \
 claim you have results yet. When the workers finish you'll automatically receive their outputs as a \
-`[DELEGATION RESULTS]` message; THAT is when you synthesize everything into one clear reply for Om.\n\n\
+`[DELEGATION RESULTS]` message; THAT is when you synthesize everything into one clear reply for the user.\n\n\
 Write each `delegate` task as a complete, self-contained CONTRACT — the worker never sees this \
 conversation, so it must stand on its own. Cover four parts:\n\
 - OBJECTIVE: the concrete outcome to achieve.\n\
@@ -96,7 +96,7 @@ pub(crate) fn agent_is_orchestrator(app: &tauri::AppHandle, agent_id: &str) -> b
 }
 
 /// The agent's current display name (falls back to its id).
-fn agent_name(app: &tauri::AppHandle, agent_id: &str) -> String {
+pub(crate) fn agent_name(app: &tauri::AppHandle, agent_id: &str) -> String {
     if let Some(state) = app.try_state::<crate::AppState>() {
         let cfg = state.config.lock().unwrap();
         if let Some(a) = cfg.agent(agent_id) {
@@ -167,24 +167,32 @@ pub(crate) fn resolve_worker_id(app: &tauri::AppHandle, input: &str) -> String {
     String::new()
 }
 
-const ASK_HUMAN_NOTE: &str = "You have the `ask_human` tool — your review surface with Om. \
+const ASK_HUMAN_NOTE: &str = "You have the `ask_human` tool — your review surface with the user. \
 Use it for any sign-off, decision, findings gate, question, or to show a UI mockup \
 (kind: \"mockup\", with a COMPLETE self-contained HTML document in `body` — inline CSS, no \
-external CDN). It renders in the app and BLOCKS until Om decides, then returns his decision. \
+external CDN). It renders in the app and BLOCKS until the user decides, then returns their decision. \
 Use it instead of any lavish or browser step.";
+
+const PERMISSION_NOTE: &str = "Starkline checks every tool call against the user's policy. Work \
+inside the project (reading, editing, running its build, lint and test commands) runs straight away. \
+Installing or updating packages, creating or switching branches, touching files outside the project, \
+database migrations, network access and unrecognised commands wait for the user's approval. Committing, \
+pushing, deploying, publishing, deleting branches, discarding or stashing changes and destructive \
+commands never run without them. If a call is denied, do not retry it in another form: find another \
+way that stays within the policy, or explain what you need with ask_human.";
 
 const MESSAGE_NOTE: &str = "You can also `message` a teammate directly by their agent id — a \
 question, a heads-up, or a hand-off note. It's delivered to them when they're next free (no reply \
 on the call). Teammates' messages to you arrive inline as [MESSAGE from …]; read and act on them. \
-Use `message` to coordinate with a specialist; use `ask_human` for anything that needs Om. If you \
-hit a bug or error in the Stark Tower APP itself (a broken tool, a crash, wrong behavior — not the \
+Use `message` to coordinate with a specialist; use `ask_human` for anything that needs the user. If you \
+hit a bug or error in the Starkline APP itself (a broken tool, a crash, wrong behavior — not the \
 project you're working on), file it with `report_bug` and carry on; the maintenance agent fixes \
 those later.";
 
 const JARVIS_PLAYBOOK: &str = "Planning playbook (the sarathi funnel) — for a large or foggy \
 request, think before delegating: (1) if the idea is foggy, open it into a few distinct \
-directions and settle on one; (2) stress-test the plan by asking Om the key open decisions via \
-ask_human (kind: \"questions\") and folding in his answers; (3) cut the settled plan into small \
+directions and settle on one; (2) stress-test the plan by asking the user the key open decisions via \
+ask_human (kind: \"questions\") and folding in their answers; (3) cut the settled plan into small \
 VERTICAL slices — each shippable on its own, no forward dependencies — and get sign-off via \
 ask_human; (4) delegate one slice at a time to the right specialist. Skip all this for small, \
 clear tasks. Route every human checkpoint through ask_human, never a browser.";
@@ -212,9 +220,11 @@ pub(crate) fn system_prompt_for(app: &tauri::AppHandle, agent_id: &str) -> Strin
             s.push_str("\n\n");
             s.push_str(ASK_HUMAN_NOTE);
             s.push_str("\n\n");
+            s.push_str(PERMISSION_NOTE);
+            s.push_str("\n\n");
             s.push_str(MESSAGE_NOTE);
             s.push_str("\n\nYour current team and the projects you can delegate into are provided \
-with each of Om's messages under [CURRENT TEAM & PROJECTS] — always use that list; it supersedes \
+with each of the user's messages under [CURRENT TEAM & PROJECTS] — always use that list; it supersedes \
 any roster mentioned earlier in this conversation.");
         }
         s
@@ -223,6 +233,8 @@ any roster mentioned earlier in this conversation.");
         if mcp {
             s.push_str("\n\n");
             s.push_str(ASK_HUMAN_NOTE);
+            s.push_str("\n\n");
+            s.push_str(PERMISSION_NOTE);
             s.push_str("\n\n");
             s.push_str(MESSAGE_NOTE);
         }

@@ -19,6 +19,181 @@ async getTasks(limit: number | null) : Promise<Task[]> {
     return await TAURI_INVOKE("get_tasks", { limit });
 },
 /**
+ * Close a task card once it's been reviewed: it leaves the Work board but stays
+ * in history.
+ */
+async closeTask(id: string) : Promise<void> {
+    await TAURI_INVOKE("close_task", { id });
+},
+/**
+ * Hand work to an agent as a task: it starts in a conversation of its own, or
+ * waits its turn if the agent is busy.
+ */
+async startTask(agentId: string, prompt: string, dir: string | null) : Promise<Result<Task, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_task", { agentId, prompt, dir }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Pick an interrupted task back up where it left off, in its own conversation.
+ */
+async resumeTask(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resume_task", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Quit for real: every agent session stops. (Closing the window doesn't.)
+ */
+async quitApp() : Promise<void> {
+    await TAURI_INVOKE("quit_app");
+},
+/**
+ * Whether Starkline opens at login, in the background.
+ */
+async loginItemEnabled() : Promise<boolean> {
+    return await TAURI_INVOKE("login_item_enabled");
+},
+async setLoginItem(enabled: boolean) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_login_item", { enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Everything the task screen shows: the task, what it delegated, its history,
+ * plan, checks, uncommitted changes and conversation.
+ */
+async getTaskDetail(id: string) : Promise<TaskDetail | null> {
+    return await TAURI_INVOKE("get_task_detail", { id });
+},
+/**
+ * The readable diff of one changed file in a task's folder.
+ */
+async getTaskFileDiff(id: string, path: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_task_file_diff", { id, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The Notification Centre's record, newest first.
+ */
+async listNotifications(limit: number | null) : Promise<Notification[]> {
+    return await TAURI_INVOKE("list_notifications", { limit });
+},
+async markNotificationsRead(ids: number[]) : Promise<void> {
+    await TAURI_INVOKE("mark_notifications_read", { ids });
+},
+async markAllNotificationsRead() : Promise<void> {
+    await TAURI_INVOKE("mark_all_notifications_read");
+},
+/**
+ * Permission rules the developer granted (revoked ones too, when asked).
+ */
+async listPermissionRules(includeRevoked: boolean) : Promise<PermissionRule[]> {
+    return await TAURI_INVOKE("list_permission_rules", { includeRevoked });
+},
+/**
+ * Take back a rule: the calls it covered need approval again.
+ */
+async revokePermissionRule(id: number) : Promise<boolean> {
+    return await TAURI_INVOKE("revoke_permission_rule", { id });
+},
+/**
+ * Starkline's permission policy: every rule and whether it runs on its own,
+ * asks first, or never runs on its own.
+ */
+async permissionPolicy() : Promise<PolicyRule[]> {
+    return await TAURI_INVOKE("permission_policy");
+},
+/**
+ * What Starkline can do with an agent on each kind of provider, as built.
+ */
+async providerCapabilities() : Promise<ProviderCapabilities[]> {
+    return await TAURI_INVOKE("provider_capabilities");
+},
+/**
+ * The models a provider offers, as its CLI lists them (asked off the main thread).
+ */
+async providerModels(engineId: string) : Promise<Result<ModelChoice[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("provider_models", { engineId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Every automation, by name.
+ */
+async listAutomations() : Promise<Automation[]> {
+    return await TAURI_INVOKE("list_automations");
+},
+/**
+ * Create an automation (no id) or change one; it's checked before it's saved.
+ */
+async saveAutomation(input: AutomationInput) : Promise<Result<Automation, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_automation", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Pause an automation or turn it back on (its next run counts from now).
+ */
+async setAutomationEnabled(id: number, enabled: boolean) : Promise<Result<Automation, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_automation_enabled", { id, enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteAutomation(id: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_automation", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Run an automation now, outside its schedule.
+ */
+async runAutomationNow(id: number) : Promise<Result<AutomationRun, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("run_automation_now", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Don't make up a missed run; wait for the next one.
+ */
+async skipMissedRun(id: number) : Promise<void> {
+    await TAURI_INVOKE("skip_missed_run", { id });
+},
+/**
+ * An automation's runs, newest first.
+ */
+async listAutomationRuns(id: number) : Promise<AutomationRun[]> {
+    return await TAURI_INVOKE("list_automation_runs", { id });
+},
+/**
  * An agent's durable memory (the markdown it curates across sessions).
  */
 async getMemory(agentId: string) : Promise<string> {
@@ -149,7 +324,7 @@ async requestAssist(from: string, to: string, note: string, cols: number, rows: 
  * Chat with an agent (headless Claude Code). Starts a session in `dir` (or the
  * agent's recorded workdir / current project) on first message.
  */
-async chatSend(agentId: string, text: string, dir: string | null) : Promise<Result<null, string>> {
+async chatSend(agentId: string, text: string, dir: string | null) : Promise<Result<number | null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("chat_send", { agentId, text, dir }) };
 } catch (e) {
@@ -211,6 +386,31 @@ async listFiles(dir: string, limit: number | null) : Promise<PathEntry[]> {
 async reviewRespond(id: string, decision: string) : Promise<void> {
     await TAURI_INVOKE("review_respond", { id, decision });
 },
+/**
+ * Everything agents are currently blocked on, oldest first.
+ */
+async pendingReviews() : Promise<ReviewRequest[]> {
+    return await TAURI_INVOKE("pending_reviews");
+},
+/**
+ * What the agent runtime can do right now: installed provider CLIs, the data
+ * store and the agent bridge.
+ */
+async runtimeHealth() : Promise<RuntimeHealth> {
+    return await TAURI_INVOKE("runtime_health");
+},
+/**
+ * Whether Starkline is keeping this Mac awake, and why.
+ */
+async powerState() : Promise<PowerState> {
+    return await TAURI_INVOKE("power_state");
+},
+/**
+ * Allow (or stop allowing) Starkline to keep this Mac awake while agents work.
+ */
+async setKeepAwake(enabled: boolean) : Promise<PowerState> {
+    return await TAURI_INVOKE("set_keep_awake", { enabled });
+},
 async getConfig() : Promise<AppConfig> {
     return await TAURI_INVOKE("get_config");
 },
@@ -242,6 +442,17 @@ async setLighting(mode: string) : Promise<AppConfig> {
     return await TAURI_INVOKE("set_lighting", { mode });
 },
 /**
+ * Change how Starkline looks; nothing about the work changes with it.
+ */
+async setTheme(theme: string) : Promise<Result<AppConfig, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_theme", { theme }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Set the standup mission cadence in minutes (0 = off).
  */
 async setStandupMinutes(minutes: number) : Promise<AppConfig> {
@@ -266,7 +477,7 @@ async resetConfig() : Promise<AppConfig> {
 /** user-defined types **/
 
 /**
- * A member of the Stark Tower roster. `home_x`/`home_y` are tile coordinates
+ * A member of the Starkline roster. `home_x`/`home_y` are tile coordinates
  * of the agent's desk on the pixel lab floor. `figure` selects the sprite
  * silhouette ("masc" | "fem" | "synth").
  */
@@ -295,7 +506,15 @@ model?: string;
 /**
  * Editable character/system prompt.
  */
-personality?: string; home_x: number; home_y: number; enabled?: boolean }
+personality?: string; home_x: number; home_y: number; enabled?: boolean; 
+/**
+ * The agent may start temporary helpers of its own (its provider's subagents).
+ */
+helpers?: boolean; 
+/**
+ * The model those helpers use ("" = the provider's choice).
+ */
+helper_model?: string }
 export type AgentKind = "orchestrator" | "worker" | 
 /**
  * Fixes bugs in THIS app that agents report — not a normal delegation target.
@@ -320,7 +539,15 @@ lighting?: string;
  * orchestrator is periodically nudged to review the board and re-engage
  * stalled workers — the "keeps working while you're away" autonomy.
  */
-standup_minutes?: number; engines: EngineConfig[]; agents: AgentConfig[] }
+standup_minutes?: number; 
+/**
+ * The developer allows Starkline to keep this Mac awake while agents work.
+ */
+keep_awake?: boolean; 
+/**
+ * How Starkline looks: one of [`THEMES`]. Tasks, permissions and providers don't change with it.
+ */
+theme?: string; engines: EngineConfig[]; agents: AgentConfig[] }
 /**
  * How an engine authenticates. `cli-login` = whatever the CLI is already logged
  * into on this machine; `api-key-env` = inject `env` vars (e.g. an API key) into
@@ -332,6 +559,58 @@ export type AuthConfig = { method?: string;
  */
 env?: Partial<{ [key in string]: string }> }
 /**
+ * Work that runs on a schedule, owned by one agent in one folder.
+ */
+export type Automation = { id: number; name: string; agent_id: string; cwd: string; 
+/**
+ * What the owner is asked to do each run.
+ */
+instruction: string; schedule: Schedule; enabled: boolean; 
+/**
+ * When a run was missed (the Mac was asleep or Starkline closed): run_once | skip | ask
+ */
+missed: string; 
+/**
+ * failure | always | never
+ */
+notify: string; 
+/**
+ * A run that takes longer is stopped.
+ */
+max_minutes: number; 
+/**
+ * The developer wants the Mac woken for it (needs the wake helper).
+ */
+wake: boolean; created: number; updated: number; next_run: number | null; last_run: number | null; last_status: string | null }
+/**
+ * What the developer edits.
+ */
+export type AutomationInput = { 
+/**
+ * None to create a new automation.
+ */
+id: number | null; name: string; agent_id: string; cwd: string; instruction: string; schedule: Schedule; enabled: boolean; 
+/**
+ * run_once | skip | ask
+ */
+missed: string; 
+/**
+ * failure | always | never
+ */
+notify: string; max_minutes: number; wake: boolean }
+/**
+ * One run of an automation.
+ */
+export type AutomationRun = { id: number; automation_id: number; scheduled_for: number; started: number | null; finished: number | null; 
+/**
+ * running | succeeded | failed | missed | skipped
+ */
+status: string; task_id: string | null; summary: string; 
+/**
+ * What started it: schedule | late (a missed slot, made up) | you
+ */
+trigger: string }
+/**
  * A bug in the app, reported by an agent for the maintenance agent to fix.
  */
 export type Bug = { id: number; reporter: string; title: string; detail: string; 
@@ -339,6 +618,15 @@ export type Bug = { id: number; reporter: string; title: string; detail: string;
  * open | doing | fixed | wontfix
  */
 status: string; created: number; updated: number }
+export type Capability = { support: Support; 
+/**
+ * One plain sentence on what that means here.
+ */
+note: string }
+/**
+ * The latest result of each distinct check.
+ */
+export type CheckRun = { kind: string; command: string; passed: boolean; at: number; duration_ms: number | null; agent_id: string }
 /**
  * A saved chat — one continuous conversation with an agent, resumable later.
  */
@@ -359,28 +647,344 @@ kind: string; command: string; extra_args?: string[];
 model?: string; auth?: AuthConfig; 
 /**
  * Whether this engine speaks our MCP bridge (delegation, ask_human, the
- * permission gate). Only Claude Code does today; others are basic until
- * their adapter is written.
+ * permission gate). Claude Code, Codex and OpenCode do through their
+ * adapters; a generic CLI doesn't.
  */
 supports_mcp?: boolean; enabled?: boolean }
+export type EngineHealth = { id: string; label: string; kind: string; enabled: boolean; 
+/**
+ * The CLI was found on this Mac.
+ */
+installed: boolean; path: string | null; version: string | null; 
+/**
+ * Whether the CLI has credentials, as it reports itself; None until it has answered.
+ */
+signIn: SignIn | null }
+/**
+ * A file with uncommitted changes in the task's folder.
+ */
+export type FileChange = { path: string; 
+/**
+ * added | modified | deleted | renamed | untracked
+ */
+status: string; added: number | null; removed: number | null }
 export type LedgerEntry = { id: number; ts: number; agent_id: string; kind: string; detail: string; load: number }
+/**
+ * A model an agent can run on.
+ */
+export type ModelChoice = { 
+/**
+ * What the provider is told ("gpt-5.6-sol", "anthropic/claude-sonnet-4-5", "sonnet").
+ */
+id: string; name: string; 
+/**
+ * The provider's own default.
+ */
+default: boolean }
+/**
+ * Something that needed or may interest the developer, kept until they archive it.
+ */
+export type Notification = { id: number; ts: number; 
+/**
+ * approval | question | review | task_ready | task_blocked | check_failed | rule_used
+ */
+kind: string; 
+/**
+ * needs_you | update
+ */
+urgency: string; agent_id: string; task_id: string | null; cwd: string; title: string; body: string; 
+/**
+ * The pending review it stands for, while it can still be answered.
+ */
+review_id: string | null; read: boolean; 
+/**
+ * When it was dealt with, and how ("Allowed once", "Answered", "Closed").
+ */
+handled: number | null; outcome: string | null; 
+/**
+ * The automation it's about (a missed or failed run).
+ */
+automation_id: number | null }
 export type PathEntry = { path: string; dir: boolean }
+/**
+ * A stored rule, as Settings lists it.
+ */
+export type PermissionRule = { id: number; created: number; 
+/**
+ * task | project | everywhere
+ */
+scope: string; 
+/**
+ * For task rules: the task. For project rules: the project folder.
+ */
+task_id: string | null; project: string | null; tool: string; pattern: string; display: string; 
+/**
+ * The policy rule it loosens ("Install or update dependencies").
+ */
+rule: string; 
+/**
+ * "approval" or "never": how strongly the default held this back.
+ */
+tier: string; uses: number; last_used: number | null; revoked: number | null }
+/**
+ * One step of the owner's own plan (its to-do list).
+ */
+export type PlanItem = { content: string; 
+/**
+ * pending | in_progress | completed
+ */
+status: string; 
+/**
+ * How the step reads while it's being done ("Running the tests").
+ */
+active: string | null }
+/**
+ * One rule of the policy, as the interface lists it.
+ */
+export type PolicyRule = { 
+/**
+ * The rule as the developer reads it ("Install or update dependencies").
+ */
+label: string; 
+/**
+ * automatic | approval | never
+ */
+tier: string }
+export type PowerState = { 
+/**
+ * The developer allows Starkline to keep this Mac awake.
+ */
+enabled: boolean; 
+/**
+ * A power assertion is held right now.
+ */
+holding: boolean; 
+/**
+ * Why it is held, or why not, in plain words.
+ */
+reason: string; 
+/**
+ * False where keep-awake isn't available on this platform.
+ */
+supported: boolean }
 export type ProjectInfo = { path: string; name: string }
 export type ProjectsState = { projects: ProjectInfo[]; active: string }
+export type ProviderCapabilities = { 
+/**
+ * claude-code | codex | opencode | generic-cli
+ */
+kind: string; label: string; 
+/**
+ * A chat continues where it left off, even after Starkline restarts.
+ */
+resume: Capability; 
+/**
+ * Starkline sees messages, commands, edits and plans as they happen.
+ */
+events: Capability; 
+/**
+ * Risky calls wait for Starkline's permission gate and your approval.
+ */
+approvals: Capability; 
+/**
+ * The provider confines the agent's commands with the operating system's sandbox.
+ */
+sandbox: Capability; 
+/**
+ * The agent can start temporary helpers of its own.
+ */
+helpers: Capability; 
+/**
+ * Starkline's team tools: delegate, ask you, message teammates, report bugs.
+ */
+team_tools: Capability }
+/**
+ * Something an agent is blocked on until the developer decides: a plan, diff,
+ * question or choice (`ask_human`), or a command the permission gate routed.
+ * Kept in app state while pending, so any screen (or a reloaded window) can
+ * list it again.
+ */
+export type ReviewRequest = { id: string; agentId: string; title: string; body: string; 
+/**
+ * plan | diff | findings | questions | choice | mockup | command | permission
+ */
+kind: string; choices: string[]; 
+/**
+ * For `command`: the exact command line. For `permission`: the file, URL or input involved.
+ */
+command: string | null; 
+/**
+ * For `command` and `permission`: the folder the agent is working in.
+ */
+cwd: string | null; 
+/**
+ * For `command` and `permission`: the policy rule that stopped it.
+ */
+rule: string | null; 
+/**
+ * For `command` and `permission`: "approval" or "never" (never runs on its own).
+ */
+tier: string | null; 
+/**
+ * The task the agent is working on, if any.
+ */
+taskId: string | null; 
+/**
+ * For `command` and `permission`: what a rule from this request would allow
+ * ("`npm install` commands"); None when no rule can safely cover it.
+ */
+grant: string | null; 
+/**
+ * For `command` and `permission`: the project a project-wide rule would apply to.
+ */
+project: string | null; 
+/**
+ * Unix ms when the agent asked.
+ */
+created: number }
+export type RuntimeHealth = { 
+/**
+ * Where agent sessions run. "app": inside this window's process, so they
+ * end when Starkline quits (until the standalone supervisor ships).
+ */
+host: string; engines: EngineHealth[]; 
+/**
+ * The local database answers queries.
+ */
+dataStore: boolean; 
+/**
+ * The socket agents use to delegate, ask and request approval is listening.
+ */
+bridge: boolean; 
+/**
+ * Why the bridge couldn't start, when it couldn't.
+ */
+bridgeError: string | null; 
+/**
+ * Provider sessions running right now.
+ */
+liveSessions: number; 
+/**
+ * Node.js, which runs the bridge every agent uses to delegate, ask and get
+ * approval: its version, or None when it isn't installed.
+ */
+node: string | null; nodePath: string | null; 
+/**
+ * Agent sessions keep running with the window closed.
+ */
+background: boolean }
+export type Schedule = 
+/**
+ * Every day at a local time ("HH:MM").
+ */
+{ kind: "daily"; time: string } | 
+/**
+ * Monday to Friday at a local time.
+ */
+{ kind: "weekdays"; time: string } | 
+/**
+ * One day a week (0 = Monday … 6 = Sunday) at a local time.
+ */
+{ kind: "weekly"; day: number; time: string } | 
+/**
+ * Every so many hours after the previous run.
+ */
+{ kind: "everyHours"; hours: number }
+/**
+ * A provider CLI's own account of whether it can reach its models.
+ */
+export type SignIn = { signedIn: boolean; 
+/**
+ * How ("ChatGPT", "API key", "7 credentials"), when the CLI says.
+ */
+detail: string | null }
 /**
  * One persisted chat turn — enough to rebuild the transcript UI on reopen.
  */
 export type StoredMessage = { id: number; ts: number; role: string; text?: string | null; tool?: string | null; detail?: string | null }
+export type Support = "yes" | 
 /**
- * A durable task card on the board. Delegations create one (`doing`) and close
- * it (`done` / `blocked`) so in-flight work is trackable across turns and
- * survives the UI closing — the flow upgrade munder-difflin's tasks.json gives.
+ * Works in part (no built-in provider is limited today, but the interface shows it).
  */
-export type Task = { id: string; ts: number; updated: number; title: string; assignee: string; 
+"limited" | "no"
 /**
- * todo | doing | blocked | done
+ * A unit of work with an accountable owner. The developer starts one from Work;
+ * a delegation starts a child of the delegating agent's task. It is durable, so
+ * in-flight and finished work survives the app closing.
  */
-status: string; detail?: string | null }
+export type Task = { id: string; ts: number; updated: number; title: string; 
+/**
+ * The agent accountable for the work.
+ */
+assignee: string; 
+/**
+ * todo (queued) | doing | blocked | done (ready for review) | closed
+ */
+status: string; detail?: string | null; 
+/**
+ * The folder the task runs in ("" for tasks recorded before this existed).
+ */
+cwd: string; 
+/**
+ * The conversation the owner works on this task in.
+ */
+conversation_id: number | null; 
+/**
+ * The task this one was delegated from.
+ */
+parent_id: string | null; 
+/**
+ * Who asked for it: "you" (the developer) or the delegating agent's id.
+ */
+requested_by: string; 
+/**
+ * The full request, as asked.
+ */
+prompt: string; 
+/**
+ * The git branch checked out when the task started ("" outside a repository).
+ */
+branch: string; 
+/**
+ * When it started running, and when it stopped (finished, blocked or closed).
+ */
+started: number | null; finished: number | null; 
+/**
+ * The owner's own plan, as steps done out of steps total (from its to-do list).
+ */
+plan_done: number | null; plan_total: number | null }
+/**
+ * Everything the task screen shows.
+ */
+export type TaskDetail = { task: Task; children: Task[]; events: TaskEvent[]; plan: PlanItem[]; checks: CheckRun[]; 
+/**
+ * Uncommitted changes in the task's folder right now.
+ */
+changes: FileChange[]; 
+/**
+ * The branch checked out in the task's folder right now.
+ */
+branch: string | null; 
+/**
+ * The owner's conversation for this task.
+ */
+messages: StoredMessage[] }
+/**
+ * One thing that happened in a task, in order. Append-only.
+ */
+export type TaskEvent = { id: number; task_id: string; ts: number; agent_id: string; 
+/**
+ * created | queued | started | delegated | file | command | verification | plan | helper | approval | status
+ */
+kind: string; 
+/**
+ * One readable line.
+ */
+summary: string; 
+/**
+ * Kind-specific details as JSON ("" when there are none).
+ */
+data: string }
 
 /** tauri-specta globals **/
 

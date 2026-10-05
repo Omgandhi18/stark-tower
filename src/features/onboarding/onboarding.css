@@ -1,0 +1,232 @@
+.onboarding .dialog-head {
+  padding-top: var(--space-6);
+}
+
+.onboarding .dialog-title {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  letter-spacing: -0.01em;
+}
+
+.onboarding .dialog-content {
+  display: grid;
+  gap: var(--space-5);
+  min-height: 300px;
+  align-content: start;
+}
+
+.onboarding .dialog-actions {
+  align-items: center;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-4);
+}
+
+.onboarding-spacer {
+  flex: 1;
+}
+
+.onboarding-error {
+  color: var(--state-danger);
+  font-size: var(--text-sm);
+}
+
+.onboarding-steps {
+  display: flex;
+  gap: var(--space-5);
+  margin: 0;
+  padding: 0 0 var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  list-style: none;
+}
+
+.onboarding-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.onboarding-step-mark {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  font-size: var(--text-2xs);
+}
+
+.onboarding-step.is-current {
+  color: var(--text);
+}
+
+.onboarding-step.is-current .onboarding-step-mark {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.onboarding-step.is-done .onboarding-step-mark {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.onboarding-facts {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboarding-facts li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-secondary);
+}
+
+.onboarding-fact-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: var(--radius-control);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.onboarding-providers,
+.onboarding-projects {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+}
+
+.onboarding-choices {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.onboarding-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-raised);
+  text-align: left;
+  transition: border-color var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out);
+}
+
+.onboarding-choice:hover {
+  border-color: var(--border-strong);
+}
+
+.onboarding-choice[aria-checked="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.onboarding-radio {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+}
+
+.onboarding-choice[aria-checked="true"] .onboarding-radio {
+  border: 5px solid var(--accent);
+}
+
+.onboarding-choice-text {
+  display: grid;
+  gap: 2px;
+}
+
+.onboarding-choice-name {
+  font-weight: var(--weight-semibold);
+}
+
+.onboarding-choice-meta {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.onboarding-provider-foot {
+  margin-top: calc(-1 * var(--space-1));
+}
+
+.onboarding-providers .field {
+  width: 100%;
+}
+
+.onboarding-project-list {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboarding-project-list li {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface-raised);
+}
+
+.onboarding-project-name {
+  font-weight: var(--weight-semibold);
+}
+
+.onboarding-project-path {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.onboarding-note {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.onboarding-team {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboarding-team li {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: var(--space-4) var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface-raised);
+  text-align: center;
+}
+
+.onboarding-team-name {
+  margin-top: var(--space-1);
+  font-weight: var(--weight-semibold);
+}
+
+.onboarding-team-role {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}

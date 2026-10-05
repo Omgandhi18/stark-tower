@@ -14,7 +14,7 @@ static SESSION_GEN: AtomicU64 = AtomicU64::new(1);
 
 /// A task id that stays unique across launches: cards are upserted by id, so a
 /// counter that restarts at 1 would overwrite earlier tasks.
-fn next_task_id() -> String {
+pub(crate) fn next_task_id() -> String {
     static LAUNCH_MS: OnceLock<u128> = OnceLock::new();
     let launch = *LAUNCH_MS.get_or_init(|| {
         std::time::SystemTime::now()
@@ -23,11 +23,6 @@ fn next_task_id() -> String {
             .unwrap_or(0)
     });
     format!("task-{launch:x}-{}", TASK_SEQ.fetch_add(1, Ordering::Relaxed))
-}
-
-/// Nudge the UI to reload the task board.
-fn emit_tasks_changed(app: &tauri::AppHandle) {
-    let _ = app.emit("tasks://changed", ());
 }
 
 /// The agent's engine with its `auth.env` secrets hydrated from the secret store
@@ -51,15 +46,40 @@ pub(crate) fn floor_log(app: &tauri::AppHandle, agent_id: &str, kind: &str, deta
     }
 }
 
-/// A persistent headless Claude Code conversation for one agent, driven over
-/// stream-json. No pty — so no trust dialog and no terminal crash class.
+/// A persistent headless conversation for one agent, on its provider. No pty,
+/// so no trust dialog and no terminal crash class.
 pub struct ChatSession {
     child: Child,
-    pub(crate) stdin: ChildStdin,
+    input: Input,
     pub cwd: String,
     /// Which spawn this is. A stop, new chat or folder switch replaces the session
     /// under the same agent id; the replaced session's reader must leave it alone.
     gen: u64,
+}
+
+/// An adapter's way to hand its provider a new user turn.
+pub(crate) type TurnSender = Box<dyn Fn(&str) -> Result<(), String> + Send>;
+
+/// How a session takes the developer's next message.
+pub(crate) enum Input {
+    /// Claude Code: stream-json user messages on stdin.
+    StreamJson(ChildStdin),
+    /// Codex or OpenCode: the adapter starts a turn on the thread it opened.
+    Turns(TurnSender),
+}
+
+impl ChatSession {
+    /// Hand the agent a new user turn.
+    pub(crate) fn send_turn(&mut self, text: &str) -> Result<(), String> {
+        match &mut self.input {
+            Input::StreamJson(stdin) => {
+                let msg = serde_json::json!({ "type": "user", "message": { "role": "user", "content": text } });
+                stdin.write_all(format!("{msg}\n").as_bytes()).map_err(|e| e.to_string())?;
+                stdin.flush().map_err(|e| e.to_string())
+            }
+            Input::Turns(start) => start(text),
+        }
+    }
 }
 
 impl Drop for ChatSession {
@@ -115,6 +135,48 @@ pub struct ChatEvent {
     pub detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    /// The transcript row this event was stored as, when it was stored.
+    #[serde(rename = "messageId", skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<i64>,
+    /// The conversation this belongs to, so views of other conversations ignore it.
+    #[serde(rename = "conversationId", skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<i64>,
+    /// The task this belongs to, if the agent is working on one.
+    #[serde(rename = "taskId", skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+}
+
+/// Where a session's output belongs.
+#[derive(Clone, Debug, Default)]
+pub struct Sink {
+    /// The conversation messages are saved in; None means the agent's active one.
+    pub conversation: Option<i64>,
+    /// The task it belongs to; None means whatever task the agent's chat session is on.
+    pub task: Option<String>,
+    /// A persistent chat session: its session id is saved for resuming, and the
+    /// loop breaker may end it.
+    pub persistent: bool,
+}
+
+impl Sink {
+    /// The agent's ongoing chat session.
+    pub fn chat() -> Sink {
+        Sink { conversation: None, task: None, persistent: true }
+    }
+
+    /// A one-shot run for a delegated task, in that task's own conversation.
+    pub fn task(conversation: i64, task: String) -> Sink {
+        Sink { conversation: Some(conversation), task: Some(task), persistent: false }
+    }
+
+    fn conversation_for(&self, app: &tauri::AppHandle, agent_id: &str) -> Option<i64> {
+        self.conversation
+            .or_else(|| app.try_state::<crate::AppState>().map(|s| s.ledger.active_conversation(agent_id)))
+    }
+
+    fn task_for(&self, app: &tauri::AppHandle, agent_id: &str) -> Option<String> {
+        self.task.clone().or_else(|| crate::tasks::current(app, agent_id))
+    }
 }
 
 
@@ -122,21 +184,53 @@ fn emit(app: &tauri::AppHandle, ev: ChatEvent) {
     let _ = app.emit("chat://event", ev);
 }
 
-/// Append a message to the durable transcript (so it survives the UI closing).
-pub(crate) fn persist(
+/// Store a transcript message where `sink` says, then announce it with its
+/// stored id, so the UI never shows it twice when a transcript load and the
+/// live stream overlap.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn record_in(
     app: &tauri::AppHandle,
+    sink: &Sink,
     agent_id: &str,
+    kind: &str,
     role: &str,
     text: Option<&str>,
     tool: Option<&str>,
     detail: Option<&str>,
 ) {
-    if let Some(state) = app.try_state::<crate::AppState>() {
-        state.ledger.add_message(agent_id, role, text, tool, detail);
-    }
+    let conversation = sink.conversation_for(app, agent_id);
+    let message_id = match (app.try_state::<crate::AppState>(), conversation) {
+        (Some(state), Some(conv)) => state.ledger.add_message_to(conv, agent_id, role, text, tool, detail),
+        _ => None,
+    };
+    emit(
+        app,
+        ChatEvent {
+            agent_id: agent_id.to_string(),
+            kind: kind.to_string(),
+            text: text.map(str::to_string),
+            tool: tool.map(str::to_string),
+            detail: detail.map(str::to_string),
+            cwd: None,
+            message_id,
+            conversation_id: conversation,
+            task_id: sink.task_for(app, agent_id),
+        },
+    );
 }
 
-pub(crate) fn simple(app: &tauri::AppHandle, agent_id: &str, kind: &str, text: Option<String>) {
+/// A system line in the agent's chat: saved and shown.
+pub(crate) fn note(app: &tauri::AppHandle, agent_id: &str, text: &str) {
+    record_in(app, &Sink::chat(), agent_id, "system", "system", Some(text), None, None);
+}
+
+/// A system line in a particular sink (a delegated task's own conversation).
+pub(crate) fn note_in(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, text: &str) {
+    record_in(app, sink, agent_id, "system", "system", Some(text), None, None);
+}
+
+/// Announce something without saving it (errors, session state).
+pub(crate) fn simple_in(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, kind: &str, text: Option<String>) {
     emit(
         app,
         ChatEvent {
@@ -146,8 +240,31 @@ pub(crate) fn simple(app: &tauri::AppHandle, agent_id: &str, kind: &str, text: O
             tool: None,
             detail: None,
             cwd: None,
+            message_id: None,
+            conversation_id: sink.conversation.or_else(|| {
+                app.try_state::<crate::AppState>().and_then(|s| s.ledger.current_conversation(agent_id))
+            }),
+            task_id: sink.task_for(app, agent_id),
         },
     );
+}
+
+pub(crate) fn simple(app: &tauri::AppHandle, agent_id: &str, kind: &str, text: Option<String>) {
+    simple_in(app, &Sink::chat(), agent_id, kind, text);
+}
+
+/// Save a developer message in the agent's active conversation and send it,
+/// starting the session in `cwd` if needed. Returns the stored message's id.
+pub fn send_user_turn(app: &tauri::AppHandle, agent_id: &str, text: &str, cwd: &str) -> Result<Option<i64>, String> {
+    let state = app.state::<crate::AppState>();
+    state.workdirs.lock().unwrap().insert(agent_id.to_string(), cwd.to_string());
+    let e = state.ledger.record(agent_id, "chat", &truncate(text, 80), 1);
+    let _ = app.emit("ledger://entry", e);
+    let message_id = state.ledger.add_message(agent_id, "user", Some(text), None, None);
+    let _ = app.emit("conversations://changed", ()); // a title/order may have changed
+    let sock = state.sock_path.clone();
+    send(app, agent_id, text, cwd, &sock)?;
+    Ok(message_id)
 }
 
 pub(crate) fn truncate(s: &str, max: usize) -> String {
@@ -230,11 +347,7 @@ pub fn resolve_program(cmd: &str) -> Option<String> {
 fn steer(app: &tauri::AppHandle, agent_id: &str, text: &str) {
     if let Some(state) = app.try_state::<crate::AppState>() {
         if let Some(s) = state.chat.sessions.lock().unwrap().get_mut(agent_id) {
-            let msg = serde_json::json!({
-                "type": "user", "message": { "role": "user", "content": text }
-            });
-            let _ = s.stdin.write_all(format!("{}\n", msg).as_bytes());
-            let _ = s.stdin.flush();
+            let _ = s.send_turn(text);
         }
     }
 }
@@ -244,7 +357,8 @@ fn steer(app: &tauri::AppHandle, agent_id: &str, text: &str) {
 /// first (nudge it to change course), then CONSTRAIN (pause + surface), then STOP
 /// (end a live persistent session). One-shot workers are bounded so they cap at
 /// Constrained. A clean turn de-escalates via breaker::calm.
-fn trip_headless_breaker(app: &tauri::AppHandle, agent_id: &str, tool: &str, persistent: bool) {
+fn trip_headless_breaker(app: &tauri::AppHandle, agent_id: &str, tool: &str, sink: &Sink) {
+    let persistent = sink.persistent;
     use crate::breaker::Level;
     // Persistent sessions may be killed (hard_stop); one-shots can't, so cap them.
     let level = crate::breaker::bump(agent_id, persistent);
@@ -253,20 +367,19 @@ fn trip_headless_breaker(app: &tauri::AppHandle, agent_id: &str, tool: &str, per
     let (kind, note) = match level {
         Level::Steering => (
             "steer",
-            format!("Steering: repeated `{tool}` calls — nudging the agent to change course."),
+            format!("Steering: repeated `{tool}` calls, so the agent was nudged to change course."),
         ),
         Level::Constrained => (
             "containment",
-            format!("Contained: still looping on `{tool}` after a steer — paused."),
+            format!("Contained: still looping on `{tool}` after a nudge, so the agent was paused."),
         ),
         Level::Stopped => (
             "containment",
-            "Stopped: runaway loop persisted — session ended.".to_string(),
+            "Stopped: the loop kept going, so the session was ended.".to_string(),
         ),
         Level::Healthy => return,
     };
-    simple(app, agent_id, "system", Some(note.clone()));
-    persist(app, agent_id, "system", Some(&note), None, None);
+    note_in(app, sink, agent_id, &note);
     if let Some(state) = app.try_state::<crate::AppState>() {
         let e = state.ledger.record(agent_id, kind, &note, 9);
         let _ = app.emit("ledger://entry", e);
@@ -296,36 +409,141 @@ reconsider your approach, and either take a genuinely different step or report w
 /// A friendly error when an engine's CLI isn't installed / on PATH.
 fn missing_engine_error(engine: &EngineConfig) -> String {
     format!(
-        "{} (`{}`) wasn't found. Install it and make sure it's on your PATH, then reopen Stark Tower.",
+        "{} (`{}`) wasn't found. Install it and make sure it's on your PATH, then try again.",
         engine.label, engine.command
     )
 }
 
-/// Build the headless command for an agent's session on a given engine.
-///
-/// The Claude Code adapter (`kind == "claude-code"`) drives our full protocol:
-/// stream-json in/out, the MCP bridge (delegate / ask_human / approve gate), and
-/// session resume. Other engine kinds only speak stream-json today if they
-/// happen to; their dedicated adapters (Codex, OpenCode, …) land in later slices,
-/// so for now non-Claude kinds spawn `command + extra_args` best-effort. The
-/// model flag and any auth env vars are applied for every kind.
-#[allow(clippy::too_many_arguments)]
-fn build_headless(
-    engine: &EngineConfig,
-    model: &str,
-    cwd: &str,
-    agent_id: Option<&str>,
-    is_orchestrator: bool,
-    system_prompt: Option<&str>,
-    resume: Option<&str>,
-    sock_path: &str,
-    sock_token: &str,
-    memory_file: &str,
-) -> Command {
-    // Resolve to an absolute path so a Finder-launched app finds nvm/brew CLIs.
-    let program = resolve_program(&engine.command).unwrap_or_else(|| engine.command.clone());
-    let mut cmd = Command::new(&program);
+/// How long the pre-tool gate hook may take to get the app's verdict.
+const GATE_HOOK_TIMEOUT_SECS: u64 = 30;
+
+/// Single-quote a path for the shell that runs hook commands.
+fn shell_quote(path: &str) -> String {
+    format!("'{}'", path.replace('\'', r"'\''"))
+}
+
+/// Everything an agent's provider session starts with, whichever provider it is.
+pub(crate) struct Launch {
+    pub engine: EngineConfig,
+    pub program: String,
+    pub model: String,
+    pub cwd: String,
+    pub agent_id: String,
+    pub orchestrator: bool,
+    pub system_prompt: String,
+    /// The provider's own session id to continue, if the conversation has one.
+    pub resume: Option<String>,
+    pub sock_path: String,
+    pub sock_token: String,
+    pub memory_file: String,
+    pub scripts: crate::health::BridgeScripts,
+    /// The Node.js that runs the bridge and the gate hook: the one Diagnostics reports,
+    /// by absolute path, so it doesn't depend on the PATH a Finder-launched app gets.
+    pub node: String,
+    /// The agent may start temporary helpers, and on which model ("" = the provider's choice).
+    pub helpers: bool,
+    pub helper_model: String,
+}
+
+/// Gather an agent's launch settings; fails when its provider's CLI isn't installed.
+pub(crate) fn launch_for(app: &tauri::AppHandle, agent_id: &str, cwd: &str, resume: Option<String>) -> Result<Launch, String> {
+    let engine = engine_for_spawn(app, agent_id);
+    let program = resolve_program(&engine.command).ok_or_else(|| missing_engine_error(&engine))?;
+    let state = app.state::<crate::AppState>();
+    let (helpers, helper_model) = state
+        .config
+        .lock()
+        .unwrap()
+        .agent(agent_id)
+        .map(|a| (a.helpers, a.helper_model.clone()))
+        .unwrap_or((true, String::new()));
+    Ok(Launch {
+        model: crate::prompts::agent_model(app, agent_id, &engine),
+        program,
+        cwd: cwd.to_string(),
+        agent_id: agent_id.to_string(),
+        orchestrator: crate::prompts::agent_is_orchestrator(app, agent_id),
+        system_prompt: crate::prompts::system_prompt_for(app, agent_id),
+        resume,
+        sock_path: state.sock_path.clone(),
+        sock_token: state.sock_token.clone(),
+        memory_file: crate::prompts::memory_file_path(app, agent_id),
+        scripts: state.scripts.clone(),
+        node: resolve_program("node").unwrap_or_else(|| "node".into()),
+        helpers,
+        helper_model,
+        engine,
+    })
+}
+
+/// Starkline's bridge as an MCP server: the tools that let an agent delegate
+/// (the orchestrator only), ask the developer, message teammates and report bugs.
+pub(crate) struct BridgeServer {
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
+pub(crate) fn bridge_server(launch: &Launch) -> BridgeServer {
+    let role = if launch.orchestrator { "orchestrator" } else { "worker" };
+    BridgeServer {
+        command: launch.node.clone(),
+        args: vec![launch.scripts.mcp.clone()],
+        env: vec![
+            ("STARK_DELEGATE_SOCK".into(), launch.sock_path.clone()),
+            ("STARK_AGENT_ID".into(), launch.agent_id.clone()),
+            ("STARK_ROLE".into(), role.into()),
+            ("STARK_DELEGATE_TOKEN".into(), launch.sock_token.clone()),
+        ],
+    }
+}
+
+/// The environment every provider process gets: a PATH that finds Homebrew and
+/// nvm tools from a Finder launch, the provider's API keys, the agent's memory file.
+pub(crate) fn provider_env(cmd: &mut Command, launch: &Launch) {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let extra = format!("{home}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin");
+    let path = match std::env::var("PATH") {
+        Ok(p) => format!("{extra}:{p}"),
+        Err(_) => extra,
+    };
+    cmd.env("PATH", path);
+    // Values are hydrated from the secret store before we get here; skip any
+    // still-sentinel (no stored secret) or empty entry.
+    for (k, v) in &launch.engine.auth.env {
+        if !v.trim().is_empty() && v != crate::secrets::SENTINEL {
+            cmd.env(k, v);
+        }
+    }
+    if !launch.memory_file.is_empty() {
+        cmd.env("STARK_MEMORY_FILE", &launch.memory_file);
+    }
+}
+
+/// Pipes for the protocol, and the provider in its own process group so the
+/// whole tree (it, its shells, its MCP servers) can be stopped together.
+pub(crate) fn detach(cmd: &mut Command) {
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+}
+
+/// Build the headless Claude Code command for an agent's session: stream-json in
+/// and out, the MCP bridge (delegate / ask_human / approve), the pre-tool gate,
+/// and session resume.
+fn build_headless(launch: &Launch) -> Command {
+    let engine = &launch.engine;
+    let mut cmd = Command::new(&launch.program);
     let mut args: Vec<String> = Vec::new();
+    let model = launch.model.as_str();
+    let sock_path = launch.sock_path.as_str();
+    let sock_token = launch.sock_token.as_str();
 
     if engine.kind == "claude-code" {
         args.extend(
@@ -345,12 +563,20 @@ fn build_headless(
 
         // Resume the stored session so the conversation continues with full
         // context; the prior session already carries the system prompt.
-        if let Some(sid) = resume {
+        if let Some(sid) = &launch.resume {
             args.push("--resume".into());
-            args.push(sid.to_string());
-        } else if let Some(prompt) = system_prompt {
+            args.push(sid.clone());
+        } else if !launch.system_prompt.is_empty() {
             args.push("--append-system-prompt".into());
-            args.push(prompt.to_string());
+            args.push(launch.system_prompt.clone());
+        }
+
+        // Temporary helpers are Claude Code's subagents (the Task tool).
+        if !launch.helpers {
+            args.push("--disallowedTools".into());
+            args.push("Task,Agent".into());
+        } else if !launch.helper_model.trim().is_empty() {
+            cmd.env("CLAUDE_CODE_SUBAGENT_MODEL", launch.helper_model.trim());
         }
 
         if !model.trim().is_empty() {
@@ -360,9 +586,10 @@ fn build_headless(
 
         // The Stark bridge MCP: ask_human (everyone) + delegate (JARVIS only),
         // plus the permission gate. Only when the engine supports MCP.
-        if engine.supports_mcp {
-            if let Some(aid) = agent_id {
-                let tools = if is_orchestrator {
+        {
+            {
+                let aid = launch.agent_id.as_str();
+                let tools = if launch.orchestrator {
                     "mcp__stark__ask_human,mcp__stark__delegate,mcp__stark__message,mcp__stark__report_bug"
                 } else {
                     "mcp__stark__ask_human,mcp__stark__message,mcp__stark__report_bug"
@@ -370,67 +597,41 @@ fn build_headless(
                 args.push("--allowedTools".into());
                 args.push(tools.into());
                 args.push("--mcp-config".into());
-                let mjs = format!("{}/mcp/delegate-mcp.mjs", env!("CARGO_MANIFEST_DIR"));
-                let role = if is_orchestrator { "orchestrator" } else { "worker" };
+                let server = bridge_server(launch);
+                let env: serde_json::Map<String, serde_json::Value> = server.env.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))).collect();
                 let bridge = serde_json::json!({
-                    "mcpServers": {
-                        "stark": {
-                            "command": "node",
-                            "args": [mjs],
-                            "env": {
-                                "STARK_DELEGATE_SOCK": sock_path,
-                                "STARK_AGENT_ID": aid,
-                                "STARK_ROLE": role,
-                                "STARK_DELEGATE_TOKEN": sock_token
-                            }
-                        }
-                    }
+                    "mcpServers": { "stark": { "command": server.command, "args": server.args, "env": env } }
                 });
                 args.push(bridge.to_string());
                 args.push("--permission-prompt-tool".into());
                 args.push("mcp__stark__approve".into());
+                // Every tool call is checked against Starkline's policy first, so the
+                // developer's own Claude allow rules can't wave a risky call through.
+                let hook = launch.scripts.hook.clone();
+                let settings = serde_json::json!({
+                    "hooks": {
+                        "PreToolUse": [{
+                            "matcher": "*",
+                            "hooks": [{ "type": "command", "command": format!("{} {}", shell_quote(&launch.node), shell_quote(&hook)), "timeout": GATE_HOOK_TIMEOUT_SECS }]
+                        }]
+                    }
+                });
+                args.push("--settings".into());
+                args.push(settings.to_string());
+                cmd.env("STARK_DELEGATE_SOCK", sock_path);
+                cmd.env("STARK_DELEGATE_TOKEN", sock_token);
+                cmd.env("STARK_AGENT_ID", aid);
             }
         }
     } else {
-        // Best-effort for not-yet-adapted engines; a real adapter replaces this.
+        // A generic CLI: started with its own arguments; it can't speak Starkline's protocol.
         args.extend(engine.extra_args.iter().cloned());
     }
 
     cmd.args(&args);
-    cmd.current_dir(cwd);
-
-    let home = std::env::var("HOME").unwrap_or_default();
-    let extra = format!("{home}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin");
-    let path = match std::env::var("PATH") {
-        Ok(p) => format!("{extra}:{p}"),
-        Err(_) => extra,
-    };
-    cmd.env("PATH", path);
-    // Inject the engine's auth env (API keys etc.) so users can bring their own.
-    // Values are hydrated from the secret store before we get here; skip any
-    // still-sentinel (no stored secret) or empty entry.
-    for (k, v) in &engine.auth.env {
-        if !v.trim().is_empty() && v != crate::secrets::SENTINEL {
-            cmd.env(k, v);
-        }
-    }
-    // The agent's durable memory file (all engines).
-    if !memory_file.is_empty() {
-        cmd.env("STARK_MEMORY_FILE", memory_file);
-    }
-    cmd.stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    // Put the agent in its own session/process group so we can later kill the
-    // whole tree (it + any Bash/MCP children) instead of orphaning them.
-    #[cfg(unix)]
-    unsafe {
-        use std::os::unix::process::CommandExt;
-        cmd.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
-    }
+    cmd.current_dir(&launch.cwd);
+    provider_env(&mut cmd, launch);
+    detach(&mut cmd);
     cmd
 }
 
@@ -458,38 +659,163 @@ fn summarize_tool(name: &str, input: &serde_json::Value) -> String {
     }
 }
 
-/// Parse one stream-json line and emit the relevant chat event(s). When
-/// `record_session` is set (persistent sessions, not one-shot delegations) the
-/// init event's session id is stored so the chat can later be resumed.
-fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, record_session: bool) {
+// ---- What any provider's session reports ------------------------------------
+// Every adapter (Claude Code's stream-json, Codex's app server, OpenCode over
+// ACP) translates its provider's events into these, in Claude Code's tool
+// vocabulary (Bash, Edit, Write, Read, TodoWrite, ...), so the transcript, the
+// task engine and the loop guard behave the same whichever provider runs.
+
+/// The session is ready. A persistent session's id is stored so the chat resumes.
+pub(crate) fn session_ready(app: &tauri::AppHandle, agent_id: &str, sink: &Sink, session_id: Option<&str>, cwd: Option<String>) {
+    if sink.persistent {
+        if let (Some(c), Some(sid)) = (cwd.as_deref(), session_id) {
+            if let Some(state) = app.try_state::<crate::AppState>() {
+                let conv = state.ledger.active_conversation(agent_id);
+                state.ledger.set_conversation_session(conv, sid, c);
+            }
+        }
+    }
+    emit(
+        app,
+        ChatEvent {
+            agent_id: agent_id.to_string(),
+            kind: "init".into(),
+            text: None,
+            tool: None,
+            detail: None,
+            cwd,
+            message_id: None,
+            conversation_id: sink.conversation_for(app, agent_id),
+            task_id: sink.task_for(app, agent_id),
+        },
+    );
+    crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
+}
+
+/// The agent said something.
+pub(crate) fn said(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, text: &str) {
+    crate::pty::emit_status(app, agent_id, AgentStatus::Working);
+    if !text.trim().is_empty() {
+        record_in(app, sink, agent_id, "text", "agent", Some(text), None, None);
+    }
+}
+
+/// The agent's reasoning, where the provider shares it.
+pub(crate) fn thought(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, text: &str) {
+    crate::pty::emit_status(app, agent_id, AgentStatus::Working);
+    if !text.trim().is_empty() {
+        record_in(app, sink, agent_id, "thinking", "thinking", Some(text), None, None);
+    }
+}
+
+/// The agent is using a tool: shown, told to the task engine, and checked for loops.
+pub(crate) fn tool_called(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, tool_use_id: &str, name: &str, input: &serde_json::Value) {
+    crate::pty::emit_status(app, agent_id, AgentStatus::Working);
+    let detail = summarize_tool(name, input);
+    record_in(app, sink, agent_id, "tool", "tool", None, Some(name), Some(&detail));
+    let task = sink.task_for(app, agent_id);
+    crate::tasks::tool_use(app, agent_id, task.as_deref(), tool_use_id, name, input);
+    // Runaway loop guard for headless sessions: trip if the same call repeats too often.
+    let sig = format!("{name}|{detail}");
+    if crate::breaker::is_runaway(crate::breaker::note_tool_call(agent_id, &sig)) {
+        crate::breaker::reset(agent_id);
+        trip_headless_breaker(app, agent_id, name, sink);
+    }
+}
+
+/// A tool call came back; checks are judged by it.
+pub(crate) fn tool_returned(app: &tauri::AppHandle, tool_use_id: &str, is_error: bool) {
+    crate::tasks::tool_result(app, tool_use_id, is_error);
+}
+
+/// What a turn used: its cost where the provider reports one, and how full the context is.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct TurnUsage {
+    pub cost_usd: Option<f64>,
+    pub context_tokens: u64,
+}
+
+/// The agent's turn ended: the transcript, the HUD, the loop guard, delegation
+/// and the task engine all hear about it.
+pub(crate) fn turn_finished(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, text: Option<String>, usage: TurnUsage) {
+    emit(
+        app,
+        ChatEvent {
+            agent_id: agent_id.to_string(),
+            kind: "result".into(),
+            text,
+            tool: None,
+            detail: usage.cost_usd.map(|c| format!("${c:.4}")),
+            cwd: None,
+            message_id: None,
+            conversation_id: sink.conversation_for(app, agent_id),
+            task_id: sink.task_for(app, agent_id),
+        },
+    );
+    let _ = app.emit(
+        "usage://update",
+        serde_json::json!({
+            "agentId": agent_id,
+            "costUsd": usage.cost_usd.unwrap_or(0.0),
+            "contextTokens": usage.context_tokens,
+        }),
+    );
+    crate::breaker::reset(agent_id); // turn ended cleanly: clear the loop guard
+    crate::breaker::step_down(agent_id); // and de-escalate the ladder one rung
+    crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
+    // The orchestrator's turn just ended: if it dispatched workers this turn, seal
+    // the batch so it flushes back once every worker finishes.
+    if crate::prompts::agent_is_orchestrator(app, agent_id) {
+        crate::delegation::seal_batch(app);
+    }
+    if sink.persistent {
+        crate::tasks::turn_ended(app, agent_id);
+    }
+}
+
+/// The provider reported an error the developer should see.
+pub(crate) fn failed(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, message: &str) {
+    simple_in(app, sink, agent_id, "error", Some(message.to_string()));
+}
+
+/// Claude Code's error text, with what to do when it's about sign-in.
+pub(crate) fn claude_error(text: &str) -> String {
+    let text = text.trim();
+    let signed_out = ["Failed to authenticate", "OAuth", "Invalid API key", "401", "not logged in", "Not logged in"]
+        .iter()
+        .any(|s| text.contains(s));
+    if signed_out {
+        format!("Claude Code isn't signed in, or its sign-in expired ({text}). Run `claude auth login` in Terminal, then send your message again.")
+    } else if text.is_empty() {
+        "Claude Code stopped with an error.".into()
+    } else {
+        text.to_string()
+    }
+}
+
+/// A `result` line that reports a failure (sign-in, limits, the API), not an answer.
+fn failed_result(v: &serde_json::Value) -> Option<String> {
+    let subtype = v.get("subtype").and_then(|s| s.as_str()).unwrap_or("");
+    let failed = v.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false) || subtype.starts_with("error");
+    if !failed {
+        return None;
+    }
+    let text = v.get("result").and_then(|r| r.as_str()).unwrap_or("");
+    Some(match (text.trim().is_empty(), subtype) {
+        (true, "error_max_turns") => "Claude Code reached its turn limit before it finished.".into(),
+        (true, "error_during_execution") => "Claude Code stopped with an error while it was working.".into(),
+        _ => claude_error(text),
+    })
+}
+
+/// Parse one Claude Code stream-json line into the events above.
+fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, sink: &Sink) {
     let t = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
     match t {
         "system" => {
             if v.get("subtype").and_then(|s| s.as_str()) == Some("init") {
                 let cwd = v.get("cwd").and_then(|c| c.as_str()).map(|c| c.to_string());
-                if record_session {
-                    if let (Some(c), Some(sid)) = (
-                        cwd.as_deref(),
-                        v.get("session_id").and_then(|s| s.as_str()),
-                    ) {
-                        if let Some(state) = app.try_state::<crate::AppState>() {
-                            let conv = state.ledger.active_conversation(agent_id);
-                            state.ledger.set_conversation_session(conv, sid, c);
-                        }
-                    }
-                }
-                emit(
-                    app,
-                    ChatEvent {
-                        agent_id: agent_id.to_string(),
-                        kind: "init".into(),
-                        text: None,
-                        tool: None,
-                        detail: None,
-                        cwd,
-                    },
-                );
-                crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
+                session_ready(app, agent_id, sink, v.get("session_id").and_then(|s| s.as_str()), cwd);
             }
         }
         "assistant" => {
@@ -497,101 +823,45 @@ fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, re
             if let Some(blocks) = v.pointer("/message/content").and_then(|c| c.as_array()) {
                 for b in blocks {
                     match b.get("type").and_then(|x| x.as_str()) {
-                        Some("text") => {
-                            let text = b.get("text").and_then(|x| x.as_str()).unwrap_or("");
-                            if !text.trim().is_empty() {
-                                simple(app, agent_id, "text", Some(text.to_string()));
-                                persist(app, agent_id, "agent", Some(text), None, None);
-                            }
-                        }
-                        Some("thinking") => {
-                            let text = b.get("thinking").and_then(|x| x.as_str()).unwrap_or("");
-                            if !text.trim().is_empty() {
-                                simple(app, agent_id, "thinking", Some(text.to_string()));
-                                persist(app, agent_id, "thinking", Some(text), None, None);
-                            }
-                        }
+                        Some("text") => said(app, sink, agent_id, b.get("text").and_then(|x| x.as_str()).unwrap_or("")),
+                        Some("thinking") => thought(app, sink, agent_id, b.get("thinking").and_then(|x| x.as_str()).unwrap_or("")),
                         Some("tool_use") => {
                             let raw = b.get("name").and_then(|x| x.as_str()).unwrap_or("tool");
                             // Shorten MCP tool names: mcp__stark__delegate -> delegate
-                            let name = if raw.starts_with("mcp__") {
-                                raw.rsplit("__").next().unwrap_or(raw)
-                            } else {
-                                raw
-                            };
-                            let detail = b
-                                .get("input")
-                                .map(|i| summarize_tool(name, i))
-                                .unwrap_or_default();
-                            persist(app, agent_id, "tool", None, Some(name), Some(&detail));
-                            // Runaway loop guard for the headless path: trip if the
-                            // same tool call repeats too many times in a row.
-                            let sig = format!("{name}|{detail}");
-                            if crate::breaker::is_runaway(crate::breaker::note_tool_call(
-                                agent_id, &sig,
-                            )) {
-                                crate::breaker::reset(agent_id);
-                                trip_headless_breaker(app, agent_id, name, record_session);
-                            }
-                            emit(
-                                app,
-                                ChatEvent {
-                                    agent_id: agent_id.to_string(),
-                                    kind: "tool".into(),
-                                    text: None,
-                                    tool: Some(name.to_string()),
-                                    detail: Some(detail),
-                                    cwd: None,
-                                },
-                            );
+                            let name = if raw.starts_with("mcp__") { raw.rsplit("__").next().unwrap_or(raw) } else { raw };
+                            let input = b.get("input").cloned().unwrap_or(serde_json::Value::Null);
+                            let tool_use_id = b.get("id").and_then(|x| x.as_str()).unwrap_or("");
+                            tool_called(app, sink, agent_id, tool_use_id, name, &input);
                         }
                         _ => {}
                     }
                 }
             }
         }
-        "result" => {
-            let text = v.get("result").and_then(|x| x.as_str()).map(|s| s.to_string());
-            let cost = v.get("total_cost_usd").and_then(|c| c.as_f64());
-            emit(
-                app,
-                ChatEvent {
-                    agent_id: agent_id.to_string(),
-                    kind: "result".into(),
-                    text,
-                    tool: None,
-                    detail: cost.map(|c| format!("${c:.4}")),
-                    cwd: None,
-                },
-            );
-            // Cost / context HUD: this turn's cost + the context-window fill from
-            // the usage block (input + cache + output ≈ conversation size sent).
-            let u = |k: &str| {
-                v.pointer("/usage")
-                    .and_then(|x| x.get(k))
-                    .and_then(|n| n.as_u64())
-                    .unwrap_or(0)
-            };
-            let context_tokens = u("input_tokens")
-                + u("cache_read_input_tokens")
-                + u("cache_creation_input_tokens")
-                + u("output_tokens");
-            let _ = app.emit(
-                "usage://update",
-                serde_json::json!({
-                    "agentId": agent_id,
-                    "costUsd": cost.unwrap_or(0.0),
-                    "contextTokens": context_tokens,
-                }),
-            );
-            crate::breaker::reset(agent_id); // turn ended cleanly — clear the loop guard
-            crate::breaker::step_down(agent_id); // de-escalate the ladder one rung
-            crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
-            // The orchestrator's turn just ended — if he dispatched workers this
-            // turn, seal the batch so it flushes back once every worker finishes.
-            if crate::prompts::agent_is_orchestrator(app, agent_id) {
-                crate::delegation::seal_batch(app);
+        "user" => {
+            // Tool results come back as user-role content.
+            if let Some(blocks) = v.pointer("/message/content").and_then(|c| c.as_array()) {
+                for b in blocks.iter().filter(|b| b.get("type").and_then(|x| x.as_str()) == Some("tool_result")) {
+                    let id = b.get("tool_use_id").and_then(|x| x.as_str()).unwrap_or("");
+                    let is_error = b.get("is_error").and_then(|x| x.as_bool()).unwrap_or(false);
+                    tool_returned(app, id, is_error);
+                }
             }
+        }
+        "result" => {
+            // A failed turn says why in the chat; its "result" isn't an answer.
+            let failure = failed_result(v);
+            if let Some(message) = &failure {
+                failed(app, sink, agent_id, message);
+            }
+            let text = if failure.is_some() { None } else { v.get("result").and_then(|x| x.as_str()).map(|s| s.to_string()) };
+            // The context-window fill from the usage block (input + cache + output ≈ conversation size sent).
+            let u = |k: &str| v.pointer("/usage").and_then(|x| x.get(k)).and_then(|n| n.as_u64()).unwrap_or(0);
+            let usage = TurnUsage {
+                cost_usd: v.get("total_cost_usd").and_then(|c| c.as_f64()),
+                context_tokens: u("input_tokens") + u("cache_read_input_tokens") + u("cache_creation_input_tokens") + u("output_tokens"),
+            };
+            turn_finished(app, sink, agent_id, text, usage);
         }
         _ => {}
     }
@@ -612,53 +882,88 @@ fn spawn_stderr_pump(app: &tauri::AppHandle, agent_id: &str, stderr: std::proces
     });
 }
 
+/// A session's process ended. Only a session that is still current reports its
+/// own end; one that was stopped or replaced (new chat, folder switch) must not
+/// remove, offline or mark as expired the session that took its place.
+/// `expired` means it was resuming a saved session that never came up.
+pub(crate) fn session_finished(app: &tauri::AppHandle, agent_id: &str, gen: u64, expired: bool, orchestrator: bool) {
+    let ended = {
+        let state = app.state::<crate::AppState>();
+        let mut map = state.chat.sessions.lock().unwrap();
+        if map.get(agent_id).map(|s| s.gen) == Some(gen) {
+            map.remove(agent_id)
+        } else {
+            None
+        }
+    };
+    if let Some(ended) = ended {
+        drop(ended);
+        // The stored session no longer resolves (the provider rotated or pruned it).
+        // Forget it so the next message starts fresh instead of re-resuming the dead
+        // id forever, and tell the developer to resend once.
+        if expired {
+            if let Some(state) = app.try_state::<crate::AppState>() {
+                let conv = state.ledger.active_conversation(agent_id);
+                state.ledger.forget_conversation_session(conv);
+            }
+            simple(
+                app,
+                agent_id,
+                "system",
+                Some("The previous session expired, so this chat started fresh. Please send your last message again.".into()),
+            );
+        }
+        simple(app, agent_id, "exit", None);
+        crate::pty::emit_status(app, agent_id, AgentStatus::Offline);
+        crate::tasks::session_ended(app, agent_id, crate::tasks::Ended::Unexpectedly);
+    }
+    // If the orchestrator's session ended mid-turn (crash / stop / cwd switch),
+    // seal any open delegation batch so pending workers' results aren't
+    // stranded waiting for a `result` that will never come.
+    if orchestrator {
+        crate::delegation::seal_batch(app);
+    }
+}
+
+/// Start an agent's chat session on its provider, resuming the active
+/// conversation's saved session when there is one.
 pub fn start_session(
     app: &tauri::AppHandle,
     agent_id: &str,
     cwd: &str,
     sock_path: &str,
 ) -> Result<(), String> {
-    let prompt = crate::prompts::system_prompt_for(app, agent_id);
-    let engine = engine_for_spawn(app, agent_id);
-    if resolve_program(&engine.command).is_none() {
-        return Err(missing_engine_error(&engine));
-    }
-    let model = crate::prompts::agent_model(app, agent_id, &engine);
-    let is_orch = crate::prompts::agent_is_orchestrator(app, agent_id);
-    // Resume the active conversation's session so it continues with full context.
+    let _ = sock_path; // the launch carries the bridge socket
     let resume = app
         .try_state::<crate::AppState>()
         .and_then(|s| s.ledger.conversation_session(s.ledger.active_conversation(agent_id)));
-    let resumed = resume.is_some();
-    let token = app
-        .try_state::<crate::AppState>()
-        .map(|s| s.sock_token.clone())
-        .unwrap_or_default();
-    let memory_file = crate::prompts::memory_file_path(app, agent_id);
-    let mut child = build_headless(
-        &engine,
-        &model,
-        cwd,
-        Some(agent_id),
-        is_orch,
-        Some(&prompt),
-        resume.as_deref(),
-        sock_path,
-        &token,
-        &memory_file,
-    )
-    .spawn()
-    .map_err(|e| e.to_string())?;
+    let launch = launch_for(app, agent_id, cwd, resume)?;
+    let gen = SESSION_GEN.fetch_add(1, Ordering::Relaxed);
+    let (child, input) = match launch.engine.kind.as_str() {
+        "codex" => crate::codex::start_chat(app, &launch, gen)?,
+        "opencode" => crate::opencode::start_chat(app, &launch, gen)?,
+        _ => start_claude(app, &launch, gen)?,
+    };
+    app.state::<crate::AppState>()
+        .chat
+        .sessions
+        .lock()
+        .unwrap()
+        .insert(agent_id.to_string(), ChatSession { child, input, cwd: cwd.to_string(), gen });
+    crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
+    Ok(())
+}
+
+/// Claude Code over stream-json: spawn it and read what it says until it exits.
+fn start_claude(app: &tauri::AppHandle, launch: &Launch, gen: u64) -> Result<(Child, Input), String> {
+    let mut child = build_headless(launch).spawn().map_err(|e| e.to_string())?;
     let stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     if let Some(stderr) = child.stderr.take() {
-        spawn_stderr_pump(app, agent_id, stderr);
+        spawn_stderr_pump(app, &launch.agent_id, stderr);
     }
-
-    let app2 = app.clone();
-    let id2 = agent_id.to_string();
-    let orch = is_orch;
-    let gen = SESSION_GEN.fetch_add(1, Ordering::Relaxed);
+    let (app2, id2) = (app.clone(), launch.agent_id.clone());
+    let (resumed, orchestrator) = (launch.resume.is_some(), launch.orchestrator);
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
         let mut saw_init = false;
@@ -673,66 +978,12 @@ pub fn start_session(
                 {
                     saw_init = true;
                 }
-                handle_line(&app2, &id2, &v, true);
+                handle_line(&app2, &id2, &v, &Sink::chat());
             }
         }
-        // Only a session that is still current reports its own end. One that was
-        // stopped or replaced (new chat, folder switch) must not remove, offline or
-        // mark as expired the session that took its place.
-        let ended = {
-            let state = app2.state::<crate::AppState>();
-            let mut map = state.chat.sessions.lock().unwrap();
-            if map.get(&id2).map(|s| s.gen) == Some(gen) {
-                map.remove(&id2)
-            } else {
-                None
-            }
-        };
-        if let Some(ended) = ended {
-            drop(ended);
-            // A resumed session that never reached `init` means the stored session
-            // id no longer resolves (Claude rotated or pruned it). Forget the stale
-            // pointer so the next message starts a genuinely fresh session instead
-            // of re-resuming the dead id forever, and tell the user to resend once.
-            if resumed && !saw_init {
-                if let Some(state) = app2.try_state::<crate::AppState>() {
-                    let conv = state.ledger.active_conversation(&id2);
-                    state.ledger.forget_conversation_session(conv);
-                }
-                simple(
-                    &app2,
-                    &id2,
-                    "system",
-                    Some("Previous session expired — starting fresh. Please resend your last message.".into()),
-                );
-            }
-            simple(&app2, &id2, "exit", None);
-            crate::pty::emit_status(&app2, &id2, AgentStatus::Offline);
-        }
-        // If the orchestrator's session ended mid-turn (crash / stop / cwd switch),
-        // seal any open delegation batch so pending workers' results aren't
-        // stranded waiting for a `result` that will never come.
-        if orch {
-            crate::delegation::seal_batch(&app2);
-        }
+        session_finished(&app2, &id2, gen, resumed && !saw_init, orchestrator);
     });
-
-    app.state::<crate::AppState>()
-        .chat
-        .sessions
-        .lock()
-        .unwrap()
-        .insert(
-            agent_id.to_string(),
-            ChatSession {
-                child,
-                stdin,
-                cwd: cwd.to_string(),
-                gen,
-            },
-        );
-    crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
-    Ok(())
+    Ok((child, Input::StreamJson(stdin)))
 }
 
 /// Send a user message, starting the session (in `cwd`) if needed.
@@ -773,19 +1024,12 @@ pub fn send(
     } else {
         text.to_string()
     };
-    let msg = serde_json::json!({
-        "type": "user",
-        "message": { "role": "user", "content": content }
-    });
-    let line = format!("{}\n", msg);
-
     let state = app.state::<crate::AppState>();
     let mut map = state.chat.sessions.lock().unwrap();
     let s = map
         .get_mut(agent_id)
         .ok_or_else(|| format!("no chat session for {agent_id}"))?;
-    s.stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
-    s.stdin.flush().map_err(|e| e.to_string())?;
+    s.send_turn(&content)?;
     drop(map);
 
     crate::pty::emit_status(app, agent_id, AgentStatus::Thinking);
@@ -811,86 +1055,54 @@ pub fn stop(app: &tauri::AppHandle, agent_id: &str) {
 /// The task card always closes: done with the result, or blocked with the reason.
 pub fn run_task_blocking(
     app: &tauri::AppHandle,
+    from: &str,
     agent_id: &str,
     task: &str,
     cwd: &str,
 ) -> Result<String, String> {
-    let marker = format!("JARVIS delegated · {}", base_name(cwd));
-    simple(app, agent_id, "system", Some(marker.clone()));
-    persist(app, agent_id, "system", Some(&marker), None, None);
-    persist(app, agent_id, "user", Some(task), None, None);
-    // Open a task card on the board so this delegation is trackable across turns.
-    let task_id = next_task_id();
-    if let Some(state) = app.try_state::<crate::AppState>() {
-        state
-            .ledger
-            .upsert_task(&task_id, &truncate(task, 80), agent_id, "doing", None);
-    }
-    emit_tasks_changed(app);
+    // The delegation becomes a child of the delegator's task, in its own conversation.
+    let Some((child, conversation)) = crate::tasks::begin_child(app, from, agent_id, task, cwd) else {
+        return Err("The delegated task couldn't be recorded.".into());
+    };
+    let sink = Sink::task(conversation, child.id.clone());
+    let from_name = crate::tasks::requester_name(app, from);
+    let origin = if from == crate::tasks::BY_DEVELOPER { "Started by you".to_string() } else { format!("Delegated by {from_name}") };
+    note_in(app, &sink, agent_id, &format!("{origin} in {}", base_name(cwd)));
+    record_in(app, &sink, agent_id, "user", "user", Some(task), None, None);
     floor_log(app, agent_id, "task-doing", &truncate(task, 80));
     if let Some(state) = app.try_state::<crate::AppState>() {
-        let e = state.ledger.record(
-            "jarvis",
-            "delegate",
-            &format!("JARVIS → {} · {}", agent_id.to_uppercase(), truncate(task, 46)),
-            3,
-        );
+        let worker_name = crate::prompts::agent_name(app, agent_id);
+        let e = state.ledger.record(from, "delegate", &format!("{from_name} → {worker_name} · {}", truncate(task, 46)), 3);
         let _ = app.emit("ledger://entry", e);
     }
     crate::pty::emit_status(app, agent_id, AgentStatus::Thinking);
 
-    let outcome = run_worker(app, agent_id, task, cwd);
-    let (status, detail) = match &outcome {
-        Ok(result) if !result.trim().is_empty() => ("done", truncate(result, 200)),
-        Ok(_) => ("blocked", "The worker finished without a result.".to_string()),
-        Err(e) => ("blocked", truncate(e, 200)),
-    };
-    if let Some(state) = app.try_state::<crate::AppState>() {
-        state.ledger.set_task_status(&task_id, status, Some(&detail));
-    }
-    emit_tasks_changed(app);
+    let outcome = run_worker(app, agent_id, task, cwd, &sink);
+    crate::tasks::end_child(app, &child.id, agent_id, &outcome);
+    let status = if matches!(&outcome, Ok(r) if !r.trim().is_empty()) { "done" } else { "blocked" };
     floor_log(app, agent_id, &format!("task-{status}"), &truncate(task, 80));
     crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
     outcome
 }
 
 /// Spawn a one-shot worker for `task` in `cwd` and wait for its final result.
-fn run_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, cwd: &str) -> Result<String, String> {
+fn run_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, cwd: &str, sink: &Sink) -> Result<String, String> {
     // Delegated workers also get their skill kit + the ask_human bridge, so
     // their review gates work even when JARVIS delegated the task.
-    let (sock, token) = app
-        .try_state::<crate::AppState>()
-        .map(|s| (s.sock_path.clone(), s.sock_token.clone()))
-        .unwrap_or_default();
-    let prompt = crate::prompts::system_prompt_for(app, agent_id);
-    let engine = engine_for_spawn(app, agent_id);
-    if resolve_program(&engine.command).is_none() {
-        return Err(missing_engine_error(&engine));
+    let launch = launch_for(app, agent_id, cwd, None)?;
+    match launch.engine.kind.as_str() {
+        "codex" => return crate::codex::run_once(app, &launch, task, sink),
+        "opencode" => return crate::opencode::run_once(app, &launch, task, sink),
+        _ => {}
     }
-    let model = crate::prompts::agent_model(app, agent_id, &engine);
-    let is_orch = crate::prompts::agent_is_orchestrator(app, agent_id);
-    let memory_file = crate::prompts::memory_file_path(app, agent_id);
-    let mut child = build_headless(
-        &engine,
-        &model,
-        cwd,
-        Some(agent_id),
-        is_orch,
-        Some(&prompt),
-        None,
-        &sock,
-        &token,
-        &memory_file,
-    )
-    .spawn()
-    .map_err(|e| e.to_string())?;
+    let mut child = build_headless(&launch).spawn().map_err(|e| e.to_string())?;
     // Track this one-shot worker so app-quit can kill its group (it lives outside
     // the `chat` session map).
     let pid = child.id();
     if let Some(state) = app.try_state::<crate::AppState>() {
         state.oneshot_pids.lock().unwrap().insert(pid);
     }
-    let outcome = drive_worker(app, agent_id, task, &mut child);
+    let outcome = drive_worker(app, agent_id, task, &mut child, sink);
     if outcome.is_err() {
         let _ = child.kill();
     }
@@ -902,7 +1114,7 @@ fn run_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, cwd: &str) -> 
 }
 
 /// Feed a spawned worker its task, stream its output, and return its result text.
-fn drive_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, child: &mut Child) -> Result<String, String> {
+fn drive_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, child: &mut Child, sink: &Sink) -> Result<String, String> {
     let mut stdin = child.stdin.take().ok_or("The worker has no input stream.")?;
     let stdout = child.stdout.take().ok_or("The worker has no output stream.")?;
     if let Some(stderr) = child.stderr.take() {
@@ -920,23 +1132,23 @@ fn drive_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, child: &mut 
     drop(stdin); // one-shot: close stdin so the worker exits after its result
 
     let reader = BufReader::new(stdout);
-    let mut result = String::new();
+    let mut result: Result<String, String> = Ok(String::new());
     for line in reader.lines().map_while(Result::ok) {
         if line.trim().is_empty() {
             continue;
         }
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-            handle_line(app, agent_id, &v, false);
+            handle_line(app, agent_id, &v, sink);
             if v.get("type").and_then(|t| t.as_str()) == Some("result") {
-                result = v
-                    .get("result")
-                    .and_then(|r| r.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                // A failed run is the delegation's failure, not its answer.
+                result = match failed_result(&v) {
+                    Some(message) => Err(message),
+                    None => Ok(v.get("result").and_then(|r| r.as_str()).unwrap_or("").to_string()),
+                };
             }
         }
     }
-    Ok(result)
+    result
 }
 
 #[cfg(test)]
@@ -950,6 +1162,102 @@ mod tests {
         assert_ne!(a, b);
         // The launch stamp keeps ids from colliding with an earlier launch's `task-1`.
         assert!(a.starts_with("task-") && a.matches('-').count() == 2, "{a}");
+    }
+
+    /// Talks to the real Claude Code with this Mac's sign-in, launched exactly as
+    /// Starkline launches an agent (the gate hook, the MCP bridge), against a
+    /// stand-in bridge that says shell commands need approval and then approves,
+    /// or with `STARK_SMOKE_DENY=1`, refuses:
+    /// `STARK_SMOKE_DIR=/tmp/x cargo test live_claude -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_claude_goes_through_the_gate_before_a_command() {
+        use std::io::Read as _;
+        use std::os::unix::net::UnixListener;
+        use std::sync::Arc;
+        let dir = std::env::var("STARK_SMOKE_DIR").expect("set STARK_SMOKE_DIR to a throwaway folder");
+        let sock = std::env::temp_dir().join(format!("starkline-smoke-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&sock);
+        let listener = UnixListener::bind(&sock).unwrap();
+        let allow = std::env::var("STARK_SMOKE_DENY").is_err();
+        let asked: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
+        {
+            let asked = asked.clone();
+            std::thread::spawn(move || {
+                for stream in listener.incoming().flatten() {
+                    let mut line = String::new();
+                    if BufReader::new(&stream).read_line(&mut line).is_err() {
+                        continue;
+                    }
+                    let request: serde_json::Value = serde_json::from_str(&line).unwrap_or_default();
+                    let reply = match request["type"].as_str().unwrap_or("") {
+                        "classify" if request["tool_name"] == "Bash" => {
+                            serde_json::json!({ "tier": "approval", "rule": "Run commands Starkline doesn't recognise", "reason": "Smoke test." })
+                        }
+                        "classify" => serde_json::json!({ "tier": "automatic", "rule": "Work inside the project", "reason": "" }),
+                        "approve" if allow => serde_json::json!({ "approved": true, "reason": "" }),
+                        "approve" => serde_json::json!({ "approved": false, "reason": "The developer didn't allow this (smoke test)." }),
+                        _ => serde_json::json!({}),
+                    };
+                    println!("bridge asked: {} {} -> {}", request["type"], request["tool_name"], reply);
+                    asked.lock().unwrap().push(request);
+                    let mut stream = stream;
+                    let _ = stream.write_all(format!("{reply}\n").as_bytes());
+                }
+            });
+        }
+        let mut launch = crate::codex::tests::smoke_launch("claude-code", &dir);
+        launch.sock_path = sock.to_string_lossy().to_string();
+        let mut child = build_headless(&launch).spawn().unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        let prompt = "Run the shell command `node -e \"console.log('starkline-' + 'smoke')\"` and reply with only its output.";
+        let message = serde_json::json!({ "type": "user", "message": { "role": "user", "content": prompt } });
+        stdin.write_all(format!("{message}\n").as_bytes()).unwrap();
+        drop(stdin);
+        let mut out = String::new();
+        child.stdout.take().unwrap().read_to_string(&mut out).unwrap();
+        let _ = child.wait();
+        let _ = std::fs::remove_file(&sock);
+
+        let mut result = String::new();
+        let mut command_output = Vec::new();
+        for line in out.lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()) {
+            if line["type"] == "result" {
+                println!("result: is_error={} {}", line["is_error"], line["result"]);
+                result = line["result"].as_str().unwrap_or("").to_string();
+            }
+            // What the command printed, if it ran (tool results come back as user content).
+            for block in line.pointer("/message/content").and_then(|c| c.as_array()).into_iter().flatten() {
+                if block["type"] == "tool_result" {
+                    println!("tool result: {}", block["content"]);
+                    command_output.push(block["content"].to_string());
+                }
+            }
+        }
+        let asked = asked.lock().unwrap();
+        let checked = asked.iter().position(|r| r["type"] == "classify" && r["tool_name"] == "Bash" && r["input"]["command"].as_str().unwrap_or("").contains("starkline"));
+        let approved = asked.iter().position(|r| r["type"] == "approve" && r["tool_name"] == "Bash");
+        assert!(checked.is_some(), "the hook asked Starkline about the command");
+        assert!(approved > checked, "then Claude Code asked Starkline's approve tool");
+        if allow {
+            assert!(result.contains("starkline-smoke"), "the approved command ran: {result}");
+        } else {
+            assert!(!command_output.iter().any(|o| o.contains("starkline-smoke")), "a refused command never runs");
+        }
+    }
+
+    #[test]
+    fn a_failed_turn_says_what_to_do() {
+        let expired = serde_json::json!({
+            "type": "result", "subtype": "success", "is_error": true,
+            "result": "Failed to authenticate: OAuth session expired and could not be refreshed"
+        });
+        let message = failed_result(&expired).unwrap();
+        assert!(message.contains("claude auth login") && message.contains("OAuth session expired"));
+        let limits = serde_json::json!({ "type": "result", "subtype": "error_max_turns", "is_error": false, "result": "" });
+        assert_eq!(failed_result(&limits).as_deref(), Some("Claude Code reached its turn limit before it finished."));
+        let answer = serde_json::json!({ "type": "result", "subtype": "success", "is_error": false, "result": "Done." });
+        assert_eq!(failed_result(&answer), None);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Stark Tower",
+  "productName": "Starkline",
   "version": "0.1.0",
   "identifier": "com.omgandhi.starktower",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Stark Tower",
+        "title": "Starkline",
         "width": 1584,
         "height": 993,
         "minWidth": 1100,
@@ -22,7 +22,9 @@
         "trafficLightPosition": {
           "x": 22,
           "y": 23
-        }
+        },
+        "label": "main",
+        "visible": false
       }
     ],
     "security": {
@@ -38,6 +40,10 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "mcp/delegate-mcp.mjs": "mcp/delegate-mcp.mjs",
+      "mcp/gate-hook.mjs": "mcp/gate-hook.mjs"
+    }
   }
 }

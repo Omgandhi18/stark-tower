@@ -23,8 +23,11 @@ export function useReferenceRenderer(hostRef: RefObject<HTMLDivElement | null>, 
   const pendingRef = useRef<Promise<ReferenceRenderer> | null>(null);
   const teardownRef = useRef<number | null>(null);
   const callbacksRef = useRef(callbacks);
-  callbacksRef.current = callbacks;
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    callbacksRef.current = callbacks;
+  });
 
   useEffect(() => {
     if (teardownRef.current !== null) {

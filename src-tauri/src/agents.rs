@@ -20,7 +20,7 @@ pub enum AgentKind {
     Maintenance,
 }
 
-/// A member of the Stark Tower roster. `home_x`/`home_y` are tile coordinates
+/// A member of the Starkline roster. `home_x`/`home_y` are tile coordinates
 /// of the agent's desk on the pixel lab floor. `figure` selects the sprite
 /// silhouette ("masc" | "fem" | "synth").
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

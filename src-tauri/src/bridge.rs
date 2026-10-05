@@ -13,13 +13,90 @@ use tauri::{Emitter, Manager};
 
 static REVIEW_SEQ: AtomicU64 = AtomicU64::new(1);
 
+/// Something an agent is blocked on until the developer decides: a plan, diff,
+/// question or choice (`ask_human`), or a command the permission gate routed.
+/// Kept in app state while pending, so any screen (or a reloaded window) can
+/// list it again.
+#[derive(Clone, Debug, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewRequest {
+    pub id: String,
+    pub agent_id: String,
+    pub title: String,
+    pub body: String,
+    /// plan | diff | findings | questions | choice | mockup | command | permission
+    pub kind: String,
+    pub choices: Vec<String>,
+    /// For `command`: the exact command line. For `permission`: the file, URL or input involved.
+    pub command: Option<String>,
+    /// For `command` and `permission`: the folder the agent is working in.
+    pub cwd: Option<String>,
+    /// For `command` and `permission`: the policy rule that stopped it.
+    pub rule: Option<String>,
+    /// For `command` and `permission`: "approval" or "never" (never runs on its own).
+    pub tier: Option<String>,
+    /// The task the agent is working on, if any.
+    pub task_id: Option<String>,
+    /// For `command` and `permission`: what a rule from this request would allow
+    /// ("`npm install` commands"); None when no rule can safely cover it.
+    pub grant: Option<String>,
+    /// For `command` and `permission`: the project a project-wide rule would apply to.
+    pub project: Option<String>,
+    /// Unix ms when the agent asked.
+    pub created: f64,
+}
+
+fn now_ms() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as f64)
+        .unwrap_or(0.0)
+}
+
+/// Register a pending review, show it in the UI, and return the channel its
+/// decision will arrive on.
+fn open_review(app: &tauri::AppHandle, request: ReviewRequest) -> std::sync::mpsc::Receiver<String> {
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let state = app.state::<crate::AppState>();
+    state.reviews.lock().unwrap().insert(request.id.clone(), tx);
+    state.pending_reviews.lock().unwrap().insert(request.id.clone(), request.clone());
+    let _ = app.emit("review://request", &request);
+    crate::notify::review_opened(app, &request);
+    rx
+}
+
+/// Forget a review once it has been decided (or its agent went away), saying how it ended.
+fn close_review(app: &tauri::AppHandle, id: &str, outcome: &str) {
+    let state = app.state::<crate::AppState>();
+    state.reviews.lock().unwrap().remove(id);
+    state.pending_reviews.lock().unwrap().remove(id);
+    let _ = app.emit("review://resolved", id);
+    crate::notify::review_settled(app, id, outcome);
+}
+
+/// How a decision reads in the history; an empty one means the agent went away.
+fn outcome_of(decision: &str) -> String {
+    if decision.trim().is_empty() {
+        "No longer needed".into()
+    } else {
+        crate::chat::truncate(decision, 80)
+    }
+}
+
 /// Listen on the Unix socket for bridge requests from an agent's MCP server.
 pub fn start_delegation_server(app: tauri::AppHandle, sock_path: String) {
     let _ = std::fs::remove_file(&sock_path);
     let listener = match UnixListener::bind(&sock_path) {
         Ok(l) => l,
-        Err(_) => return,
+        Err(e) => {
+            // Without the bridge agents can't delegate, ask or request approval;
+            // runtime health reports it, with the reason.
+            eprintln!("[bridge] couldn't listen on {sock_path}: {e}");
+            crate::health::set_bridge_failed(format!("Couldn't listen on {sock_path}: {e}"));
+            return;
+        }
     };
+    crate::health::set_bridge_up(true);
     // Owner-only on the socket node itself, on top of the 0700 app data dir.
     {
         use std::os::unix::fs::PermissionsExt;
@@ -75,6 +152,10 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
             handle_approve(app, &mut writer, &req);
             return;
         }
+        Some("classify") => {
+            handle_classify(app, &mut writer, &req);
+            return;
+        }
         Some("roster") => {
             handle_roster(app, &mut writer, &req);
             return;
@@ -109,9 +190,10 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
         return;
     }
 
+    let from = req.get("agentId").and_then(|a| a.as_str()).unwrap_or("");
     let cwd = dir.unwrap_or_else(|| {
         let state = app.state::<crate::AppState>();
-        let wd = state.workdirs.lock().unwrap().get("jarvis").cloned();
+        let wd = state.workdirs.lock().unwrap().get(from).cloned();
         wd.unwrap_or_else(|| state.project.lock().unwrap().clone())
     });
     // record the worker's dir too
@@ -137,7 +219,7 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
     );
     let _ = writer.flush();
 
-    let result = run_task_blocking(app, &agent, &task, &cwd)
+    let result = run_task_blocking(app, from, &agent, &task, &cwd)
         .unwrap_or_else(|e| format!("(delegation failed: {e})"));
     complete_delegation(app, &agent, &task, &result);
 }
@@ -196,7 +278,7 @@ fn handle_report_bug(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serd
     let _ = app.emit("bugs://changed", ());
     reply(
         writer,
-        serde_json::json!({ "result": "Bug filed for the maintenance agent. Thanks — carry on." }),
+        serde_json::json!({ "result": "Bug filed for the maintenance agent. Thanks, carry on." }),
     );
 }
 
@@ -235,23 +317,29 @@ fn handle_review(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_js
         .unwrap_or("Review")
         .to_string();
 
-    let (tx, rx) = std::sync::mpsc::channel::<String>();
-    app.state::<crate::AppState>()
-        .reviews
-        .lock()
-        .unwrap()
-        .insert(id.clone(), tx);
-
-    let _ = app.emit(
-        "review://request",
-        serde_json::json!({
-            "id": id,
-            "agentId": agent_id,
-            "title": title,
-            "body": req.get("body").and_then(|s| s.as_str()).unwrap_or(""),
-            "kind": req.get("kind").and_then(|s| s.as_str()).unwrap_or("choice"),
-            "choices": req.get("choices").cloned().unwrap_or_else(|| serde_json::json!([])),
-        }),
+    let choices = req
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let rx = open_review(
+        app,
+        ReviewRequest {
+            id: id.clone(),
+            agent_id: agent_id.clone(),
+            title: title.clone(),
+            body: req.get("body").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            kind: req.get("kind").and_then(|s| s.as_str()).unwrap_or("choice").to_string(),
+            choices,
+            command: None,
+            cwd: app.state::<crate::AppState>().workdirs.lock().unwrap().get(&agent_id).cloned(),
+            rule: None,
+            tier: None,
+            task_id: crate::tasks::active_task_for(app, &agent_id),
+            grant: None,
+            project: None,
+            created: now_ms(),
+        },
     );
     let e = app.state::<crate::AppState>().ledger.record(
         &agent_id,
@@ -264,11 +352,8 @@ fn handle_review(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_js
 
     // Block until review_respond delivers the decision.
     let decision = rx.recv().unwrap_or_default();
-    app.state::<crate::AppState>()
-        .reviews
-        .lock()
-        .unwrap()
-        .remove(&id);
+    close_review(app, &id, &outcome_of(&decision));
+    crate::tasks::decision(app, &agent_id, &title, &decision, None);
     crate::pty::emit_status(app, &agent_id, AgentStatus::Working);
 
     let _ = writer.write_all(
@@ -276,58 +361,219 @@ fn handle_review(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_js
     );
 }
 
-/// A risky command needs your go-ahead: render an Allow/Deny in the review
-/// overlay and BLOCK until you decide. Driven by the `approve` permission gate.
+/// What a permission request is about, for the approval card: the command, or
+/// the file, URL or input of another tool.
+fn subject_of(tool: &str, input: &serde_json::Value) -> String {
+    let text = |key: &str| input.get(key).and_then(|v| v.as_str()).map(str::to_string);
+    match tool {
+        "Bash" => text("command").unwrap_or_default(),
+        "WebFetch" => text("url").unwrap_or_default(),
+        _ => text("file_path")
+            .or_else(|| text("notebook_path"))
+            .or_else(|| text("path"))
+            .unwrap_or_else(|| truncate(&input.to_string(), 400)),
+    }
+}
+
+/// The tool call an agent's provider is about to make, and the gate's verdict on it
+/// in the folder that agent works in.
+fn assess_request(app: &tauri::AppHandle, req: &serde_json::Value) -> (String, serde_json::Value, Option<String>, crate::gate::Assessment) {
+    // Older bridge scripts sent only `command` for Bash.
+    let legacy_command = req.get("command").and_then(|s| s.as_str());
+    let tool = req
+        .get("tool_name")
+        .and_then(|s| s.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| if legacy_command.is_some() { "Bash".into() } else { String::new() });
+    let input = req
+        .get("input")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({ "command": legacy_command.unwrap_or("") }));
+    let agent_id = req.get("agentId").and_then(|s| s.as_str()).unwrap_or("");
+    let (cwd, assessment) = assess(app, agent_id, &tool, &input);
+    (tool, input, cwd, assessment)
+}
+
+/// The gate's verdict on a tool call by an agent, in the folder it works in.
+fn assess(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_json::Value) -> (Option<String>, crate::gate::Assessment) {
+    let state = app.state::<crate::AppState>();
+    let cwd = state.workdirs.lock().unwrap().get(agent_id).cloned();
+    let project = cwd.clone().unwrap_or_else(|| state.project.lock().unwrap().clone());
+    // The bridge scripts (bundled and in the source tree) and the app's own data
+    // (policy, keys) are off limits to agents.
+    let mut protected = vec![
+        std::path::PathBuf::from(&state.scripts.dir),
+        std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/mcp")),
+    ];
+    protected.extend(app.path().app_data_dir().ok());
+    let context = crate::gate::Context::for_project(&project).protecting(protected);
+    (cwd, crate::gate::assess(tool, input, &context))
+}
+
+/// The provider's pre-tool hook asks before every call: anything that isn't
+/// automatic becomes a permission prompt, which arrives at `handle_approve`.
+fn handle_classify(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_json::Value) {
+    let (_, _, _, a) = assess_request(app, req);
+    let reply = serde_json::json!({ "tier": a.tier.as_str(), "rule": a.rule.label(), "reason": a.reason });
+    let _ = writer.write_all((reply.to_string() + "\n").as_bytes());
+}
+
+/// The project folder a request falls in: the longest known project containing `cwd`.
+fn project_of(app: &tauri::AppHandle, cwd: &str) -> String {
+    let state = app.state::<crate::AppState>();
+    let projects = state.projects.lock().unwrap().clone();
+    projects
+        .into_iter()
+        .filter(|p| std::path::Path::new(cwd).starts_with(p))
+        .max_by_key(|p| p.len())
+        .unwrap_or_else(|| cwd.to_string())
+}
+
+/// What the developer chose for a permission request.
+enum Choice {
+    Deny,
+    Once,
+    Grant(crate::policy::Scope),
+}
+
+fn choice_of(decision: &str) -> Choice {
+    match decision {
+        "Allow for task" => Choice::Grant(crate::policy::Scope::Task),
+        "Allow in project" => Choice::Grant(crate::policy::Scope::Project),
+        "Allow everywhere" => Choice::Grant(crate::policy::Scope::Everywhere),
+        d if d.starts_with("Allow") => Choice::Once,
+        _ => Choice::Deny,
+    }
+}
+
+/// The bridge script asks for a permission decision on a tool call.
 fn handle_approve(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_json::Value) {
-    let command = req
-        .get("command")
-        .and_then(|s| s.as_str())
-        .unwrap_or("")
-        .to_string();
-    let agent_id = req
-        .get("agentId")
-        .and_then(|s| s.as_str())
-        .unwrap_or("jarvis")
-        .to_string();
+    let agent_id = req.get("agentId").and_then(|s| s.as_str()).unwrap_or("").to_string();
+    let (tool, input, _, _) = assess_request(app, req);
+    let verdict = decide(app, &agent_id, &tool, &input);
+    let reply = serde_json::json!({ "approved": verdict.approved, "reason": verdict.reason });
+    let _ = writer.write_all((reply.to_string() + "\n").as_bytes());
+}
+
+/// Whether a tool call may go ahead, and if not, what to tell the agent.
+pub struct Verdict {
+    pub approved: bool,
+    pub reason: String,
+}
+
+impl Verdict {
+    fn allow() -> Verdict {
+        Verdict { approved: true, reason: String::new() }
+    }
+}
+
+/// A tool call needs a permission decision. The gate settles what may run on its
+/// own; a rule the developer granted may cover the rest; anything else goes to
+/// the developer and BLOCKS until they decide. Every provider comes through here:
+/// Claude Code through the bridge script, Codex and OpenCode from their adapters.
+pub fn decide(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_json::Value) -> Verdict {
+    let agent_id = agent_id.to_string();
+    let (tool, input) = (tool.to_string(), input.clone());
+    let (cwd, assessment) = assess(app, &agent_id, &tool, &input);
+    let state = app.state::<crate::AppState>();
+    if assessment.tier == crate::gate::Tier::Automatic {
+        return Verdict::allow();
+    }
+
+    let subject = subject_of(&tool, &input);
+    let folder = cwd.clone().unwrap_or_else(|| state.project.lock().unwrap().clone());
+    let project = project_of(app, &folder);
+    let task = crate::tasks::active_task_for(app, &agent_id);
+    let risky = if tool == "Bash" {
+        crate::gate::risky_commands(&subject, &crate::gate::Context::for_project(&folder))
+    } else {
+        vec![]
+    };
+    let key = crate::policy::rule_for(&tool, &input, &risky);
+
+    // A rule the developer granted may already cover this; it never stretches to a stricter tier.
+    if let Some(key) = &key {
+        let tier = assessment.tier.as_str();
+        let granted = state.ledger.rules(false).into_iter().find(|r| {
+            let rule_key = crate::policy::RuleKey { tool: r.tool.clone(), pattern: r.pattern.clone(), display: r.display.clone() };
+            crate::policy::covers(&rule_key, key)
+                && crate::policy::applies(r, task.as_deref(), &folder)
+                && (r.tier == tier || r.tier == "never")
+        });
+        if let Some(rule) = granted {
+            state.ledger.record_rule_use(rule.id);
+            crate::tasks::decision(app, &agent_id, &format!("{} (your rule: {})", truncate(&subject, 80), rule.display), "Allow", Some(true));
+            crate::notify::rule_used(app, &agent_id, task.as_deref(), &folder, &rule.display, &subject);
+            return Verdict::allow();
+        }
+    }
+
     let id = format!("rv-{}", REVIEW_SEQ.fetch_add(1, Ordering::Relaxed));
-
-    let (tx, rx) = std::sync::mpsc::channel::<String>();
-    app.state::<crate::AppState>()
-        .reviews
-        .lock()
-        .unwrap()
-        .insert(id.clone(), tx);
-
-    let _ = app.emit(
-        "review://request",
-        serde_json::json!({
-            "id": id,
-            "agentId": agent_id,
-            "title": "Run command?",
-            "body": format!("```sh\n{}\n```", command),
-            "kind": "choice",
-            "choices": ["Allow", "Deny"],
-        }),
+    let rx = open_review(
+        app,
+        ReviewRequest {
+            id: id.clone(),
+            agent_id: agent_id.clone(),
+            title: assessment.rule.title().into(),
+            body: assessment.reason.clone(),
+            kind: if tool == "Bash" { "command".into() } else { "permission".into() },
+            choices: vec!["Allow".into(), "Deny".into()],
+            command: Some(subject.clone()),
+            cwd,
+            rule: Some(assessment.rule.label().into()),
+            tier: Some(assessment.tier.as_str().into()),
+            task_id: task.clone(),
+            grant: key.as_ref().map(|k| k.display.clone()),
+            project: Some(project.clone()),
+            created: now_ms(),
+        },
     );
-    let e = app.state::<crate::AppState>().ledger.record(
-        &agent_id,
-        "command",
-        &format!("awaiting approval · {}", truncate(&command, 46)),
-        1,
-    );
-    let _ = app.emit("ledger://entry", e);
+    let record = |what: &str| {
+        let e = state.ledger.record(&agent_id, "permission", &format!("{what} · {}", truncate(&subject, 46)), 1);
+        let _ = app.emit("ledger://entry", e);
+    };
+    record("awaiting approval");
     crate::pty::emit_status(app, &agent_id, AgentStatus::Blocked);
 
     let decision = rx.recv().unwrap_or_default();
-    app.state::<crate::AppState>()
-        .reviews
-        .lock()
-        .unwrap()
-        .remove(&id);
+    let choice = choice_of(&decision);
+    let approved = !matches!(choice, Choice::Deny);
+    let outcome = match &choice {
+        Choice::Deny if decision.is_empty() => "No longer needed".to_string(),
+        Choice::Deny => "Denied".to_string(),
+        Choice::Once => "Allowed once".to_string(),
+        Choice::Grant(scope) => {
+            // The rule comes from this exact request, never from what the UI or agent sent.
+            let (task_id, project_root) = match scope {
+                crate::policy::Scope::Task => (task.as_deref(), None),
+                crate::policy::Scope::Project => (None, Some(project.as_str())),
+                crate::policy::Scope::Everywhere => (None, None),
+            };
+            let saved = match (&key, scope) {
+                (Some(_), crate::policy::Scope::Task) if task_id.is_none() => None,
+                (Some(k), _) => state.ledger.add_rule(scope.as_str(), task_id, project_root, k, assessment.rule.label(), assessment.tier.as_str()),
+                (None, _) => None,
+            };
+            match (saved, scope) {
+                (Some(_), crate::policy::Scope::Task) => "Allowed for this task".into(),
+                (Some(_), crate::policy::Scope::Project) => "Always allowed in this project".into(),
+                (Some(_), crate::policy::Scope::Everywhere) => "Always allowed everywhere".into(),
+                (None, _) => "Allowed once".into(),
+            }
+        }
+    };
+    close_review(app, &id, &outcome);
     crate::pty::emit_status(app, &agent_id, AgentStatus::Working);
+    if matches!(choice, Choice::Grant(_)) {
+        let _ = app.emit("rules://changed", ());
+    }
 
-    let approved = decision.starts_with("Allow");
-    let _ = writer.write_all(
-        (serde_json::json!({ "approved": approved }).to_string() + "\n").as_bytes(),
-    );
+    record(if approved { "allowed" } else { "denied" });
+    crate::tasks::decision(app, &agent_id, &format!("{} ({})", truncate(&subject, 80), assessment.rule.title()), &outcome, Some(approved));
+    let reason = if approved {
+        String::new()
+    } else {
+        format!("The developer didn't allow this ({}). Find another way, or ask them with ask_human.", assessment.rule.label())
+    };
+    Verdict { approved, reason }
 }

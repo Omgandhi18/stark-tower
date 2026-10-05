@@ -1,16 +1,29 @@
 mod agents;
+mod automations;
 mod breaker;
 mod bridge;
 mod chat;
+mod codex;
 mod config;
 mod delegation;
 mod engine;
 mod floor;
+mod gate;
+mod health;
 mod ledger;
+mod lifecycle;
+mod notify;
+mod opencode;
 mod proc;
 mod prompts;
+mod power;
+mod providers;
+mod policy;
 mod pty;
+mod rpc;
+mod schedule;
 mod secrets;
+mod tasks;
 mod update;
 
 use agents::{Agent, AgentKind, AgentStatus};
@@ -48,6 +61,8 @@ pub struct AppState {
     pub sock_token: String,
     /// Pending human-review requests (id → channel that unblocks the agent).
     pub reviews: Mutex<HashMap<String, std::sync::mpsc::Sender<String>>>,
+    /// What each pending review is about, so the UI can list them again.
+    pub pending_reviews: Mutex<HashMap<String, bridge::ReviewRequest>>,
     /// The current batch of background delegations JARVIS is waiting on, so their
     /// results can be synthesized back to him in one follow-up when all finish.
     pub delegations: Mutex<chat::DelegationState>,
@@ -61,6 +76,10 @@ pub struct AppState {
     pub oneshot_pids: Mutex<HashSet<u32>>,
     /// Directory holding each agent's durable `<id>.md` memory file.
     pub memory_dir: String,
+    /// Which task each agent is on, and the work waiting for busy agents.
+    pub tasks: tasks::TaskEngine,
+    /// The bridge and gate scripts agents' providers run.
+    pub scripts: health::BridgeScripts,
     /// The git-versioned floor: an append-only event log + per-agent mailboxes,
     /// making the run observable and recoverable.
     pub floor_dir: String,
@@ -68,6 +87,10 @@ pub struct AppState {
     pub secrets: Mutex<secrets::SecretStore>,
     /// Where the secret store is persisted (0600).
     pub secrets_file: String,
+    /// Keep-awake power assertion.
+    pub power: power::PowerManager,
+    /// Provider CLI versions, probed once per launch.
+    pub probes: health::Probes,
 }
 
 impl AppState {
@@ -89,6 +112,25 @@ fn default_workdir() -> String {
 
 /// A per-launch secret for the delegation socket. 16 bytes from the OS CSPRNG,
 /// hex-encoded; falls back to a time+pid mix if /dev/urandom is unavailable.
+/// macOS keeps a socket's path under 104 bytes, the terminating NUL included.
+const MAX_SOCKET_PATH: usize = 103;
+const BRIDGE_SOCKET_PREFIX: &str = "starkline-bridge-";
+/// Enough random characters that the name can't be guessed, short enough to fit.
+const SOCKET_NAME_RANDOM: usize = 8;
+
+/// Where the bridge listens: a short random name in the app data folder (user-only),
+/// or, when that path would be too long for a socket, in this user's private temp folder.
+fn bridge_socket_path(data_dir: &std::path::Path, private_tmp: &std::path::Path, random: &str) -> std::path::PathBuf {
+    let tail: String = random.chars().take(SOCKET_NAME_RANDOM).collect();
+    let name = format!("{BRIDGE_SOCKET_PREFIX}{tail}.sock");
+    let preferred = data_dir.join(&name);
+    if preferred.as_os_str().len() <= MAX_SOCKET_PATH {
+        preferred
+    } else {
+        private_tmp.join(name)
+    }
+}
+
 fn gen_token() -> String {
     let mut buf = [0u8; 16];
     let ok = std::fs::File::open("/dev/urandom")
@@ -352,7 +394,7 @@ fn chat_send(
     agent_id: String,
     text: String,
     dir: Option<String>,
-) -> Result<(), String> {
+) -> Result<Option<i64>, String> {
     let cwd = dir
         .filter(|d| !d.trim().is_empty())
         .map(|d| shellexpand_home(d.trim()))
@@ -365,21 +407,188 @@ fn chat_send(
                 .cloned()
                 .unwrap_or_else(|| current_project(&state))
         });
-    state
-        .workdirs
-        .lock()
-        .unwrap()
-        .insert(agent_id.clone(), cwd.clone());
+    // A follow-up in a task's conversation picks that task back up.
+    tasks::developer_message(&app, &agent_id);
+    // The stored id goes back to the UI, which already shows the message, to avoid a repeat.
+    chat::send_user_turn(&app, &agent_id, &text, &cwd)
+}
 
-    let e = state
-        .ledger
-        .record(&agent_id, "chat", &truncate(&text, 80), 1);
-    let _ = app.emit("ledger://entry", e);
-    // Persist the user turn so the transcript can be rebuilt on reopen.
-    state.ledger.add_message(&agent_id, "user", Some(&text), None, None);
-    let _ = app.emit("conversations://changed", ()); // a title/order may have changed
+/// Pick an interrupted task back up where it left off, in its own conversation.
+#[tauri::command]
+#[specta::specta]
+fn resume_task(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    tasks::resume(&app, &id)
+}
 
-    chat::send(&app, &agent_id, &text, &cwd, &state.sock_path)
+/// Quit for real: every agent session stops. (Closing the window doesn't.)
+#[tauri::command]
+#[specta::specta]
+fn quit_app(app: tauri::AppHandle) {
+    lifecycle::quit(&app);
+}
+
+/// Whether Starkline opens at login, in the background.
+#[tauri::command]
+#[specta::specta]
+fn login_item_enabled(app: tauri::AppHandle) -> bool {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_login_item(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let launcher = app.autolaunch();
+    let result = if enabled { launcher.enable() } else { launcher.disable() };
+    result.map_err(|e| format!("macOS didn't accept the change: {e}"))?;
+    launcher.is_enabled().map_err(|e| e.to_string())
+}
+
+/// Hand work to an agent as a task: it starts in a conversation of its own, or
+/// waits its turn if the agent is busy.
+#[tauri::command]
+#[specta::specta]
+fn start_task(
+    app: tauri::AppHandle,
+    agent_id: String,
+    prompt: String,
+    dir: Option<String>,
+) -> Result<ledger::Task, String> {
+    tasks::start(&app, &agent_id, &prompt, dir.map(|d| shellexpand_home(d.trim())))
+}
+
+/// The Notification Centre's record, newest first.
+#[tauri::command]
+#[specta::specta]
+fn list_notifications(state: tauri::State<AppState>, limit: Option<i64>) -> Vec<ledger::Notification> {
+    state.ledger.notifications(limit.unwrap_or(500))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn mark_notifications_read(app: tauri::AppHandle, state: tauri::State<AppState>, ids: Vec<i64>) {
+    state.ledger.mark_notifications_read(&ids);
+    let _ = app.emit("notifications://changed", ());
+}
+
+#[tauri::command]
+#[specta::specta]
+fn mark_all_notifications_read(app: tauri::AppHandle, state: tauri::State<AppState>) {
+    state.ledger.mark_all_notifications_read();
+    let _ = app.emit("notifications://changed", ());
+}
+
+/// Permission rules the developer granted (revoked ones too, when asked).
+#[tauri::command]
+#[specta::specta]
+fn list_permission_rules(state: tauri::State<AppState>, include_revoked: bool) -> Vec<policy::PermissionRule> {
+    state.ledger.rules(include_revoked)
+}
+
+/// What Starkline can do with an agent on each kind of provider, as built.
+#[tauri::command]
+#[specta::specta]
+fn provider_capabilities() -> Vec<providers::ProviderCapabilities> {
+    providers::all()
+}
+
+/// The models a provider offers, as its CLI lists them (asked off the main thread).
+#[tauri::command]
+#[specta::specta]
+async fn provider_models(app: tauri::AppHandle, engine_id: String) -> Result<Vec<providers::ModelChoice>, String> {
+    let engine = {
+        let state = app.state::<AppState>();
+        let config = state.config.lock().unwrap();
+        config.engines.iter().find(|e| e.id == engine_id).cloned().ok_or("That provider doesn't exist.")?
+    };
+    let program = chat::resolve_program(&engine.command).ok_or_else(|| format!("{} isn't installed on this Mac.", engine.label))?;
+    tauri::async_runtime::spawn_blocking(move || providers::models(&engine.kind, &program))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Starkline's permission policy: every rule and whether it runs on its own,
+/// asks first, or never runs on its own.
+#[tauri::command]
+#[specta::specta]
+fn permission_policy() -> Vec<gate::PolicyRule> {
+    gate::policy()
+}
+
+/// Take back a rule: the calls it covered need approval again.
+#[tauri::command]
+#[specta::specta]
+fn revoke_permission_rule(app: tauri::AppHandle, state: tauri::State<AppState>, id: i64) -> bool {
+    let revoked = state.ledger.revoke_rule(id);
+    if revoked {
+        let _ = app.emit("rules://changed", ());
+    }
+    revoked
+}
+
+/// Every automation, by name.
+#[tauri::command]
+#[specta::specta]
+fn list_automations(app: tauri::AppHandle) -> Vec<ledger::Automation> {
+    automations::list(&app)
+}
+
+/// Create an automation (no id) or change one; it's checked before it's saved.
+#[tauri::command]
+#[specta::specta]
+fn save_automation(app: tauri::AppHandle, input: automations::AutomationInput) -> Result<ledger::Automation, String> {
+    automations::save(&app, input)
+}
+
+/// Pause an automation or turn it back on (its next run counts from now).
+#[tauri::command]
+#[specta::specta]
+fn set_automation_enabled(app: tauri::AppHandle, id: i64, enabled: bool) -> Result<ledger::Automation, String> {
+    automations::set_enabled(&app, id, enabled)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn delete_automation(app: tauri::AppHandle, id: i64) -> Result<(), String> {
+    automations::delete(&app, id)
+}
+
+/// Run an automation now, outside its schedule.
+#[tauri::command]
+#[specta::specta]
+fn run_automation_now(app: tauri::AppHandle, id: i64) -> Result<ledger::AutomationRun, String> {
+    automations::run_now(&app, id)
+}
+
+/// Don't make up a missed run; wait for the next one.
+#[tauri::command]
+#[specta::specta]
+fn skip_missed_run(app: tauri::AppHandle, id: i64) {
+    automations::skip_missed(&app, id)
+}
+
+/// An automation's runs, newest first.
+#[tauri::command]
+#[specta::specta]
+fn list_automation_runs(app: tauri::AppHandle, id: i64) -> Vec<ledger::AutomationRun> {
+    automations::runs(&app, id)
+}
+
+/// Everything the task screen shows: the task, what it delegated, its history,
+/// plan, checks, uncommitted changes and conversation.
+#[tauri::command]
+#[specta::specta]
+fn get_task_detail(app: tauri::AppHandle, id: String) -> Option<tasks::TaskDetail> {
+    tasks::detail(&app, &id)
+}
+
+/// The readable diff of one changed file in a task's folder.
+#[tauri::command]
+#[specta::specta]
+fn get_task_file_diff(state: tauri::State<AppState>, id: String, path: String) -> Result<String, String> {
+    let task = state.ledger.task(&id).ok_or("That task doesn't exist.")?;
+    tasks::file_diff(&task.cwd, &path)
 }
 
 /// The persisted transcript for an agent's active conversation (for rehydration).
@@ -407,12 +616,24 @@ fn list_conversations(state: tauri::State<AppState>) -> Vec<ledger::Conversation
     state.ledger.conversations(200)
 }
 
+/// End an agent's live session because the developer chose to (stop, new chat,
+/// another chat, removed or turned off). A task it was running is marked blocked.
+fn stop_by_developer(app: &tauri::AppHandle, agent_id: &str) {
+    tasks::session_ended(app, agent_id, tasks::Ended::ByYou);
+    chat::stop(app, agent_id);
+}
+
+/// Tell the UI an agent now talks in a different conversation.
+fn emit_chat_switched(app: &tauri::AppHandle, agent_id: &str, conversation_id: i64) {
+    let _ = app.emit("chat://switched", serde_json::json!({ "agentId": agent_id, "conversationId": conversation_id }));
+}
+
 /// Start a fresh conversation with an agent (ends the live session so the next
 /// message begins a genuinely new chat). Returns the new conversation id.
 #[tauri::command]
 #[specta::specta]
 fn new_chat(app: tauri::AppHandle, state: tauri::State<AppState>, agent_id: String) -> i64 {
-    chat::stop(&app, &agent_id);
+    stop_by_developer(&app, &agent_id);
     let cwd = state
         .workdirs
         .lock()
@@ -421,6 +642,7 @@ fn new_chat(app: tauri::AppHandle, state: tauri::State<AppState>, agent_id: Stri
         .cloned()
         .unwrap_or_else(|| current_project(&state));
     let id = state.ledger.new_conversation(&agent_id, &cwd);
+    emit_chat_switched(&app, &agent_id, id);
     let _ = app.emit("conversations://changed", ());
     id
 }
@@ -432,10 +654,11 @@ fn new_chat(app: tauri::AppHandle, state: tauri::State<AppState>, agent_id: Stri
 fn open_conversation(app: tauri::AppHandle, state: tauri::State<AppState>, conversation_id: i64) {
     state.ledger.open_conversation(conversation_id);
     if let Some(c) = state.ledger.conversation(conversation_id) {
-        chat::stop(&app, &c.agent_id);
+        stop_by_developer(&app, &c.agent_id);
         if !c.cwd.trim().is_empty() {
             state.workdirs.lock().unwrap().insert(c.agent_id.clone(), c.cwd.clone());
         }
+        emit_chat_switched(&app, &c.agent_id, conversation_id);
     }
     let _ = app.emit("conversations://changed", ());
 }
@@ -506,13 +729,85 @@ fn list_files(dir: String, limit: Option<usize>) -> Vec<PathEntry> {
 #[specta::specta]
 fn chat_stop(app: tauri::AppHandle, agent_id: String) {
     // Only the live session ends; the transcript stays in saved chats.
-    chat::stop(&app, &agent_id);
+    stop_by_developer(&app, &agent_id);
+}
+
+/// What the agent runtime can do right now: installed provider CLIs, the data
+/// store and the agent bridge.
+#[tauri::command]
+#[specta::specta]
+fn runtime_health(app: tauri::AppHandle, state: tauri::State<AppState>) -> health::RuntimeHealth {
+    let engines = state.config.lock().unwrap().engines.clone();
+    let engines = engines
+        .iter()
+        .map(|e| {
+            let path = chat::resolve_program(&e.command);
+            let version = path.as_deref().and_then(|p| state.probes.version_of(&app, p));
+            let sign_in = path.as_deref().and_then(|p| state.probes.sign_in_of(&app, &e.kind, p));
+            health::EngineHealth {
+                id: e.id.clone(),
+                label: e.label.clone(),
+                kind: e.kind.clone(),
+                enabled: e.enabled,
+                installed: path.is_some(),
+                path,
+                version,
+                sign_in,
+            }
+        })
+        .collect();
+    let node_path = chat::resolve_program("node");
+    let node = node_path.as_deref().and_then(|p| state.probes.version_of(&app, p));
+    health::RuntimeHealth {
+        host: "app".into(),
+        engines,
+        data_store: state.ledger.healthy(),
+        bridge: health::bridge_up(),
+        bridge_error: health::bridge_error(),
+        live_sessions: state.chat.sessions.lock().unwrap().len() as u32,
+        node,
+        node_path,
+        background: true,
+    }
+}
+
+/// Whether Starkline is keeping this Mac awake, and why.
+#[tauri::command]
+#[specta::specta]
+fn power_state(app: tauri::AppHandle) -> power::PowerState {
+    power::state(&app)
+}
+
+/// Allow (or stop allowing) Starkline to keep this Mac awake while agents work.
+#[tauri::command]
+#[specta::specta]
+fn set_keep_awake(app: tauri::AppHandle, state: tauri::State<AppState>, enabled: bool) -> power::PowerState {
+    state.config.lock().unwrap().keep_awake = enabled;
+    state.save_config();
+    state.power.set_enabled(enabled);
+    power::state(&app)
+}
+
+/// Everything agents are currently blocked on, oldest first.
+#[tauri::command]
+#[specta::specta]
+fn pending_reviews(state: tauri::State<AppState>) -> Vec<bridge::ReviewRequest> {
+    let mut list: Vec<_> = state.pending_reviews.lock().unwrap().values().cloned().collect();
+    list.sort_by(|a, b| a.created.total_cmp(&b.created));
+    list
 }
 
 /// Deliver the human's decision back to a blocked `ask_human` review.
 #[tauri::command]
 #[specta::specta]
 fn review_respond(state: tauri::State<AppState>, id: String, decision: String) {
+    // A question and its answer belong in the agent's conversation history.
+    let question = state.pending_reviews.lock().unwrap().get(&id).cloned();
+    if let Some(q) = question.filter(|q| q.kind == "questions") {
+        let asked = if q.body.trim().is_empty() { &q.title } else { &q.body };
+        state.ledger.add_message(&q.agent_id, "agent", Some(asked), None, None);
+        state.ledger.add_message(&q.agent_id, "user", Some(&decision), None, None);
+    }
     if let Some(tx) = state.reviews.lock().unwrap().remove(&id) {
         let _ = tx.send(decision);
     }
@@ -547,6 +842,10 @@ fn update_agent(
     state: tauri::State<AppState>,
     agent: AgentConfig,
 ) -> AppConfig {
+    // Turning an agent off ends its live session; its chats are kept.
+    if !agent.enabled {
+        stop_by_developer(&app, &agent.id);
+    }
     {
         let mut cfg = state.config.lock().unwrap();
         match cfg.agents.iter_mut().find(|a| a.id == agent.id) {
@@ -560,6 +859,7 @@ fn update_agent(
 #[tauri::command]
 #[specta::specta]
 fn remove_agent(app: tauri::AppHandle, state: tauri::State<AppState>, id: String) -> AppConfig {
+    stop_by_developer(&app, &id);
     {
         let mut cfg = state.config.lock().unwrap();
         cfg.agents.retain(|a| a.id != id);
@@ -621,6 +921,17 @@ fn set_lighting(app: tauri::AppHandle, state: tauri::State<AppState>, mode: Stri
     commit_config(&app, &state)
 }
 
+/// Change how Starkline looks; nothing about the work changes with it.
+#[tauri::command]
+#[specta::specta]
+fn set_theme(app: tauri::AppHandle, state: tauri::State<AppState>, theme: String) -> Result<AppConfig, String> {
+    if !config::THEMES.contains(&theme.as_str()) {
+        return Err("That theme isn't one Starkline has.".into());
+    }
+    state.config.lock().unwrap().theme = theme;
+    Ok(commit_config(&app, &state))
+}
+
 /// Set the standup mission cadence in minutes (0 = off).
 #[tauri::command]
 #[specta::specta]
@@ -652,6 +963,14 @@ fn get_ledger(state: tauri::State<AppState>, limit: Option<i64>) -> Vec<LedgerEn
 #[specta::specta]
 fn get_tasks(state: tauri::State<AppState>, limit: Option<i64>) -> Vec<ledger::Task> {
     state.ledger.tasks(limit.unwrap_or(50))
+}
+
+/// Close a task card once it's been reviewed: it leaves the Work board but stays
+/// in history.
+#[tauri::command]
+#[specta::specta]
+fn close_task(app: tauri::AppHandle, id: String) {
+    tasks::close(&app, &id);
 }
 
 /// An agent's durable memory (the markdown it curates across sessions).
@@ -712,12 +1031,22 @@ reversible), and briefly say what you changed. If one is too vague to act on, sa
         ));
     }
     let repo = repo_root();
-    state.workdirs.lock().unwrap().insert("dum-e".into(), repo.clone());
+    // Names are the developer's to choose: find the maintenance agent by its kind.
+    let maintainer = state
+        .config
+        .lock()
+        .unwrap()
+        .agents
+        .iter()
+        .find(|a| a.kind == agents::AgentKind::Maintenance && a.enabled)
+        .map(|a| a.id.clone())
+        .ok_or("There's no maintenance agent on the roster.")?;
+    state.workdirs.lock().unwrap().insert(maintainer.clone(), repo.clone());
     let ids: Vec<i64> = bugs.iter().map(|b| b.id).collect();
 
     std::thread::spawn(move || {
         // A run that fails or ends without a result fixed nothing: reopen the bugs.
-        let outcome = chat::run_task_blocking(&app, "dum-e", &task, &repo);
+        let outcome = chat::run_task_blocking(&app, tasks::BY_DEVELOPER, &maintainer, &task, &repo);
         let fixed = matches!(&outcome, Ok(result) if !result.trim().is_empty());
         if let Some(state) = app.try_state::<AppState>() {
             for id in ids {
@@ -876,7 +1205,7 @@ fn dispatch_task(
     rows: u16,
 ) -> Result<DispatchResult, String> {
     if prompt.trim().is_empty() {
-        return Err("Empty task — nothing to route.".into());
+        return Err("The task is empty, so there is nothing to route.".into());
     }
 
     let roster = state.roster.lock().unwrap().clone();
@@ -895,7 +1224,7 @@ fn dispatch_task(
             .map(|w| (*w).clone());
     }
 
-    let agent = chosen.ok_or("All agents are busy — wait for one to free up.")?;
+    let agent = chosen.ok_or("Every agent is busy. Try again when one is free.")?;
 
     let route = state.ledger.record(
         "jarvis",
@@ -988,6 +1317,29 @@ fn specta_builder() -> tauri_specta::Builder {
             list_agents,
             get_ledger,
             get_tasks,
+            close_task,
+            start_task,
+            resume_task,
+            quit_app,
+            login_item_enabled,
+            set_login_item,
+            get_task_detail,
+            get_task_file_diff,
+            list_notifications,
+            mark_notifications_read,
+            mark_all_notifications_read,
+            list_permission_rules,
+            revoke_permission_rule,
+            permission_policy,
+            provider_capabilities,
+            provider_models,
+            list_automations,
+            save_automation,
+            set_automation_enabled,
+            delete_automation,
+            run_automation_now,
+            skip_missed_run,
+            list_automation_runs,
             get_memory,
             get_bugs,
             set_bug_status,
@@ -1014,6 +1366,10 @@ fn specta_builder() -> tauri_specta::Builder {
             open_conversation,
             list_files,
             review_respond,
+            pending_reviews,
+            runtime_health,
+            power_state,
+            set_keep_awake,
             get_config,
             update_agent,
             remove_agent,
@@ -1021,6 +1377,7 @@ fn specta_builder() -> tauri_specta::Builder {
             remove_engine,
             set_onboarded,
             set_lighting,
+            set_theme,
             set_standup_minutes,
             reset_config
         ],
@@ -1032,6 +1389,13 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![lifecycle::BACKGROUND_ARG]),
+        ))
+        .on_window_event(lifecycle::on_window_event)
         .setup(|app| {
             let data_dir = app
                 .path()
@@ -1041,23 +1405,22 @@ pub fn run() {
             let ledger =
                 Ledger::open(&data_dir.join("ledger.db")).expect("failed to open ledger db");
 
-            // Per-launch token + a randomly-named socket inside the app data dir
-            // (which is user-only, 0700), instead of a predictable world-reachable
-            // /tmp path. Sweep any stale delegate sockets from a previous run.
+            // Per-launch token + a randomly-named socket in a user-only folder,
+            // instead of a predictable world-reachable /tmp path. Sweep any stale
+            // bridge sockets from a previous run.
             let sock_token = gen_token();
-            if let Ok(rd) = std::fs::read_dir(&data_dir) {
-                for e in rd.flatten() {
-                    let n = e.file_name();
-                    let n = n.to_string_lossy();
-                    if n.starts_with("delegate-") && n.ends_with(".sock") {
-                        let _ = std::fs::remove_file(e.path());
+            for dir in [data_dir.clone(), std::env::temp_dir()] {
+                if let Ok(rd) = std::fs::read_dir(&dir) {
+                    for e in rd.flatten() {
+                        let n = e.file_name();
+                        let n = n.to_string_lossy();
+                        if (n.starts_with("delegate-") || n.starts_with(BRIDGE_SOCKET_PREFIX)) && n.ends_with(".sock") {
+                            let _ = std::fs::remove_file(e.path());
+                        }
                     }
                 }
             }
-            let sock_path = data_dir
-                .join(format!("delegate-{sock_token}.sock"))
-                .to_string_lossy()
-                .to_string();
+            let sock_path = bridge_socket_path(&data_dir, &std::env::temp_dir(), &gen_token()).to_string_lossy().to_string();
             let projects_file = data_dir.join("projects.json").to_string_lossy().to_string();
             let (projects, active) = load_projects(&projects_file);
 
@@ -1102,20 +1465,40 @@ pub fn run() {
                 sock_path: sock_path.clone(),
                 sock_token: sock_token.clone(),
                 reviews: Mutex::new(HashMap::new()),
+                pending_reviews: Mutex::new(HashMap::new()),
                 delegations: Mutex::new(chat::DelegationState::default()),
                 config: Mutex::new(cfg),
                 config_file,
                 oneshot_pids: Mutex::new(HashSet::new()),
                 memory_dir,
+                tasks: tasks::TaskEngine::default(),
+                scripts: health::BridgeScripts::resolve(app.handle()),
                 floor_dir,
                 secrets: Mutex::new(secret_store),
                 secrets_file,
+                power: power::PowerManager::default(),
+                probes: health::Probes::default(),
             });
+            {
+                let state = app.state::<AppState>();
+                let enabled = state.config.lock().unwrap().keep_awake;
+                state.power.set_enabled(enabled);
+            }
+            start_power_monitor(app.handle().clone());
 
             pty::start_idle_monitor(app.handle().clone());
             bridge::start_delegation_server(app.handle().clone(), sock_path);
             start_mission_scheduler(app.handle().clone());
             start_floor_router(app.handle().clone());
+            if let Err(e) = lifecycle::setup_tray(app.handle()) {
+                eprintln!("[lifecycle] couldn't add the menu bar item: {e}");
+            }
+            // Opened at login, it starts in the background; otherwise the window shows.
+            if !lifecycle::launched_in_background() {
+                lifecycle::show_main(app.handle());
+            }
+            // Recovery first, then the automation scheduler.
+            automations::start(app.handle().clone());
             {
                 let h = app.handle().clone();
                 std::thread::spawn(move || update::check(&h));
@@ -1124,20 +1507,8 @@ pub fn run() {
         })
         .invoke_handler(specta_builder.invoke_handler())
         .build(tauri::generate_context!())
-        .expect("error while building Stark Tower")
-        .run(|app_handle, event| {
-            if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
-                cleanup_children(app_handle);
-            }
-        });
-}
-
-/// On quit, SIGKILL the process group of every live agent — persistent chat
-/// sessions, one-shot delegation workers, and interactive PTYs — so no `claude`
-/// (or the tools it spawned) is left orphaned.
-fn cleanup_children(app: &tauri::AppHandle) {
-    chat::kill_all(app);
-    pty::kill_all(app);
+        .expect("error while building Starkline")
+        .run(|app_handle, event| lifecycle::on_run_event(app_handle, &event));
 }
 
 /// The floor router: move outbox messages to inboxes (single mover), then drain
@@ -1180,6 +1551,15 @@ fn start_floor_router(app: tauri::AppHandle) {
     });
 }
 
+/// Re-checks keep-awake on a timer, so the waiting-on-you grace period ends even
+/// when no agent changes status.
+fn start_power_monitor(app: tauri::AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(power::RECHECK_EVERY);
+        power::sync(&app);
+    });
+}
+
 /// Background loop that fires the standup mission every `standup_minutes` (0 =
 /// off). It only nudges a live orchestrator — never spawns one — so autonomy
 /// stays within a session the user actually opened.
@@ -1202,6 +1582,33 @@ fn start_mission_scheduler(app: tauri::AppHandle) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_bridge_socket_always_fits_and_listens() {
+        let random = "0123456789abcdef0123456789abcdef";
+        // This Mac's real data folder: the old name made a 114-byte path, too long for a socket.
+        let home = std::env::var("HOME").unwrap_or_default();
+        let data = std::path::PathBuf::from(format!("{home}/Library/Application Support/com.omgandhi.starktower"));
+        let private_tmp = std::env::temp_dir();
+        let chosen = bridge_socket_path(&data, &private_tmp, random);
+        assert!(chosen.as_os_str().len() <= MAX_SOCKET_PATH, "{chosen:?}");
+        assert!(chosen.starts_with(&data), "a short name fits in the data folder");
+        assert_eq!(chosen.file_name().unwrap(), "starkline-bridge-01234567.sock");
+
+        // A folder too deep for any socket name falls back to the private temp folder.
+        let deep = std::path::PathBuf::from(format!("/{}", "deep/".repeat(30)));
+        let fallback = bridge_socket_path(&deep, &private_tmp, random);
+        assert!(fallback.starts_with(&private_tmp) && fallback.as_os_str().len() <= MAX_SOCKET_PATH);
+
+        // And a socket really listens at a path chosen this way.
+        let dir = private_tmp.join(format!("starkline-bridge-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = bridge_socket_path(&dir, &private_tmp, random);
+        let listener = std::os::unix::net::UnixListener::bind(&path);
+        assert!(listener.is_ok(), "{path:?}: {:?}", listener.err());
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     #[test]

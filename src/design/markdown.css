@@ -1,0 +1,158 @@
+/* Agent-written markdown. Type follows the app scale; code uses the mono face. */
+.markdown {
+  min-width: 0;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.markdown-plain { white-space: pre-wrap; }
+
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown table,
+.markdown .md-code {
+  margin: 0 0 var(--space-3);
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: var(--space-5) 0 var(--space-2);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+}
+
+.markdown h1 { font-size: var(--text-xl); }
+.markdown h2 { font-size: var(--text-lg); }
+.markdown h3,
+.markdown h4 { font-size: var(--text-md); }
+
+.markdown ul,
+.markdown ol { padding-left: 1.4em; }
+.markdown li + li { margin-top: 3px; }
+.markdown li > p { margin: 0; }
+
+.markdown a {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-decoration-color: rgb(95 217 232 / 0.4);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.markdown a:hover { text-decoration-color: currentColor; }
+
+.markdown strong { font-weight: var(--weight-semibold); }
+
+.markdown blockquote {
+  padding: 2px 0 2px var(--space-3);
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.markdown hr {
+  margin: var(--space-4) 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.markdown :not(pre) > code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--surface-hover);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+
+.markdown table {
+  display: block;
+  max-width: 100%;
+  border-collapse: collapse;
+  overflow-x: auto;
+  font-size: var(--text-sm);
+}
+
+.markdown th,
+.markdown td {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--surface-hover);
+  font-weight: var(--weight-semibold);
+}
+
+.markdown input[type="checkbox"] {
+  margin: 0 6px 0 0;
+  vertical-align: -1px;
+  accent-color: var(--accent);
+}
+
+/* Code blocks */
+.md-code {
+  position: relative;
+}
+
+.md-code pre {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  overflow-x: auto;
+  tab-size: 2;
+}
+
+.md-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  opacity: 0;
+  background: var(--surface-overlay);
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.md-code:hover .md-copy,
+.md-copy:focus-visible {
+  opacity: 1;
+}
+
+/* Syntax colours: the accent for structure, state hues for literals. */
+.markdown .hljs { color: var(--text); }
+.markdown .hljs-comment,
+.markdown .hljs-quote { color: var(--text-muted); font-style: italic; }
+.markdown .hljs-keyword,
+.markdown .hljs-selector-tag,
+.markdown .hljs-built_in,
+.markdown .hljs-type,
+.markdown .hljs-literal { color: var(--accent-text); }
+.markdown .hljs-string,
+.markdown .hljs-regexp,
+.markdown .hljs-symbol,
+.markdown .hljs-bullet,
+.markdown .hljs-addition { color: var(--state-success); }
+.markdown .hljs-number,
+.markdown .hljs-meta { color: var(--state-attention); }
+.markdown .hljs-title,
+.markdown .hljs-title.function_,
+.markdown .hljs-section,
+.markdown .hljs-name { color: var(--state-review); }
+.markdown .hljs-attr,
+.markdown .hljs-attribute,
+.markdown .hljs-variable,
+.markdown .hljs-template-variable,
+.markdown .hljs-property { color: var(--text-secondary); }
+.markdown .hljs-deletion { color: var(--state-danger); }
+.markdown .hljs-emphasis { font-style: italic; }
+.markdown .hljs-strong { font-weight: var(--weight-semibold); }
