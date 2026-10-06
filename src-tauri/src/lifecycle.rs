@@ -136,6 +136,7 @@ pub fn on_run_event(app: &tauri::AppHandle, event: &tauri::RunEvent) {
             } else {
                 crate::chat::kill_all(app);
                 crate::pty::kill_all(app);
+                app.state::<crate::AppState>().terminals.kill_all();
             }
         }
         #[cfg(target_os = "macos")]

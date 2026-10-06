@@ -298,3 +298,12 @@ pub fn reminder_settled(app: &tauri::AppHandle, reminder_id: i64, outcome: &str)
         changed(app);
     }
 }
+
+/// Budget warnings never stop work; they point the developer to their settings.
+pub fn budget(app: &tauri::AppHandle, agent_id: &str, exhausted: bool, title: &str) {
+    add(app, NewNotification {
+        kind: "budget", urgency: if exhausted { NEEDS_YOU } else { UPDATE },
+        agent_id, title, body: "Open Settings → Spend to review your budget. Agents keep working.",
+        ..Default::default()
+    }, "Spending budget");
+}

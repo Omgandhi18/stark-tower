@@ -159,6 +159,18 @@ function install(scenario: Scenario) {
     emit("notifications://changed", null);
   };
 
+  let nextTerminal = state.terminals.length;
+  const terminalChannels = new Map<string, { callback: number; index: number }>();
+  const terminalOutput = (id: string, text: string, exit_code: number | null = null) => {
+    const terminal = state.terminals.find((t) => t.id === id);
+    if (!terminal) return;
+    const data = Array.from(new TextEncoder().encode(text));
+    terminal.output = [...terminal.output, ...data].slice(-256 * 1024);
+    terminal.offset += data.length;
+    const channel = terminalChannels.get(id);
+    if (channel) callbacks.get(channel.callback)?.({ index: channel.index++, message: { data, offset: terminal.offset, exit_code } });
+  };
+
   const commands: Record<string, (args: Json) => unknown> = {
     "plugin:event|listen": (args) => {
       const event = String(args.event);
@@ -177,8 +189,109 @@ function install(scenario: Scenario) {
     "plugin:window|close": () => null,
     "plugin:window|set_fullscreen": () => null,
     "plugin:window|is_fullscreen": () => false,
+    terminal_list: () => state.terminals.map((t) => ({ id: t.id, folder: t.folder, title: t.title, shell: t.shell, alive: t.alive, exit_code: t.exit_code, program_running: t.program_running, note: t.note })),
+    terminal_open: (args) => {
+      const id = `terminal-${nextTerminal++}`;
+      const info = { id, folder: String(args.folder || "/Users/dev"), title: "zsh", shell: "zsh", alive: true, exit_code: null, program_running: false, note: args.folder ? null : "No project folder was selected. This terminal opened in your home folder." };
+      state.terminals.push({ ...info, output: Array.from(new TextEncoder().encode("$ ")), offset: 2, input: "" });
+      return info;
+    },
+    terminal_attach: (args) => {
+      const id = String(args.id);
+      const channel = args.channel as { id: number };
+      terminalChannels.set(id, { callback: channel.id, index: 0 });
+      const terminal = state.terminals.find((t) => t.id === id)!;
+      return { data: terminal.output, offset: terminal.offset, exit_code: terminal.exit_code };
+    },
+    terminal_write: (args) => {
+      const terminal = state.terminals.find((t) => t.id === args.id)!;
+      for (const char of String(args.data)) {
+        if (char === "\r" || char === "\n") {
+          const command = terminal.input;
+          terminal.input = "";
+          if (command === "exit") {
+            terminal.alive = false; terminal.exit_code = 0;
+            terminalOutput(terminal.id, "\r\n", 0);
+          } else if (command === "npm run dev") {
+            terminal.program_running = true; terminal.title = command;
+            terminalOutput(terminal.id, "\r\n\x1b]0;npm run dev\x07Server ready at http://localhost:5173\r\n");
+          } else {
+            terminalOutput(terminal.id, `\r\n${command.startsWith("echo ") ? command.slice(5) + "\r\n" : ""}$ `);
+          }
+        } else if (char === "\x7f") {
+          terminal.input = terminal.input.slice(0, -1); terminalOutput(terminal.id, "\b \b");
+        } else { terminal.input += char; terminalOutput(terminal.id, char); }
+      }
+      return null;
+    },
+    terminal_resize: () => null,
+    terminal_title: (args) => { const terminal = state.terminals.find((t) => t.id === args.id); if (terminal) terminal.title = String(args.title); return null; },
+    terminal_close: (args) => { state.terminals = state.terminals.filter((t) => t.id !== args.id); terminalChannels.delete(String(args.id)); return null; },
     list_agents: () => roster(),
+    active_context: (args) => {
+      const agentId = String(args.agentId);
+      const agent = state.config.agents.find((a) => a.id === agentId);
+      if (!agent) throw "That agent is no longer in the roster.";
+      const engine = state.config.engines.find((e) => e.id === agent.engine) ?? state.config.engines[0];
+      const kind = engine.kind;
+      const provider = kind === "claude-code" ? "Claude Code" : kind === "codex" ? "Codex" : "OpenCode";
+      const folder = String(args.folder || conversationOf(agentId)?.cwd || state.projects.active);
+      const source = (group: number, name: string, scope: string, text: string, delivery: string, accepted = true, path: string | null = null) => ({
+        group, name, scope, delivery, accepted, conditional: false, path, characters: text.length,
+        tokens: Math.ceil(text.length / 4), text: text.slice(0, 20 * 1024), omitted_characters: Math.max(0, text.length - 20 * 1024), markdown: true,
+      });
+      const sent = kind === "claude-code" || kind === "codex" || kind === "opencode";
+      const delivery =
+        kind === "codex"
+          ? "Sent by Starkline as developer instructions"
+          : kind === "opencode"
+            ? "Sent by Starkline as an instructions file OpenCode adds to its system prompt (new sessions)"
+            : "Sent by Starkline in the system prompt";
+      const sources = [source(1, "Permission policy", "everywhere", "Project work runs automatically. Publishing requires your approval.", delivery, sent)];
+      for (const [path, text] of Object.entries(state.contextFiles)) {
+        const parent = path.slice(0, path.lastIndexOf("/"));
+        if (folder !== parent && !folder.startsWith(`${parent}/`)) continue;
+        const filename = path.split("/").pop() ?? "";
+        const accepted = kind === "claude-code" ? filename.startsWith("CLAUDE") : filename.startsWith("AGENTS");
+        sources.push(source(2, `${filename} in ${parent.split("/").pop()}`, folder === parent ? "this folder" : "this project", text, `${accepted ? "Read by" : "Not read by"} ${provider}${accepted ? " itself" : ""}`, accepted, path));
+      }
+      sources.push(source(3, `${agent.name}'s personality and tone`, "this agent", `${agent.personality || agent.role}\n\nTone: ${JSON.stringify(agent.tone)}`, delivery, sent));
+      if (state.memory[agentId]) sources.push(source(3, `${agent.name}'s memory`, "this agent", state.memory[agentId], delivery, sent));
+      const task = args.taskId ? state.tasks.find((t) => t.id === args.taskId && t.assignee === agentId) : state.tasks.find((t) => t.assignee === agentId && t.cwd === folder && t.status === "doing");
+      if (task) {
+        sources.push(source(4, task.parent_id ? "Delegation request" : "Task request", "this task", task.prompt, "Sent with the task's first message"));
+        const request = task.conversation_id ? state.transcripts[task.conversation_id]?.find((m) => m.role === "user") : undefined;
+        for (const attachment of request?.attachments ?? []) {
+          const inline = attachment.kind === "image" || (kind === "claude-code" && attachment.kind === "pdf");
+          const item = source(4, attachment.name, "this task", SAMPLE_TEXT[attachment.kind] || `Attached file: ${attachment.name}`, inline ? "Sent with the task's first message as a document or image" : "Named with the task's first message; its tools can read the file", true, attachment.path);
+          item.conditional = !inline;
+          item.markdown = attachment.kind === "markdown";
+          sources.push(item);
+        }
+      }
+      if (agent.kind === "orchestrator") sources.push(source(4, "Team and projects (each message)", "this agent", state.config.agents.map((a) => a.name).join("\n"), "Sent with each message"));
+      const filename = kind === "claude-code" ? "CLAUDE.md" : "AGENTS.md";
+      const project_hint = sources.some((s) => s.group === 2 && s.accepted) ? null : `${provider} reads ${filename} from the project. ${folder.split("/").pop()} doesn't have one. Add ${filename} to give it project instructions.`;
+      return { agent_name: agent.name, provider: engine.label, model: agent.model || engine.model, sources, project_hint, notes: ["A snapshot of current local files; provider acceptance is based on discovery rules."] };
+    },
+    open_context_file: () => null,
     get_config: () => state.config,
+    spend_summary: () => state.spend,
+    set_budget: (args) => {
+      const budget = args.budget as Scenario["spend"]["budget"];
+      if (!Number.isFinite(budget.limit_usd) || budget.limit_usd < 0 || budget.warn_percent < 50 || budget.warn_percent > 95) throw "Choose a valid budget amount and warning percentage.";
+      state.notifications = state.notifications.map((n) => n.kind === "budget" && n.handled === null ? { ...n, handled: Date.now(), outcome: "Budget reviewed", read: true } : n);
+      emit("notifications://changed", null);
+      state.config.budget = budget;
+      state.spend.budget = budget;
+      state.spend.budget_spend = state.spend[budget.period === "day" ? "today" : budget.period].cost_usd;
+      commitConfig();
+      emit("spend://changed", null);
+      return state.spend;
+    },
+    conversation_spend: (args) => state.conversationSpend[Number(args.conversationId)] ?? {
+      total: { cost_usd: 0, input_tokens: 0, output_tokens: 0, context_tokens: 0, turns: 0, unpriced_turns: 0 }, context_tokens: 0,
+    },
     list_projects: () => state.projects,
     add_project: (args) => {
       const path = String(args.path);

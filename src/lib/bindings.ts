@@ -6,6 +6,30 @@
 
 
 export const commands = {
+async spendSummary() : Promise<Result<SpendSummary, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("spend_summary") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setBudget(budget: Budget) : Promise<Result<SpendSummary, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_budget", { budget }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async conversationSpend(conversationId: number) : Promise<Result<ConversationSpend, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("conversation_spend", { conversationId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listAgents() : Promise<Agent[]> {
     return await TAURI_INVOKE("list_agents");
 },
@@ -445,6 +469,28 @@ async getMemory(agentId: string) : Promise<string> {
     return await TAURI_INVOKE("get_memory", { agentId });
 },
 /**
+ * Inspect current prompt sections and provider instruction files without blocking the UI.
+ */
+async activeContext(agentId: string, folder: string, taskId: string | null) : Promise<Result<ActiveContext, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("active_context", { agentId, folder, taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Developer-clicked file actions are limited to files in the inspector.
+ */
+async openContextFile(agentId: string, folder: string, path: string, reveal: boolean, taskId: string | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_context_file", { agentId, folder, path, reveal, taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Bugs agents have reported about the app, newest first.
  */
 async getBugs() : Promise<Bug[]> {
@@ -500,6 +546,57 @@ async removeProject(path: string) : Promise<ProjectsState> {
 async spawnAgent(agentId: string, cols: number, rows: number) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("spawn_agent", { agentId, cols, rows }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async terminalOpen(folder: string, cols: number, rows: number) : Promise<Result<TerminalInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("terminal_open", { folder, cols, rows }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async terminalWrite(id: string, data: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("terminal_write", { id, data }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async terminalResize(id: string, cols: number, rows: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("terminal_resize", { id, cols, rows }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async terminalClose(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("terminal_close", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async terminalList() : Promise<TerminalInfo[]> {
+    return await TAURI_INVOKE("terminal_list");
+},
+async terminalAttach(id: string, channel: TAURI_CHANNEL<TerminalOutput>) : Promise<Result<TerminalOutput, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("terminal_attach", { id, channel }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async terminalTitle(id: string, title: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("terminal_title", { id, title }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -722,6 +819,7 @@ async resetConfig() : Promise<AppConfig> {
 
 /** user-defined types **/
 
+export type ActiveContext = { agent_name: string; provider: string; model: string; sources: ContextSource[]; project_hint: string | null; notes: string[] }
 /**
  * A member of the Starkline roster. `home_x`/`home_y` are tile coordinates
  * of the agent's desk on the pixel lab floor. `figure` selects the sprite
@@ -797,7 +895,7 @@ standup_minutes?: number;
 /**
  * The developer allows Starkline to keep this Mac awake while agents work.
  */
-keep_awake?: boolean; 
+keep_awake?: boolean; budget?: Budget; 
 /**
  * How Starkline looks: one of [`THEMES`]. Tasks, permissions and providers don't change with it.
  */
@@ -906,6 +1004,8 @@ export type BrowserPage = {
  * "" before anything has been opened.
  */
 url: string; title: string; loading: boolean }
+export type Budget = { period: BudgetPeriod; limit_usd: number; warn_percent: number }
+export type BudgetPeriod = "day" | "week" | "month"
 /**
  * A bug in the app, reported by an agent for the maintenance agent to fix.
  */
@@ -923,6 +1023,7 @@ note: string }
  * The latest result of each distinct check.
  */
 export type CheckRun = { kind: string; command: string; passed: boolean; at: number; duration_ms: number | null; agent_id: string }
+export type ContextSource = { group: number; name: string; scope: string; delivery: string; accepted: boolean; conditional: boolean; path: string | null; characters: number; tokens: number; text: string; omitted_characters: number; markdown: boolean }
 /**
  * A saved chat — one continuous conversation with an agent, resumable later.
  */
@@ -931,6 +1032,7 @@ export type Conversation = { id: number; agent_id: string; title: string; cwd: s
  * A teammate's delegation ran here, not a chat the developer had.
  */
 delegated: boolean }
+export type ConversationSpend = { total: SpendTotal; context_tokens: number }
 export type DispatchResult = { agent_id: string; name: string; spawned: boolean }
 /**
  * A backend an agent can run on. `kind` selects the adapter (how we build the
@@ -1291,6 +1393,10 @@ problem: string | null; devices: SimDevice[];
  * AXe or idb is installed, so taps, swipes and typing go through from Starkline.
  */
 touch: boolean }
+export type SpendDay = { date: string; total: SpendTotal }
+export type SpendGroup = { key: string; total: SpendTotal }
+export type SpendSummary = { today: SpendTotal; week: SpendTotal; month: SpendTotal; budget: Budget; budget_spend: number; days: SpendDay[]; agents: SpendGroup[]; projects: SpendGroup[]; models: SpendGroup[]; first_date: string | null; has_spend: boolean }
+export type SpendTotal = { cost_usd: number; input_tokens: number; output_tokens: number; context_tokens: number; turns: number; unpriced_turns: number }
 /**
  * One persisted chat turn — enough to rebuild the transcript UI on reopen.
  */
@@ -1304,6 +1410,7 @@ export type Support = "yes" |
  * Works in part (no built-in provider is limited today, but the interface shows it).
  */
 "limited" | "no"
+export type TAURI_CHANNEL<TSend> = null
 /**
  * A unit of work with an accountable owner. The developer starts one from Work;
  * a delegation starts a child of the delegating agent's task. It is durable, so
@@ -1382,6 +1489,8 @@ summary: string;
  * Kind-specific details as JSON ("" when there are none).
  */
 data: string }
+export type TerminalInfo = { id: string; folder: string; title: string; shell: string; alive: boolean; exit_code: number | null; program_running: boolean; note: string | null }
+export type TerminalOutput = { data: number[]; offset: number; exit_code: number | null }
 export type Tone = { 
 /**
  * Serious (0) to playful.

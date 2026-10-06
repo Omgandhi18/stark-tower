@@ -8,19 +8,21 @@ import type { Agent, AgentConfig, AppConfig } from "../../lib/types";
 import { useConfig } from "../../stores/config";
 import { useNavigation } from "../../stores/navigation";
 import { hasProblems, isDirty, validateAgent } from "./agentDraft";
+import ContextPanel from "../context/ContextPanel";
 import AgentMemory from "./AgentMemory";
 import AgentPermissions from "./AgentPermissions";
 import AgentProviderFields from "./AgentProviderFields";
 import { ACCENTS, FIGURES } from "./appearance";
 import ToneDials from "./ToneDials";
 
-type EditorTab = "profile" | "provider" | "permissions" | "memory";
+type EditorTab = "profile" | "provider" | "permissions" | "memory" | "context";
 
 const TABS: readonly TabItem<EditorTab>[] = [
   { id: "profile", label: "Profile" },
   { id: "provider", label: "Provider" },
   { id: "permissions", label: "Permissions" },
   { id: "memory", label: "Memory" },
+  { id: "context", label: "Context" },
 ];
 
 const SAVED_NOTICE_MS = 1800;
@@ -102,7 +104,11 @@ export default function AgentEditor({ saved, config, live, onRemoved }: AgentEdi
 
       <Tabs tabs={TABS} value={tab} onChange={setTab} label={`${saved.name} sections`} idPrefix={`agent-${saved.id}`} className="agent-editor-tabs" />
 
-      {tab === "memory" ? (
+      {tab === "context" ? (
+        <div role="tabpanel" id={`agent-${saved.id}-panel-context`} aria-labelledby={`agent-${saved.id}-tab-context`} className="agent-editor-body">
+          <ContextPanel agentId={saved.id} name={saved.name} />
+        </div>
+      ) : tab === "memory" ? (
         <div role="tabpanel" id={`agent-${saved.id}-panel-memory`} aria-labelledby={`agent-${saved.id}-tab-memory`} className="agent-editor-body">
           <AgentMemory agentId={saved.id} name={saved.name} />
         </div>

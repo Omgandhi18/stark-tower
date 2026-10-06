@@ -1,18 +1,21 @@
-import { useState } from "react";
-import { ArrowLeft, FolderOpen, MessageSquarePlus, PanelRight } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowLeft, FolderOpen, MessageSquarePlus, PanelRight, SquareTerminal } from "lucide-react";
 import { Button, IconButton, Portrait, SelectField, StatusPill } from "../../design";
 import { errorMessage } from "../../lib/errors";
-import { formatCost, formatTokens } from "../../lib/format";
+import { formatTokens } from "../../lib/format";
 import { AGENT_STATUS } from "../../lib/status";
 import type { Agent } from "../../lib/types";
 import { selectThread, useChats } from "../../stores/chats";
 import { useConfig } from "../../stores/config";
 import { useNavigation } from "../../stores/navigation";
 import { usePreview } from "../../stores/preview";
-import { useUsage } from "../../stores/usage";
+import { useSpend } from "../../stores/spend";
+import { useTerminal } from "../../stores/terminal";
+import { reportedCost } from "../spend/spendModel";
 import { useWorkspace } from "../../stores/workspace";
 import { engineLabel } from "../agents/display";
 import { startNewChat } from "./chatActions";
+import ContextButton from "../context/ContextButton";
 import { folderOptions } from "./folders";
 
 /** Who you're talking to, where they work, and a fresh start. */
@@ -22,9 +25,16 @@ export default function ConversationHeader({ agent }: { agent: Agent }) {
   const projects = useWorkspace((s) => s.projects);
   const activeProject = useWorkspace((s) => s.activeProject);
   const chatFolder = useChats((s) => selectThread(agent.id)(s).folder);
-  const usage = useUsage((s) => s.byAgent[agent.id]);
+  const conversationId = useChats((s) => selectThread(agent.id)(s).conversationId);
+  const usage = useSpend((s) => conversationId === null ? undefined : s.chats[conversationId]);
+  const revision = useSpend((s) => s.revision);
+  useEffect(() => {
+    if (conversationId !== null) void useSpend.getState().refreshChat(conversationId).catch(() => {});
+  }, [conversationId, revision]);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const terminalOpen = useTerminal((s) => s.open);
+  const toggleTerminal = useTerminal((s) => s.toggle);
   const previewing = usePreview((s) => s.open);
   const togglePreview = usePreview((s) => s.toggle);
   const status = AGENT_STATUS[agent.status];
@@ -61,9 +71,9 @@ export default function ConversationHeader({ agent }: { agent: Agent }) {
             {error}
           </span>
         )}
-        {usage && (
-          <span className="conversation-usage" title="Reported by the provider after the last reply">
-            {formatCost(usage.costUsd)} spent, {formatTokens(usage.contextTokens)} context
+        {usage && usage.total.turns > 0 && (
+          <span className="conversation-usage" title="This conversation’s recorded cost and the latest context fill">
+            {reportedCost(usage.total)} this chat, {formatTokens(usage.context_tokens)} context
           </span>
         )}
         <SelectField
@@ -75,9 +85,11 @@ export default function ConversationHeader({ agent }: { agent: Agent }) {
           onChange={(path) => useChats.getState().setFolder(agent.id, path)}
           className="conversation-folder"
         />
+        <ContextButton agentId={agent.id} name={agent.name} folder={folder} />
         <Button icon={MessageSquarePlus} disabled={starting} onClick={newChat}>
           New chat
         </Button>
+        <IconButton icon={SquareTerminal} label="Terminal" aria-pressed={terminalOpen} onClick={toggleTerminal} />
         <IconButton icon={PanelRight} label={previewing ? "Hide the browser and simulator" : "Show the browser and simulator"} aria-pressed={previewing} onClick={togglePreview} />
       </div>
     </header>

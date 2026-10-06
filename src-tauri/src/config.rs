@@ -203,6 +203,8 @@ pub struct AppConfig {
     /// The developer allows Starkline to keep this Mac awake while agents work.
     #[serde(default)]
     pub keep_awake: bool,
+    #[serde(default)]
+    pub budget: crate::spend::Budget,
     /// How Starkline looks: one of [`THEMES`]. Tasks, permissions and providers don't change with it.
     #[serde(default = "default_theme")]
     pub theme: String,
@@ -412,6 +414,7 @@ pub fn claude_default() -> EngineConfig {
 
 pub fn default_config() -> AppConfig {
     AppConfig {
+        budget: crate::spend::Budget::default(),
         version: cfg_version(),
         onboarded: false,
         lighting: default_lighting(),
@@ -662,14 +665,17 @@ fn backup_previous(path: &std::path::Path) {
 /// Atomic write (temp + rename) so a concurrent reader never sees a partial file,
 /// after backing up the previous version (append-only).
 pub fn save(path: &std::path::Path, cfg: &AppConfig) {
-    if let Ok(out) = serde_json::to_string_pretty(cfg) {
-        backup_previous(path);
-        let tmp = path.with_extension("json.starktmp");
-        if std::fs::write(&tmp, out).is_ok() {
-            set_owner_only(&tmp);
-            let _ = std::fs::rename(&tmp, path);
-        }
-    }
+    let _ = save_checked(path, cfg);
+}
+
+/// Settings that promise a saved result need to report a failed disk write.
+pub fn save_checked(path: &std::path::Path, cfg: &AppConfig) -> Result<(), String> {
+    let out = serde_json::to_string_pretty(cfg).map_err(|_| "The settings couldn't be prepared for saving.".to_string())?;
+    backup_previous(path);
+    let tmp = path.with_extension("json.starktmp");
+    std::fs::write(&tmp, out).map_err(|_| "The settings couldn't be saved. Check that the app's data folder is writable and has space.".to_string())?;
+    set_owner_only(&tmp);
+    std::fs::rename(&tmp, path).map_err(|_| "The settings couldn't be saved. Check that the app's data folder is writable.".to_string())
 }
 
 #[cfg(test)]

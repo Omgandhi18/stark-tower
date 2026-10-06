@@ -5,6 +5,7 @@ import { useNavigation } from "../../stores/navigation";
 import DiagnosticsSettings from "./DiagnosticsSettings";
 import GeneralSettings from "./GeneralSettings";
 import PermissionsSettings from "./PermissionsSettings";
+import SpendSettings from "../spend/SpendSettings";
 import PowerSettings from "./PowerSettings";
 import ProviderSettings from "./ProviderSettings";
 import ThemeStudio from "./ThemeStudio";
@@ -27,6 +28,8 @@ export default function SettingsScreen() {
         );
       case "permissions":
         return <PermissionsSettings />;
+      case "spend":
+        return <SpendSettings />;
       case "power":
         return <PowerSettings />;
       case "themes":

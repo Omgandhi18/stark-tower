@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   checkUpdate,
+  onSpendChanged,
   getConfig,
   listAgents,
   onAgentStatus,
@@ -25,7 +26,6 @@ import {
   onReviewResolved,
   onTasksChanged,
   onUpdateStatus,
-  onUsageUpdate,
 } from "../lib/api";
 import { errorMessage } from "../lib/errors";
 import { IS_TAURI } from "../lib/platform";
@@ -39,7 +39,7 @@ import { useChats } from "../stores/chats";
 import { useConfig } from "../stores/config";
 import { useNotifications } from "../stores/notifications";
 import { useSystem } from "../stores/system";
-import { useUsage } from "../stores/usage";
+import { useSpend } from "../stores/spend";
 import { useWorkspace } from "../stores/workspace";
 
 /** Statuses arrive as events; this only catches anything that slipped past. */
@@ -93,6 +93,7 @@ export function useBackendSync() {
       (e) => useConfig.getState().fail(errorMessage(e, "The configuration couldn't be read.")),
       stopped,
     );
+    first("spending", useSpend.getState().refresh);
     first("projects", workspace.refreshProjects);
     first("saved chats", workspace.refreshConversations);
     first("tasks", workspace.refreshTasks);
@@ -120,7 +121,7 @@ export function useBackendSync() {
         useChats.getState().apply(e);
       }),
       onChatSwitched((s) => useChats.getState().switchTo(s.agentId, s.conversationId)),
-      onUsageUpdate((u) => useUsage.getState().record(u)),
+      onSpendChanged(() => useSpend.getState().changed().catch(report("spending"))),
       onTasksChanged(() => useWorkspace.getState().refreshTasks().catch(report("tasks"))),
       onConversationsChanged(() => useWorkspace.getState().refreshConversations().catch(report("saved chats"))),
       onBugsChanged(() => useWorkspace.getState().refreshBugs().catch(report("bugs"))),
@@ -144,11 +145,13 @@ export function useBackendSync() {
       .catch(report("runtime health"));
 
     const agentTimer = window.setInterval(reloadAgents, AGENT_RECONCILE_MS);
+    const spendTimer = window.setInterval(() => useSpend.getState().refresh().catch(report("spending")), HEALTH_REFRESH_MS);
     const healthTimer = window.setInterval(() => useSystem.getState().refreshHealth().catch(report("runtime health")), HEALTH_REFRESH_MS);
     return () => {
       unmounted = true;
       window.clearInterval(agentTimer);
       window.clearInterval(healthTimer);
+      window.clearInterval(spendTimer);
       for (const unlisten of subscriptions) unlisten.then((off) => off()).catch(() => {});
     };
   }, []);

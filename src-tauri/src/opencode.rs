@@ -59,9 +59,12 @@ struct Turn {
     /// The latest thing the agent said in this turn: a delegated task's result.
     said: String,
     context_tokens: u64,
+    input_tokens: u64,
+    output_tokens: u64,
     /// OpenCode reports the session's total cost; a turn's is the difference.
     cost_total: Option<f64>,
     cost_before: f64,
+    cost_reported: bool,
     finished: Option<mpsc::Sender<Result<String, String>>>,
 }
 
@@ -72,6 +75,11 @@ struct OpenCode {
     sink: Sink,
     rpc: Rpc,
     turn: Mutex<Turn>,
+}
+
+fn usage_tokens(usage: &Value) -> (u64, u64) {
+    let token = |key| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
+    (token("inputTokens"), token("outputTokens"))
 }
 
 fn str_of<'a>(v: &'a Value, key: &str) -> &'a str {
@@ -274,8 +282,11 @@ impl OpenCode {
             }
             "usage_update" => {
                 turn.context_tokens = update.get("used").and_then(Value::as_u64).unwrap_or(turn.context_tokens);
+                turn.input_tokens = update.get("inputTokens").and_then(Value::as_u64).unwrap_or(turn.input_tokens);
+                turn.output_tokens = update.get("outputTokens").and_then(Value::as_u64).unwrap_or(turn.output_tokens);
                 if let Some(total) = update.pointer("/cost/amount").and_then(Value::as_f64) {
                     turn.cost_total = Some(total);
+                    turn.cost_reported = true;
                 }
             }
             _ => {}
@@ -324,6 +335,10 @@ impl OpenCode {
             turn.busy = true;
             turn.said.clear();
             turn.cost_before = turn.cost_total.unwrap_or(0.0);
+            turn.cost_reported = false;
+            turn.input_tokens = 0;
+            turn.output_tokens = 0;
+            turn.context_tokens = 0;
             session
         };
         let me = self.clone();
@@ -346,14 +361,24 @@ impl OpenCode {
                 Ok(r) => r.pointer("/usage/totalTokens").and_then(Value::as_u64).filter(|_| turn.context_tokens == 0).unwrap_or(turn.context_tokens),
                 Err(_) => turn.context_tokens,
             };
-            let cost = turn.cost_total.map(|total| (total - turn.cost_before).max(0.0));
-            (std::mem::take(&mut turn.said), TurnUsage { cost_usd: cost, context_tokens: context }, turn.finished.take(), turn.queued.pop_front())
+            if let Ok(response) = &reply {
+                if let Some(usage) = response.get("usage") {
+                    let (input, output) = usage_tokens(usage);
+                    turn.input_tokens = input;
+                    turn.output_tokens = output;
+                }
+            }
+            let running_total = turn.cost_total.filter(|_| turn.cost_reported);
+            let cost = running_total.map(|total| crate::spend::cost_delta(total, turn.cost_before));
+            (std::mem::take(&mut turn.said), TurnUsage { cost_usd: cost, context_tokens: context, input_tokens: turn.input_tokens, output_tokens: turn.output_tokens, running_total }, turn.finished.take(), turn.queued.pop_front())
         };
         let failure = reply.err().map(|e| readable(&e.message));
         if let Some(message) = &failure {
             chat::failed(app, sink, agent, message);
         }
-        chat::turn_finished(app, sink, agent, (!said.is_empty()).then(|| said.clone()), usage);
+        let mut sink = sink.clone();
+        if let Some(session) = &mut sink.usage_session { session.session_id = self.turn.lock().unwrap().session.clone(); }
+        chat::turn_finished(app, &sink, agent, (!said.is_empty()).then(|| said.clone()), usage);
         if let Some(waiter) = waiter {
             let _ = waiter.send(match failure {
                 Some(message) if said.is_empty() => Err(message),
@@ -362,10 +387,45 @@ impl OpenCode {
         }
         if let Some(next) = next {
             if let Err(e) = self.send(&next) {
-                chat::failed(app, sink, agent, &e);
+                chat::failed(app, &sink, agent, &e);
             }
         }
     }
+}
+
+const INLINE_CONFIG: &str = "OPENCODE_CONFIG_CONTENT";
+
+/// An inline OpenCode config that adds `file` to its instructions, keeping whatever inline
+/// config was already set. OpenCode adds an inline config's instructions to the developer's
+/// own (their opencode.json and the project's AGENTS.md), so nothing of theirs is replaced.
+fn with_instructions(existing: Option<&str>, file: &std::path::Path) -> String {
+    let mut config = existing.and_then(|s| serde_json::from_str::<Value>(s).ok()).filter(Value::is_object).unwrap_or_else(|| json!({}));
+    let path = Value::String(file.to_string_lossy().into());
+    match config.get_mut("instructions").and_then(Value::as_array_mut) {
+        Some(list) if list.contains(&path) => {}
+        Some(list) => list.push(path),
+        None => config["instructions"] = json!([path]),
+    }
+    config.to_string()
+}
+
+/// ACP has no system prompt, so Starkline's instructions for the agent (who they are, their
+/// memory, how Starkline's tools work) go in a file OpenCode reads as instructions. It's
+/// rewritten at every launch, so it carries the agent's current memory and tone.
+fn pass_instructions(app: &tauri::AppHandle, cmd: &mut Command, launch: &Launch) -> Result<(), String> {
+    if launch.system_prompt.trim().is_empty() {
+        return Ok(());
+    }
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("opencode");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let name: String = launch.agent_id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+    let file = dir.join(format!("{name}.md"));
+    std::fs::write(&file, &launch.system_prompt).map_err(|e| e.to_string())?;
+    // An inline config from the engine's settings wins over one inherited from Starkline's environment.
+    let set_here = cmd.get_envs().find(|(k, _)| *k == INLINE_CONFIG).and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()));
+    let existing = set_here.or_else(|| std::env::var(INLINE_CONFIG).ok());
+    cmd.env(INLINE_CONFIG, with_instructions(existing.as_deref(), &file));
+    Ok(())
 }
 
 /// Spawn `opencode acp`, read it on its own thread, and shake hands.
@@ -375,6 +435,7 @@ fn connect(app: &tauri::AppHandle, launch: &Launch, sink: Sink, gen: Option<u64>
     chat::provider_env(&mut cmd, launch);
     cmd.env("OPENCODE_PERMISSION", permissions().to_string());
     cmd.env("OPENCODE_DISABLE_AUTOUPDATE", "1");
+    pass_instructions(app, &mut cmd, launch).map_err(|e| format!("Starkline couldn't write this agent's instructions for OpenCode: {e}"))?;
     chat::detach(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| format!("OpenCode couldn't start: {e}"))?;
     let stdin = child.stdin.take().ok_or("OpenCode has no input stream.")?;
@@ -387,7 +448,7 @@ fn connect(app: &tauri::AppHandle, launch: &Launch, sink: Sink, gen: Option<u64>
         app: app.clone(),
         agent_id: launch.agent_id.clone(),
         cwd: launch.cwd.clone(),
-        sink,
+        sink: sink.launched(launch),
         rpc: Rpc::new(stdin),
         turn: Mutex::new(Turn::default()),
     });
@@ -509,6 +570,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn prompt_usage_keeps_the_reported_input_and_output_counts() {
+        assert_eq!(usage_tokens(&json!({ "inputTokens": 100, "outputTokens": 20, "cachedReadTokens": 30, "cachedWriteTokens": 10 })), (100, 20));
+        assert_eq!(usage_tokens(&json!({})), (0, 0));
+    }
+
+    #[test]
     fn messages_that_look_like_commands_stay_messages() {
         assert_eq!(as_message("Fix the bug"), "Fix the bug");
         let guarded = as_message("/Users/dev/app is the folder");
@@ -564,6 +631,21 @@ mod tests {
         assert!(call_failed(&json!({ "status": "completed", "rawOutput": { "metadata": { "exit": 1 } } })));
         assert!(!call_failed(&json!({ "status": "completed", "rawOutput": { "metadata": { "exit": 0 } } })));
         assert!(!call_failed(&json!({ "status": "completed" })));
+    }
+
+    #[test]
+    fn instructions_join_any_inline_config_without_replacing_it() {
+        let file = std::path::Path::new("/data/opencode/friday.md");
+        let fresh: Value = serde_json::from_str(&with_instructions(None, file)).unwrap();
+        assert_eq!(fresh, json!({ "instructions": ["/data/opencode/friday.md"] }));
+        let theirs = r#"{"model":"anthropic/claude","instructions":["docs/rules.md"]}"#;
+        let merged: Value = serde_json::from_str(&with_instructions(Some(theirs), file)).unwrap();
+        assert_eq!(merged, json!({ "model": "anthropic/claude", "instructions": ["docs/rules.md", "/data/opencode/friday.md"] }));
+        // Launching twice doesn't list the file twice, and unreadable config is set aside.
+        let again: Value = serde_json::from_str(&with_instructions(Some(&merged.to_string()), file)).unwrap();
+        assert_eq!(again["instructions"].as_array().unwrap().len(), 2);
+        let broken: Value = serde_json::from_str(&with_instructions(Some("not json"), file)).unwrap();
+        assert_eq!(broken, fresh);
     }
 
     /// Talks to the real OpenCode with this Mac's sign-in, in a throwaway git folder:

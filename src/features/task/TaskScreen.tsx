@@ -7,6 +7,7 @@ import { useAgents } from "../../stores/agents";
 import { useAttention } from "../../stores/attention";
 import { useAutomations } from "../../stores/automations";
 import { useNavigation } from "../../stores/navigation";
+import TerminalDrawer from "../terminal/TerminalDrawer";
 import { taskState } from "../work/board";
 import ActivityList from "./ActivityList";
 import ChangesList from "./ChangesList";
@@ -24,6 +25,7 @@ const CLOCK_MS = 15_000;
 
 /** One task in full: who's on it, the conversation, its plan, changes and history. */
 export default function TaskScreen() {
+  const route = useNavigation((s) => s.route);
   const taskId = useNavigation((s) => s.taskId);
   const navigate = useNavigation((s) => s.navigate);
   const agents = useAgents((s) => s.agents);
@@ -92,6 +94,7 @@ export default function TaskScreen() {
             {tab === "files" && <ChangesList taskId={task.id} changes={detail.changes} cwd={task.cwd} />}
             {tab === "activity" && <ActivityList events={detail.events} agents={agents} now={now} />}
           </div>
+          <TerminalDrawer folder={task.cwd} active={route === "task"} />
         </section>
         <TaskSideRail reviews={reviews} changes={detail.changes} checks={detail.checks} now={now} onShowFiles={() => setTab("files")} />
       </div>

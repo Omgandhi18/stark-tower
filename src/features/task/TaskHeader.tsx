@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { ArrowLeft, CheckCheck, Clock, Folder, FolderOpen, GitBranch, MessageSquareText, Play, ShieldCheck, Square, X } from "lucide-react";
+import { ArrowLeft, CheckCheck, Clock, Folder, FolderOpen, GitBranch, MessageSquareText, Play, ShieldCheck, Square, SquareTerminal, X } from "lucide-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { Button, OverflowMenu, Portrait, StatusPill, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
+import { Button, IconButton, OverflowMenu, Portrait, StatusPill, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
 import { chatStop, closeTask, resumeTask, reviewTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { formatElapsed } from "../../lib/time";
@@ -10,6 +10,8 @@ import { useConfig } from "../../stores/config";
 import { useNavigation } from "../../stores/navigation";
 import { folderName } from "../../stores/workspace";
 import { providerLabel } from "../agents/display";
+import { useTerminal } from "../../stores/terminal";
+import ContextButton from "../context/ContextButton";
 import RemindMeButton from "../reminders/RemindMeButton";
 import type { StateTone } from "../../lib/status";
 
@@ -25,6 +27,8 @@ interface TaskHeaderProps {
 
 /** What the task is, who owns it, and where and how long it has been running. */
 export default function TaskHeader({ detail, owner, requester, state, now }: TaskHeaderProps) {
+  const terminalOpen = useTerminal((s) => s.open);
+  const toggleTerminal = useTerminal((s) => s.toggle);
   const config = useConfig((s) => s.config);
   const navigate = useNavigation((s) => s.navigate);
   const openConversation = useNavigation((s) => s.openConversation);
@@ -74,6 +78,8 @@ export default function TaskHeader({ detail, owner, requester, state, now }: Tas
           <Button icon={MessageSquareText} onClick={() => openConversation(task.assignee)}>
             Talk to {name}
           </Button>
+          <IconButton icon={SquareTerminal} label="Terminal" aria-pressed={terminalOpen} onClick={toggleTerminal} />
+          <ContextButton agentId={task.assignee} name={name} folder={task.cwd} taskId={task.id} />
           <RemindMeButton task={task} ownerName={name} />
           {task.status === "done" && (
             <Button variant="review" icon={CheckCheck} onClick={markReviewed}>

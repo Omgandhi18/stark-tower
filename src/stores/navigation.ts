@@ -5,7 +5,7 @@ import { create } from "zustand";
 
 export type RouteId = "work" | "task" | "conversation" | "environment" | "agents" | "automations" | "reminders" | "notifications" | "settings";
 
-export type SettingsSection = "general" | "providers" | "permissions" | "power" | "themes" | "diagnostics";
+export type SettingsSection = "general" | "spend" | "providers" | "permissions" | "power" | "themes" | "diagnostics";
 
 interface NavigationState {
   route: RouteId;

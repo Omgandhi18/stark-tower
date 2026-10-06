@@ -7,6 +7,7 @@ mod browser;
 mod chat;
 mod codex;
 mod config;
+mod context;
 mod delegation;
 mod engine;
 mod floor;
@@ -30,7 +31,9 @@ mod secrets;
 mod simulator;
 #[cfg(target_os = "macos")]
 mod snapshot;
+mod spend;
 mod tasks;
+mod terminal;
 mod tone;
 mod update;
 
@@ -46,6 +49,7 @@ use tauri::{Emitter, Manager};
 /// Shared application state, managed by Tauri.
 pub struct AppState {
     pub pty: PtyManager,
+    pub terminals: terminal::TerminalManager,
     pub chat: chat::ChatManager,
     pub ledger: Ledger,
     pub roster: Mutex<Vec<Agent>>,
@@ -1018,6 +1022,40 @@ fn review_respond(state: tauri::State<AppState>, id: String, decision: String) {
     }
 }
 
+#[tauri::command]
+#[specta::specta]
+fn spend_summary(state: tauri::State<AppState>) -> Result<spend::SpendSummary, String> {
+    let budget = state.config.lock().unwrap().budget.clone();
+    state.ledger.spend_summary(budget)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_budget(app: tauri::AppHandle, state: tauri::State<AppState>, budget: spend::Budget) -> Result<spend::SpendSummary, String> {
+    budget.validate()?;
+    let updated = {
+        let mut config = state.config.lock().unwrap();
+        let mut updated = config.clone();
+        updated.budget = budget.clone();
+        config::save_checked(std::path::Path::new(&state.config_file), &updated)?;
+        *config = updated.clone();
+        updated
+    };
+    let _ = app.emit("config://changed", updated);
+    if state.ledger.settle_budget_notices() > 0 {
+        let _ = app.emit("notifications://changed", ());
+    }
+    let summary = state.ledger.spend_summary(budget)?;
+    let _ = app.emit("spend://changed", ());
+    Ok(summary)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn conversation_spend(state: tauri::State<AppState>, conversation_id: i64) -> Result<spend::ConversationSpend, String> {
+    state.ledger.conversation_spend(conversation_id)
+}
+
 // ---- configuration (engines + roster) --------------------------------------
 
 /// Persist config, refresh the derived roster, and notify the UI.
@@ -1200,6 +1238,28 @@ fn default_tone(agent_id: String) -> tone::Tone {
 #[specta::specta]
 fn review_task(app: tauri::AppHandle, id: String) -> Result<(), String> {
     tasks::review(&app, &id)
+}
+
+/// Inspect current prompt sections and provider instruction files without blocking the UI.
+#[tauri::command]
+#[specta::specta]
+async fn active_context(app: tauri::AppHandle, agent_id: String, folder: String, task_id: Option<String>) -> Result<context::ActiveContext, String> {
+    tauri::async_runtime::spawn_blocking(move || context::snapshot(&app, &agent_id, &folder, task_id.as_deref())).await.map_err(|_| "The context couldn't be read. Refresh to try again.".to_string())?
+}
+
+/// Developer-clicked file actions are limited to files in the inspector.
+#[tauri::command]
+#[specta::specta]
+async fn open_context_file(app: tauri::AppHandle, agent_id: String, folder: String, path: String, reveal: bool, task_id: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_opener::OpenerExt;
+        let snapshot = context::snapshot(&app, &agent_id, &folder, task_id.as_deref())?;
+        if !snapshot.sources.iter().any(|s| s.path.as_deref() == Some(&path)) {
+            return Err("That file is no longer in this context. Refresh and try again.".into());
+        }
+        if reveal { app.opener().reveal_item_in_dir(&path) } else { app.opener().open_path(&path, None::<&str>) }
+            .map_err(|_| "The file couldn't be opened. Check that it still exists and try again.".into())
+    }).await.map_err(|_| "The file couldn't be opened. Try again.".to_string())?
 }
 
 /// An agent's durable memory (the markdown it curates across sessions).
@@ -1385,6 +1445,75 @@ fn spawn_agent(
 
 #[tauri::command]
 #[specta::specta]
+async fn terminal_open(
+    state: tauri::State<'_, AppState>,
+    folder: String,
+    cols: u16,
+    rows: u16,
+) -> Result<terminal::TerminalInfo, String> {
+    let manager = state.terminals.clone();
+    tauri::async_runtime::spawn_blocking(move || manager.open(&folder, cols, rows))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn terminal_write(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    data: String,
+) -> Result<(), String> {
+    let manager = state.terminals.clone();
+    tauri::async_runtime::spawn_blocking(move || manager.write(&id, &data))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+#[specta::specta]
+fn terminal_resize(
+    state: tauri::State<AppState>,
+    id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    state.terminals.resize(&id, cols, rows)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn terminal_close(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    let manager = state.terminals.clone();
+    tauri::async_runtime::spawn_blocking(move || manager.close(&id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+#[specta::specta]
+fn terminal_list(state: tauri::State<AppState>) -> Vec<terminal::TerminalInfo> {
+    state.terminals.list()
+}
+
+#[tauri::command]
+#[specta::specta]
+fn terminal_title(state: tauri::State<AppState>, id: String, title: String) -> Result<(), String> {
+    state.terminals.title(&id, title)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn terminal_attach(
+    state: tauri::State<AppState>,
+    id: String,
+    channel: tauri::ipc::Channel<terminal::TerminalOutput>,
+) -> Result<terminal::TerminalOutput, String> {
+    state.terminals.attach(&id, channel)
+}
+
+#[tauri::command]
+#[specta::specta]
 fn pty_write(app: tauri::AppHandle, agent_id: String, data: String) -> Result<(), String> {
     pty::write_bytes(&app, &agent_id, data.as_bytes())
 }
@@ -1543,6 +1672,9 @@ fn request_assist(
 fn specta_builder() -> tauri_specta::Builder {
     tauri_specta::Builder::<tauri::Wry>::new().commands(
         tauri_specta::collect_commands![
+            spend_summary,
+            set_budget,
+            conversation_spend,
             list_agents,
             get_ledger,
             get_tasks,
@@ -1596,6 +1728,8 @@ fn specta_builder() -> tauri_specta::Builder {
             skip_missed_run,
             list_automation_runs,
             get_memory,
+            active_context,
+            open_context_file,
             get_bugs,
             set_bug_status,
             run_maintenance,
@@ -1605,6 +1739,13 @@ fn specta_builder() -> tauri_specta::Builder {
             add_project,
             remove_project,
             spawn_agent,
+            terminal_open,
+            terminal_write,
+            terminal_resize,
+            terminal_close,
+            terminal_list,
+            terminal_attach,
+            terminal_title,
             pty_write,
             pty_resize,
             kill_agent,
@@ -1710,6 +1851,7 @@ pub fn run() {
             app.manage(browser::Browser::default());
             app.manage(AppState {
                 pty: PtyManager::default(),
+                terminals: terminal::TerminalManager::default(),
                 chat: chat::ChatManager::default(),
                 ledger,
                 roster: Mutex::new(roster),

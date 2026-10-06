@@ -1,9 +1,12 @@
 import { MessagesSquare } from "lucide-react";
 import { EmptyState, KeepAlive, cx } from "../../design";
 import { useAgents } from "../../stores/agents";
+import { selectThread, useChats } from "../../stores/chats";
+import { useWorkspace } from "../../stores/workspace";
 import { useNavigation } from "../../stores/navigation";
 import { usePreview } from "../../stores/preview";
 import PreviewPane from "../preview/PreviewPane";
+import TerminalDrawer from "../terminal/TerminalDrawer";
 import ChatPanel from "./ChatPanel";
 import ConversationHeader from "./ConversationHeader";
 import ConversationRail from "./ConversationRail";
@@ -14,6 +17,9 @@ export default function ConversationScreen() {
   const agentId = useNavigation((s) => s.agentId);
   const openChats = useNavigation((s) => s.openChats);
   const agents = useAgents((s) => s.agents);
+  const chatFolder = useChats((s) => agentId ? selectThread(agentId)(s).folder : "");
+  const project = useWorkspace((s) => s.activeProject);
+  const route = useNavigation((s) => s.route);
   const focused = agents.some((a) => a.id === agentId);
   const previewing = usePreview((s) => s.open);
 
@@ -21,25 +27,28 @@ export default function ConversationScreen() {
     <div className={cx("conversation-screen", previewing && "has-preview")}>
       <ConversationRail agentId={agentId} />
       <section className="conversation-main" aria-label="Conversation">
-        {openChats.map((id) => {
-          const agent = agents.find((a) => a.id === id);
-          if (!agent) return null;
-          return (
-            <KeepAlive key={id} active={id === agentId}>
-              <div className="conversation-view">
-                <ConversationHeader agent={agent} />
-                <ChatPanel agentId={id} />
-              </div>
-            </KeepAlive>
-          );
-        })}
-        {!focused && (
-          <EmptyState
-            icon={MessagesSquare}
-            title="Pick someone to talk to"
-            body="Choose an agent on the left. Each conversation keeps its own folder and history."
-          />
-        )}
+        <div className="conversation-chat-region">
+          {openChats.map((id) => {
+            const agent = agents.find((a) => a.id === id);
+            if (!agent) return null;
+            return (
+              <KeepAlive key={id} active={id === agentId}>
+                <div className="conversation-view">
+                  <ConversationHeader agent={agent} />
+                  <ChatPanel agentId={id} />
+                </div>
+              </KeepAlive>
+            );
+          })}
+          {!focused && (
+            <EmptyState
+              icon={MessagesSquare}
+              title="Pick someone to talk to"
+              body="Choose an agent on the left. Each conversation keeps its own folder and history."
+            />
+          )}
+        </div>
+        {focused && <TerminalDrawer folder={chatFolder || project} active={route === "conversation"} />}
       </section>
       {previewing && <PreviewPane />}
     </div>

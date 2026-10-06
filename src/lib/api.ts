@@ -1,6 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { commands, type AutomationInput, type Bounds, type BrowserPage, type PowerState, type ReminderInput, type Result } from "./bindings";
+import { commands, type Budget, type AutomationInput, type Bounds, type BrowserPage, type PowerState, type ReminderInput, type Result } from "./bindings";
 import type { Attachment, ChatEvent, ChatSwitch, TaskEvent, LedgerEntry, PtyData, ReviewRequest, StatusEvent, UsageUpdate, UpdateStatus } from "./types";
 
 // Commands are the tauri-specta-generated, typed wrappers (bindings.ts). Fallible
@@ -329,3 +329,24 @@ export async function pickFiles(title: string): Promise<string[]> {
   if (Array.isArray(chosen)) return chosen;
   return typeof chosen === "string" ? [chosen] : [];
 }
+
+// ---- Developer terminals ----
+export const terminalOpen = (folder: string, cols: number, rows: number) => ok(commands.terminalOpen(folder, cols, rows));
+export const terminalWrite = (id: string, data: string) => ok(commands.terminalWrite(id, data));
+export const terminalResize = (id: string, cols: number, rows: number) => ok(commands.terminalResize(id, cols, rows));
+export const terminalClose = (id: string) => ok(commands.terminalClose(id));
+export const terminalList = () => commands.terminalList();
+export const terminalAttach = (id: string, channel: Parameters<typeof commands.terminalAttach>[1]) => ok(commands.terminalAttach(id, channel));
+
+export const terminalTitle = (id: string, title: string) => ok(commands.terminalTitle(id, title));
+
+// ---- Active context ----
+/** Current prompt pieces and the provider's local instruction sources. */
+export const activeContext = (agentId: string, folder: string, taskId?: string) => ok(commands.activeContext(agentId, folder, taskId ?? null));
+export const openContextFile = (agentId: string, folder: string, path: string, reveal: boolean, taskId?: string) => ok(commands.openContextFile(agentId, folder, path, reveal, taskId ?? null));
+
+// ---- Spend ----
+export const spendSummary = () => ok(commands.spendSummary());
+export const setBudget = (budget: Budget) => ok(commands.setBudget(budget));
+export const conversationSpend = (id: number) => ok(commands.conversationSpend(id));
+export const onSpendChanged = (cb: () => void): Promise<UnlistenFn> => listen("spend://changed", cb);
