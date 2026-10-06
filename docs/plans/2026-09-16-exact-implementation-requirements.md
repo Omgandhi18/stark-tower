@@ -842,3 +842,11 @@ The developer asked for "an inbuilt browser and an ios simulator like Claude Des
 
 - **Icon.** Starkline had Tauri's default icon. The new one is a dark night sky with a single futuristic tower: a landing platform near the top, a glowing cyan core, and a low skyline at its foot. Codex drew it from a composition sketch, alongside a glossy and a pixel-art version. This one won because it still reads at 32 px, where the other two thin out into a line. It sits in Apple's icon grid: a 1024 canvas with an 824 px rounded-square body, a soft shadow and a faint rim light. Every size is generated from `src-tauri/icons/source/icon-1024.png` with `npx tauri icon`. The menu-bar tray icon stays the monochrome template. The program itself is now called Starkline (`[[bin]]` in Cargo.toml, with `default-run`), so in dev mode the Dock names it Starkline, as a built app is named by productName.
 - **Upcoming reminders on Work's right-hand rail**, below Attention: any that went off (with Done and Snooze), then the next few coming up, with a link to the rest and a + to set one. The attention cards scroll above it, so the reminders stay in view however many cards there are.
+
+### 2026-10-06: the simulator fits its panel, and taps without idb's two installs
+
+- **The whole device fits the panel.** The screen was shown at the screenshot's own size (an iPhone 17 Pro's is 1206 x 2622 pixels), cropped by the panel. It now scales down to whichever of the panel's width and height runs out first.
+- **Taps go through AXe first.** AXe is one `brew install cameroncooke/axe/axe` and needs no Python. Starkline uses it when it's installed, and idb when that's what's there.
+- **Click to tap, drag to swipe.** Swipes are also new in the agents' `simulator` tool (`swipe` from x, y to to_x, to_y).
+- **Screen scale.** The pixels-per-point used to place taps comes from idb's description of the device, else from the width AXe reports in points, else from the screen size (iPads and narrow iPhones are 2x, the rest 3x).
+- **When nothing can send taps,** the panel says so as a note: the install command shown as code, a Copy button, and Check again. Before, a red error with raw backticks appeared after the click.

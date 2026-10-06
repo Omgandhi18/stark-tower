@@ -238,11 +238,22 @@ async simulatorFrame(udid: string) : Promise<Result<string, string>> {
 }
 },
 /**
- * A tap where the developer clicked the screen, in the screenshot's pixels.
+ * A tap where the developer clicked the screen, in the screenshot's pixels (`width` is the screenshot's).
  */
-async simulatorTap(udid: string, name: string, x: number, y: number) : Promise<Result<null, string>> {
+async simulatorTap(udid: string, name: string, x: number, y: number, width: number) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("simulator_tap", { udid, name, x, y }) };
+    return { status: "ok", data: await TAURI_INVOKE("simulator_tap", { udid, name, x, y, width }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * A swipe where the developer dragged across the screen, in the screenshot's pixels.
+ */
+async simulatorSwipe(udid: string, name: string, fromX: number, fromY: number, toX: number, toY: number, width: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("simulator_swipe", { udid, name, fromX, fromY, toX, toY, width }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1277,7 +1288,7 @@ available: boolean;
  */
 problem: string | null; devices: SimDevice[]; 
 /**
- * idb is installed, so taps and typing go through from Starkline.
+ * AXe or idb is installed, so taps, swipes and typing go through from Starkline.
  */
 touch: boolean }
 /**

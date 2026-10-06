@@ -78,23 +78,42 @@
 .simulator-toolbar { display: flex; flex: none; align-items: center; gap: 4px; padding: 6px var(--space-2); border-bottom: 1px solid var(--border-subtle); }
 .simulator-device { flex: 1; min-width: 0; }
 .simulator-error { margin: 0; padding: 6px var(--space-3); }
+/* The screen fits the panel: the picture scales down to whichever of width and height runs out first. */
 .simulator-screen {
-  display: grid;
+  display: flex;
   flex: 1;
-  place-items: center;
+  align-items: center;
+  justify-content: center;
   min-height: 0;
   padding: var(--space-4);
   background: var(--surface-sunken);
   overflow: hidden;
 }
 .simulator-frame {
+  display: block;
+  width: auto;
+  height: auto;
   max-width: 100%;
   max-height: 100%;
-  border-radius: 28px;
-  box-shadow: 0 0 0 6px #111, 0 12px 32px rgb(0 0 0 / 0.35);
-  cursor: pointer;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 6% / 3%;
+  box-shadow: 0 0 0 5px #111, 0 12px 32px rgb(0 0 0 / 0.35);
   user-select: none;
+  touch-action: none;
 }
+.simulator-frame.is-touchable { cursor: pointer; }
+.simulator-hint {
+  display: grid;
+  flex: none;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.simulator-hint p { margin: 0; }
+.simulator-hint-actions { display: flex; gap: var(--space-2); }
 .simulator-type { display: flex; flex: none; gap: var(--space-2); padding: var(--space-2); border-top: 1px solid var(--border-subtle); }
 .simulator-type .input { flex: 1; min-width: 0; height: 28px; }
 .simulator-loading { padding: var(--space-4); }

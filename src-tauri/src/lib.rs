@@ -683,23 +683,31 @@ async fn simulator_frame(udid: String) -> Result<String, String> {
     simulator::screenshot(&udid).map(|jpeg| base64::engine::general_purpose::STANDARD.encode(jpeg))
 }
 
-/// A tap where the developer clicked the screen, in the screenshot's pixels.
+/// A tap where the developer clicked the screen, in the screenshot's pixels (`width` is the screenshot's).
 #[tauri::command]
 #[specta::specta]
-async fn simulator_tap(udid: String, name: String, x: f64, y: f64) -> Result<(), String> {
-    simulator::tap_pixel(&udid, &name, x, y)
+async fn simulator_tap(udid: String, name: String, x: f64, y: f64, width: f64) -> Result<(), String> {
+    simulator::tap_pixel(&udid, &name, x, y, width)
+}
+
+/// A swipe where the developer dragged across the screen, in the screenshot's pixels.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+async fn simulator_swipe(udid: String, name: String, from_x: f64, from_y: f64, to_x: f64, to_y: f64, width: f64) -> Result<(), String> {
+    simulator::swipe_pixel(&udid, &name, (from_x, from_y), (to_x, to_y), width)
 }
 
 #[tauri::command]
 #[specta::specta]
 async fn simulator_type(udid: String, text: String) -> Result<(), String> {
-    simulator::type_text(&udid, &text)
+    simulator::gesture(&udid, &simulator::Gesture::Text(text))
 }
 
 #[tauri::command]
 #[specta::specta]
 async fn simulator_home(udid: String) -> Result<(), String> {
-    simulator::home(&udid)
+    simulator::gesture(&udid, &simulator::Gesture::Home)
 }
 
 /// Open the Simulator app on this device.
@@ -1566,6 +1574,7 @@ fn specta_builder() -> tauri_specta::Builder {
             simulator_shutdown,
             simulator_frame,
             simulator_tap,
+            simulator_swipe,
             simulator_type,
             simulator_home,
             simulator_open_app,

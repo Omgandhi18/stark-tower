@@ -97,8 +97,11 @@ export const simulatorBoot = (udid: string) => ok(commands.simulatorBoot(udid));
 export const simulatorShutdown = (udid: string) => ok(commands.simulatorShutdown(udid));
 /** The device's screen now, as a base64 JPEG. */
 export const simulatorFrame = (udid: string) => ok(commands.simulatorFrame(udid));
-/** A tap where the screen was clicked, in the screenshot's pixels. */
-export const simulatorTap = (udid: string, name: string, x: number, y: number) => ok(commands.simulatorTap(udid, name, x, y));
+/** A tap where the screen was clicked, in the screenshot's pixels (`width` is the screenshot's). */
+export const simulatorTap = (udid: string, name: string, x: number, y: number, width: number) => ok(commands.simulatorTap(udid, name, x, y, width));
+/** A swipe where the screen was dragged across, in the screenshot's pixels. */
+export const simulatorSwipe = (udid: string, name: string, from: [number, number], to: [number, number], width: number) =>
+  ok(commands.simulatorSwipe(udid, name, from[0], from[1], to[0], to[1], width));
 export const simulatorType = (udid: string, text: string) => ok(commands.simulatorType(udid, text));
 export const simulatorHome = (udid: string) => ok(commands.simulatorHome(udid));
 export const simulatorOpenApp = (udid: string) => ok(commands.simulatorOpenApp(udid));

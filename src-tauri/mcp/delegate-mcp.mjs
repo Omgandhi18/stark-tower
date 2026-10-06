@@ -248,21 +248,23 @@ const SIMULATOR_TOOL = {
   description:
     "Use the iOS Simulator, which the developer sees beside your chat (needs Xcode on this Mac). List " +
     "the `devices`, `boot` one, `install` a built .app and `launch` it by bundle id, `open_url`, take a " +
-    "`screenshot` to see the screen, and `tap` (x and y in points from the top left), `type` or go " +
-    "`home` (those three need idb). Build for a simulator with xcodebuild first.",
+    "`screenshot` to see the screen, and `tap` (x and y in points from the top left), `swipe` (from x, y " +
+    "to to_x, to_y), `type` or go `home` (those four need AXe or idb). Build for a simulator with xcodebuild first.",
   inputSchema: {
     type: "object",
     properties: {
       action: {
         type: "string",
-        enum: ["devices", "boot", "screenshot", "install", "launch", "open_url", "tap", "type", "home"],
+        enum: ["devices", "boot", "screenshot", "install", "launch", "open_url", "tap", "swipe", "type", "home"],
       },
       device: { type: "string", description: "A simulator's name or id; leave out for the running one." },
       path: { type: "string", description: "For install: the built .app bundle." },
       bundle_id: { type: "string", description: "For launch: the app's bundle id." },
       url: { type: "string", description: "For open_url: a link or deep link." },
-      x: { type: "number", description: "For tap: points from the left." },
-      y: { type: "number", description: "For tap: points from the top." },
+      x: { type: "number", description: "For tap and swipe: points from the left." },
+      y: { type: "number", description: "For tap and swipe: points from the top." },
+      to_x: { type: "number", description: "For swipe: where it ends, from the left." },
+      to_y: { type: "number", description: "For swipe: where it ends, from the top." },
       text: { type: "string", description: "For type: what to type." },
     },
     required: ["action"],
@@ -381,6 +383,8 @@ rl.on("line", async (raw) => {
         bundle_id: args.bundle_id || "",
         x: args.x ?? null,
         y: args.y ?? null,
+        to_x: args.to_x ?? null,
+        to_y: args.to_y ?? null,
       });
       if (res.error) result(id, name + ": " + res.error, true);
       else if (res.image) {
