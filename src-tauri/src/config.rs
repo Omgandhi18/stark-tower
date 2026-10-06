@@ -211,6 +211,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub keep_awake: bool,
     #[serde(default)]
+    pub mac_notifications: crate::system_notifications::MacNotifications,
+    #[serde(default)]
     pub budget: crate::spend::Budget,
     #[serde(default = "yes")]
     pub worktrees_enabled: bool,
@@ -443,6 +445,7 @@ pub fn default_config() -> AppConfig {
         standup_minutes: 0,
         keep_awake: false,
         quick_capture: crate::capture::CaptureConfig::default(),
+        mac_notifications: crate::system_notifications::MacNotifications::default(),
         theme: default_theme(),
         outfits: default_outfits(),
         dev_servers: std::collections::HashMap::new(),
@@ -706,6 +709,17 @@ pub fn save_checked(path: &std::path::Path, cfg: &AppConfig) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_and_partial_notification_settings_keep_defaults() {
+        use crate::system_notifications::MacNotifications;
+        let old: AppConfig = serde_json::from_str(r#"{"engines": [], "agents": []}"#).unwrap();
+        assert_eq!(old.mac_notifications, MacNotifications::default());
+        let partial: AppConfig = serde_json::from_str(r#"{"engines": [], "agents": [], "mac_notifications": {"enabled": false, "checks": true}}"#).unwrap();
+        assert_eq!(partial.mac_notifications, MacNotifications { enabled: false, checks: true, ..Default::default() });
+        let round_trip: AppConfig = serde_json::from_str(&serde_json::to_string(&partial).unwrap()).unwrap();
+        assert_eq!(partial.mac_notifications, round_trip.mac_notifications);
+    }
 
     fn tmp_dir(tag: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("stark-cfg-{tag}-{}", std::process::id()));

@@ -50,6 +50,8 @@ const MINUTE = 60_000;
 const ago = (minutes: number) => NOW - minutes * MINUTE;
 
 export interface Scenario {
+  macNotificationPermission?: "allowed" | "denied" | "not_asked" | "provisional" | "system";
+  macNotificationTestError?: string;
   spend: SpendSummary;
   conversationSpend: Record<number, ConversationSpend>;
   studio?: { available: boolean; looks: Record<string, import("../src/lib/bindings").Look>; failTheme?: string };
@@ -194,6 +196,7 @@ const config: AppConfig = {
   onboarded: true,
   standup_minutes: 0,
   keep_awake: true,
+  mac_notifications: { enabled: true, in_front: true, reminders: true, requests: true, work: true, code_review: true, automations: true, budget: true, checks: false, claims: false },
   theme: "rnd",
   engines: [
     {

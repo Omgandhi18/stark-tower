@@ -276,6 +276,45 @@ async getTaskFileDiff(id: string, path: string) : Promise<Result<string, string>
 }
 },
 /**
+ * Whether macOS lets Starkline show notifications. Async: macOS answers on its own thread.
+ */
+async macNotificationStatus() : Promise<Result<NotificationPermission, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mac_notification_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Ask macOS to allow notifications (it prompts only the first time), waiting for the developer's answer.
+ */
+async requestMacNotifications() : Promise<Result<NotificationPermission, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("request_mac_notifications") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * What also reaches the developer as a notification on this Mac.
+ */
+async setMacNotifications(settings: MacNotifications) : Promise<AppConfig> {
+    return await TAURI_INVOKE("set_mac_notifications", { settings });
+},
+/**
+ * Show a test notification the way real ones arrive, whatever the toggles say.
+ */
+async testMacNotification() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("test_mac_notification") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * The Notification Centre's record, newest first.
  */
 async listNotifications(limit: number | null) : Promise<Notification[]> {
@@ -1214,7 +1253,7 @@ standup_minutes?: number;
 /**
  * The developer allows Starkline to keep this Mac awake while agents work.
  */
-keep_awake?: boolean; budget?: Budget; worktrees_enabled?: boolean; worktree_setup?: Partial<{ [key in string]: WorktreeSetup }>; 
+keep_awake?: boolean; mac_notifications?: MacNotifications; budget?: Budget; worktrees_enabled?: boolean; worktree_setup?: Partial<{ [key in string]: WorktreeSetup }>; 
 /**
  * The global capture shortcut and the choices used in its small window.
  */
@@ -1419,6 +1458,7 @@ export type Host = { kind: HostKind; hostname: string; repository: string; remot
 export type HostKind = "github" | "gitlab" | "unknown"
 export type LedgerEntry = { id: number; ts: number; agent_id: string; kind: string; detail: string; load: number }
 export type Look = { id: string; choices: Choices; paths: Partial<{ [key in string]: string }>; progress: Partial<{ [key in string]: string }>; errors: Partial<{ [key in string]: string }>; revision: number; saved: boolean }
+export type MacNotifications = { enabled?: boolean; in_front?: boolean; reminders?: boolean; requests?: boolean; work?: boolean; code_review?: boolean; automations?: boolean; budget?: boolean; checks?: boolean; claims?: boolean }
 /**
  * A model an agent can run on.
  */
@@ -1475,6 +1515,7 @@ automation_id: number | null;
  * The reminder that went off.
  */
 reminder_id: number | null }
+export type NotificationPermission = { state: PermissionState; settings_url: string | null }
 export type Output = { folder: string; generation: number; cursor: number; lines: string[] }
 export type PathEntry = { path: string; dir: boolean }
 /**
@@ -1497,6 +1538,7 @@ rule: string;
  * "approval" or "never": how strongly the default held this back.
  */
 tier: string; uses: number; last_used: number | null; revoked: number | null }
+export type PermissionState = "allowed" | "denied" | "not_asked" | "provisional" | "system"
 export type PickerResult = { active: boolean; pick: BrowserPick | null; attachment?: Attachment | null }
 /**
  * One step of the owner's own plan (its to-do list).

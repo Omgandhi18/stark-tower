@@ -430,6 +430,13 @@ pub struct Bug {
     pub updated: i64,
 }
 
+/// Runs an `UPDATE … RETURNING id` and gives back the ids it changed, so the Mac can take them off too.
+pub(crate) fn notification_ids(conn: &rusqlite::Connection, sql: &str, params: impl rusqlite::Params) -> Vec<i64> {
+    let Ok(mut stmt) = conn.prepare(sql) else { return vec![] };
+    let Ok(rows) = stmt.query_map(params, |r| r.get(0)) else { return vec![] };
+    rows.filter_map(Result::ok).collect()
+}
+
 pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1135,63 +1142,61 @@ impl Ledger {
         found
     }
 
-    pub fn mark_notifications_read(&self, ids: &[i64]) {
+    pub fn mark_notifications_read(&self, ids: &[i64]) -> Vec<i64> {
         let conn = self.conn.lock().unwrap();
-        for id in ids {
-            let _ = conn.execute("UPDATE notifications SET read = 1 WHERE id = ?1", [id]);
-        }
+        ids.iter()
+            .flat_map(|id| notification_ids(&conn, "UPDATE notifications SET read = 1 WHERE id = ?1 AND read = 0 RETURNING id", [id]))
+            .collect()
     }
 
-    pub fn mark_all_notifications_read(&self) {
+    pub fn mark_all_notifications_read(&self) -> Vec<i64> {
         let conn = self.conn.lock().unwrap();
-        let _ = conn.execute("UPDATE notifications SET read = 1 WHERE read = 0", []);
+        notification_ids(&conn, "UPDATE notifications SET read = 1 WHERE read = 0 RETURNING id", [])
     }
 
     /// Settle the open notifications for a review or a task, saying how.
-    pub fn handle_notifications(&self, review_id: Option<&str>, task_id: Option<&str>, kinds: &[&str], outcome: &str) -> usize {
+    pub fn handle_notifications(&self, review_id: Option<&str>, task_id: Option<&str>, kinds: &[&str], outcome: &str) -> Vec<i64> {
         let ts = now_ms();
         let conn = self.conn.lock().unwrap();
-        let mut changed = 0;
+        let mut changed = Vec::new();
         if let Some(review) = review_id {
-            changed += conn
-                .execute(
-                    "UPDATE notifications SET handled = ?2, outcome = ?3, read = 1 WHERE review_id = ?1 AND handled IS NULL",
-                    rusqlite::params![review, ts, outcome],
-                )
-                .unwrap_or(0);
+            changed.extend(notification_ids(
+                &conn,
+                "UPDATE notifications SET handled = ?2, outcome = ?3, read = 1 WHERE review_id = ?1 AND handled IS NULL RETURNING id",
+                rusqlite::params![review, ts, outcome],
+            ));
         }
         if let Some(task) = task_id {
             for kind in kinds {
-                changed += conn
-                    .execute(
-                        "UPDATE notifications SET handled = ?2, outcome = ?3, read = 1 \
-                         WHERE task_id = ?1 AND kind = ?4 AND handled IS NULL",
-                        rusqlite::params![task, ts, outcome, kind],
-                    )
-                    .unwrap_or(0);
+                changed.extend(notification_ids(
+                    &conn,
+                    "UPDATE notifications SET handled = ?2, outcome = ?3, read = 1 \
+                     WHERE task_id = ?1 AND kind = ?4 AND handled IS NULL RETURNING id",
+                    rusqlite::params![task, ts, outcome, kind],
+                ));
             }
         }
         changed
     }
 
     /// Settle an automation's open notifications (a missed run that asked what to do).
-    pub fn handle_automation_notifications(&self, automation_id: i64, outcome: &str) -> usize {
+    pub fn handle_automation_notifications(&self, automation_id: i64, outcome: &str) -> Vec<i64> {
         let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE notifications SET handled = ?2, outcome = ?3, read = 1 WHERE automation_id = ?1 AND handled IS NULL",
+        notification_ids(
+            &conn,
+            "UPDATE notifications SET handled = ?2, outcome = ?3, read = 1 WHERE automation_id = ?1 AND handled IS NULL RETURNING id",
             rusqlite::params![automation_id, now_ms(), outcome],
         )
-        .unwrap_or(0)
     }
 
     /// Settle a reminder's open notification (done, snoozed, deleted).
-    pub fn handle_reminder_notifications(&self, reminder_id: i64, outcome: &str) -> usize {
+    pub fn handle_reminder_notifications(&self, reminder_id: i64, outcome: &str) -> Vec<i64> {
         let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE notifications SET handled = ?2, outcome = ?3, read = 1 WHERE reminder_id = ?1 AND handled IS NULL",
+        notification_ids(
+            &conn,
+            "UPDATE notifications SET handled = ?2, outcome = ?3, read = 1 WHERE reminder_id = ?1 AND handled IS NULL RETURNING id",
             rusqlite::params![reminder_id, now_ms(), outcome],
         )
-        .unwrap_or(0)
     }
 
     // ---- Reminders -------------------------------------------------------------
@@ -1997,12 +2002,32 @@ mod tests {
             .add_notification(&NewNotification { kind: "reminder", urgency: "needs_you", agent_id: "veronica", title: "Check the deploy", reminder_id: Some(saved.id), ..Default::default() })
             .unwrap();
         assert_eq!(n.reminder_id, Some(saved.id));
-        assert_eq!(l.handle_reminder_notifications(saved.id, "Done"), 1);
+        assert_eq!(l.handle_reminder_notifications(saved.id, "Done"), vec![n.id]);
+        assert!(l.handle_reminder_notifications(saved.id, "Done").is_empty());
         assert_eq!(l.notification(n.id).unwrap().outcome.as_deref(), Some("Done"));
 
         l.delete_reminder(saved.id);
         assert!(l.reminder(saved.id).is_none());
         let _ = std::fs::remove_file(p);
+    }
+
+    #[test]
+    fn settling_returns_every_matching_id_once() {
+        let l = Ledger::open(std::path::Path::new(":memory:")).unwrap();
+        let notice = NewNotification { kind: "task_ready", task_id: Some("t1"), review_id: Some("r1"), ..Default::default() };
+        let first = l.add_notification(&notice).unwrap();
+        let second = l.add_notification(&notice).unwrap();
+        let other = l.add_notification(&NewNotification { task_id: Some("t2"), review_id: Some("r2"), ..notice }).unwrap();
+        let mut ids = l.handle_notifications(Some("r1"), Some("t1"), &["task_ready", "task_ready"], "Reviewed");
+        ids.sort_unstable();
+        assert_eq!(ids, vec![first.id, second.id]);
+        assert!(l.handle_notifications(Some("r1"), Some("t1"), &["task_ready"], "Reviewed").is_empty());
+        assert!(l.notification(other.id).unwrap().handled.is_none());
+        for id in ids {
+            let saved = l.notification(id).unwrap();
+            assert!(saved.read && saved.handled.is_some());
+            assert_eq!(saved.outcome.as_deref(), Some("Reviewed"));
+        }
     }
 
     #[test]
@@ -2023,16 +2048,24 @@ mod tests {
         let approval = l.add_notification(&base("approval", Some("rv-1"), Some("t1"))).unwrap();
         let ready = l.add_notification(&base("task_ready", None, Some("t1"))).unwrap();
         assert!(!approval.read && approval.handled.is_none());
-        assert_eq!(l.handle_notifications(Some("rv-1"), None, &[], "Allowed once"), 1);
+        assert_eq!(l.handle_notifications(Some("rv-1"), None, &[], "Allowed once"), vec![approval.id]);
+        assert!(l.handle_notifications(Some("rv-1"), None, &[], "Allowed once").is_empty());
         assert_eq!(l.notification(approval.id).unwrap().outcome.as_deref(), Some("Allowed once"));
         assert!(l.notification(ready.id).unwrap().handled.is_none(), "only the review's own notice is settled");
-        assert_eq!(l.handle_notifications(None, Some("t1"), &["task_ready"], "Closed"), 1);
+        assert_eq!(l.handle_notifications(None, Some("t1"), &["task_ready"], "Closed"), vec![ready.id]);
+        assert!(l.handle_notifications(None, Some("t1"), &["task_ready"], "Closed").is_empty());
         let missed = l
             .add_notification(&NewNotification { kind: "automation_missed", urgency: "needs_you", agent_id: "jarvis", title: "Nightly review missed a run", automation_id: Some(7), ..Default::default() })
             .unwrap();
-        assert_eq!(l.handle_automation_notifications(7, "Ran it now"), 1);
+        assert_eq!(l.handle_automation_notifications(7, "Ran it now"), vec![missed.id]);
+        assert!(l.handle_automation_notifications(7, "Ran it now").is_empty());
         assert_eq!(l.notification(missed.id).unwrap().outcome.as_deref(), Some("Ran it now"));
-        l.mark_all_notifications_read();
+        let update = l.add_notification(&base("check_failed", None, None)).unwrap();
+        let another = l.add_notification(&base("claim_refused", None, None)).unwrap();
+        assert_eq!(l.mark_notifications_read(&[update.id, update.id, -1]), vec![update.id]);
+        assert!(l.mark_notifications_read(&[update.id]).is_empty());
+        assert_eq!(l.mark_all_notifications_read(), vec![another.id]);
+        assert!(l.mark_all_notifications_read().is_empty());
         assert!(l.notifications(10).iter().all(|n| n.read));
         std::fs::remove_file(&p).ok();
     }

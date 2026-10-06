@@ -21,6 +21,9 @@ mod delivery_draft;
 mod ledger;
 mod lifecycle;
 mod notify;
+#[cfg(target_os = "macos")]
+mod notifications_mac;
+mod system_notifications;
 mod opencode;
 mod outputs;
 mod proc;
@@ -524,6 +527,35 @@ async fn start_task(
     }).await.map_err(|e| e.to_string())?
 }
 
+/// Whether macOS lets Starkline show notifications. Async: macOS answers on its own thread.
+#[tauri::command]
+#[specta::specta]
+async fn mac_notification_status(app: tauri::AppHandle) -> Result<system_notifications::NotificationPermission, String> {
+    tauri::async_runtime::spawn_blocking(move || system_notifications::permission(&app)).await.map_err(|e| e.to_string())
+}
+
+/// Ask macOS to allow notifications (it prompts only the first time), waiting for the developer's answer.
+#[tauri::command]
+#[specta::specta]
+async fn request_mac_notifications(app: tauri::AppHandle) -> Result<system_notifications::NotificationPermission, String> {
+    tauri::async_runtime::spawn_blocking(move || system_notifications::request(&app)).await.map_err(|e| e.to_string())
+}
+
+/// What also reaches the developer as a notification on this Mac.
+#[tauri::command]
+#[specta::specta]
+fn set_mac_notifications(app: tauri::AppHandle, state: tauri::State<AppState>, settings: system_notifications::MacNotifications) -> AppConfig {
+    state.config.lock().unwrap().mac_notifications = settings;
+    commit_config(&app, &state)
+}
+
+/// Show a test notification the way real ones arrive, whatever the toggles say.
+#[tauri::command]
+#[specta::specta]
+async fn test_mac_notification(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || system_notifications::test(&app)).await.map_err(|e| e.to_string())?
+}
+
 /// The Notification Centre's record, newest first.
 #[tauri::command]
 #[specta::specta]
@@ -534,14 +566,16 @@ fn list_notifications(state: tauri::State<AppState>, limit: Option<i64>) -> Vec<
 #[tauri::command]
 #[specta::specta]
 fn mark_notifications_read(app: tauri::AppHandle, state: tauri::State<AppState>, ids: Vec<i64>) {
-    state.ledger.mark_notifications_read(&ids);
+    let read = state.ledger.mark_notifications_read(&ids);
+    system_notifications::forget(&read);
     let _ = app.emit("notifications://changed", ());
 }
 
 #[tauri::command]
 #[specta::specta]
 fn mark_all_notifications_read(app: tauri::AppHandle, state: tauri::State<AppState>) {
-    state.ledger.mark_all_notifications_read();
+    let read = state.ledger.mark_all_notifications_read();
+    system_notifications::forget(&read);
     let _ = app.emit("notifications://changed", ());
 }
 
@@ -1286,7 +1320,9 @@ fn set_budget(app: tauri::AppHandle, state: tauri::State<AppState>, budget: spen
         updated
     };
     let _ = app.emit("config://changed", updated);
-    if state.ledger.settle_budget_notices() > 0 {
+    let settled = state.ledger.settle_budget_notices();
+    if !settled.is_empty() {
+        system_notifications::forget(&settled);
         let _ = app.emit("notifications://changed", ());
     }
     let summary = state.ledger.spend_summary(budget)?;
@@ -2139,6 +2175,10 @@ fn specta_builder() -> tauri_specta::Builder {
             delivery_info, discard_task_file, commit_task, push_task, draft_delivery, cancel_delivery_draft, create_task_request,
             code_reviews, refresh_code_reviews, see_code_review, ask_code_review,
             get_task_file_diff,
+            mac_notification_status,
+            request_mac_notifications,
+            set_mac_notifications,
+            test_mac_notification,
             list_notifications,
             mark_notifications_read,
             mark_all_notifications_read,
@@ -2383,6 +2423,7 @@ pub fn run() {
                 lifecycle::show_main(app.handle());
             }
             workspaces::reconcile(&app.state::<AppState>().ledger);
+            system_notifications::start(app.handle());
             // Recovery first, then the automation scheduler.
             automations::start(app.handle().clone());
             reminders::start(app.handle().clone());

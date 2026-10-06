@@ -400,6 +400,20 @@ function install(scenario: Scenario) {
       return { agent_name: agent.name, provider: engine.label, model: agent.model || engine.model, sources, project_hint, notes: ["A snapshot of current local files; provider acceptance is based on discovery rules."] };
     },
     open_context_file: () => null,
+    mac_notification_status: () => ({ state: state.macNotificationPermission ?? "allowed", settings_url: state.macNotificationPermission === "system" ? null : "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=com.starkline.app" }),
+    request_mac_notifications: () => {
+      if (state.macNotificationPermission === "not_asked") state.macNotificationPermission = "allowed";
+      return commands.mac_notification_status({});
+    },
+    set_mac_notifications: (args) => {
+      state.config.mac_notifications = args.settings as Scenario["config"]["mac_notifications"];
+      return commitConfig();
+    },
+    test_mac_notification: () => {
+      if (state.macNotificationTestError) throw new Error(state.macNotificationTestError);
+      if (state.macNotificationPermission === "denied") throw new Error("Notifications are turned off for Starkline. Turn them on in System Settings → Notifications → Starkline, then try again.");
+      return null;
+    },
     get_config: () => state.config,
     spend_summary: () => state.spend,
     set_budget: (args) => {

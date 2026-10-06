@@ -1,9 +1,10 @@
-import { AudioLines, Wallet, Activity, Moon, Palette, Plug, ShieldCheck, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import { AudioLines, Bell, Wallet, Activity, Moon, Palette, Plug, ShieldCheck, SlidersHorizontal, type LucideIcon } from "lucide-react";
 import { cx, ICON_SIZE, ICON_STROKE } from "../../design";
 import { useNavigation, type SettingsSection } from "../../stores/navigation";
 
 const SECTIONS: ReadonlyArray<{ id: SettingsSection; label: string; icon: LucideIcon }> = [
   { id: "general", label: "General", icon: SlidersHorizontal },
+  { id: "notifications", label: "Notifications", icon: Bell },
   { id: "providers", label: "Providers", icon: Plug },
   { id: "permissions", label: "Permissions", icon: ShieldCheck },
   { id: "spend", label: "Spend", icon: Wallet },

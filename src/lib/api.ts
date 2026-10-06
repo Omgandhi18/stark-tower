@@ -1,6 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { commands, type AutomationInput, type Bounds, type BrowserPage, type Budget, type CodeReviews, type CommitInput, type ExtraArgs, type Output, type PowerState, type ReminderInput, type RequestInput, type Result, type Server, type WorktreeSetup } from "./bindings";
+import { commands, type AutomationInput, type Bounds, type BrowserPage, type Budget, type CodeReviews, type CommitInput, type ExtraArgs, type MacNotifications, type Output, type PowerState, type ReminderInput, type RequestInput, type Result, type Server, type WorktreeSetup } from "./bindings";
 import type { Attachment, ChatEvent, ChatSwitch, TaskEvent, LedgerEntry, PtyData, ReviewRequest, StatusEvent, UsageUpdate, UpdateStatus } from "./types";
 
 // Commands are the tauri-specta-generated, typed wrappers (bindings.ts). Fallible
@@ -421,3 +421,13 @@ export const speakVoice = (agentId: string, text: string, token: string, voice: 
 export const stopSpeaking = () => commands.stopSpeaking();
 export const voiceChatVisibility = (agentId: string | null) => commands.voiceChatVisibility(agentId);
 export const onVoiceStatus = (cb: (status: import("./types").VoiceStatus) => void): Promise<UnlistenFn> => listen<import("./types").VoiceStatus>("voices://status", (e) => cb(e.payload));
+
+// ---- Notifications on this Mac ----
+
+export const macNotificationStatus = () => ok(commands.macNotificationStatus());
+/** Ask macOS to allow notifications; resolves once the developer has answered its prompt. */
+export const requestMacNotifications = () => ok(commands.requestMacNotifications());
+export const setMacNotifications = (settings: MacNotifications) => commands.setMacNotifications(settings);
+export const testMacNotification = () => ok(commands.testMacNotification());
+/** A Starkline notification was clicked in macOS: open it in the Notification Centre. */
+export const onNotificationOpen = (cb: (id: number) => void): Promise<UnlistenFn> => listen<number>("notifications://open", (evt) => cb(evt.payload));

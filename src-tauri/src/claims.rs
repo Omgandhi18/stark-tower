@@ -323,7 +323,7 @@ pub fn report(app: &tauri::AppHandle, agent: &str, workspace: &str, reason: &str
         format!("{} couldn't change the shared workspace", crate::prompts::agent_name(app, agent))
     };
     if first_in_a_while(agent, &title) {
-        state.ledger.add_notification(&crate::ledger::NewNotification {
+        if let Some(stored) = state.ledger.add_notification(&crate::ledger::NewNotification {
             kind: "claim_refused",
             urgency: "update",
             agent_id: agent,
@@ -332,8 +332,10 @@ pub fn report(app: &tauri::AppHandle, agent: &str, workspace: &str, reason: &str
             title: &title,
             body: &reason,
             ..Default::default()
-        });
-        let _ = app.emit("notifications://changed", ());
+        }) {
+            crate::system_notifications::deliver(app, &stored, "");
+            let _ = app.emit("notifications://changed", ());
+        }
     }
     changed(app);
 }
