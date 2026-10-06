@@ -335,11 +335,13 @@ impl crate::ledger::Ledger {
         summary.models = group_rows(models);
         Ok(summary)
     }
-    pub(crate) fn settle_budget_notices(&self) -> usize {
-        self.conn.lock().unwrap().execute(
-            "UPDATE notifications SET handled = ?1, outcome = 'Budget reviewed', read = 1 WHERE kind = 'budget' AND handled IS NULL",
+    pub(crate) fn settle_budget_notices(&self) -> Vec<i64> {
+        let conn = self.conn.lock().unwrap();
+        crate::ledger::notification_ids(
+            &conn,
+            "UPDATE notifications SET handled = ?1, outcome = 'Budget reviewed', read = 1 WHERE kind = 'budget' AND handled IS NULL RETURNING id",
             [Local::now().timestamp_millis()],
-        ).unwrap_or(0)
+        )
     }
 
     pub fn conversation_spend(&self, id: i64) -> Result<ConversationSpend, String> {
@@ -756,8 +758,9 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-        assert_eq!(ledger.settle_budget_notices(), 1);
-        assert_eq!(ledger.settle_budget_notices(), 0);
+        let id = ledger.notifications(10)[0].id;
+        assert_eq!(ledger.settle_budget_notices(), vec![id]);
+        assert!(ledger.settle_budget_notices().is_empty());
         assert!(ledger
             .record_usage(&row(Some(1.0), None, day), &budget)
             .unwrap()

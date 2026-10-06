@@ -5,6 +5,7 @@ import { AttachmentGallery } from "../attachments/AttachmentView";
 import { presentTool } from "../../lib/tools";
 import type { Agent } from "../../lib/types";
 import type { ChatMessage, MessageRole } from "../../stores/chats";
+import ReadAloud from "../voices/ReadAloud";
 import { useStickToBottom } from "./useStickToBottom";
 
 /** Messages that come from the agent's side of the conversation. */
@@ -13,7 +14,7 @@ const AGENT_SIDE: readonly MessageRole[] = ["agent", "tool", "thinking", "artifa
 const startsAgentRun = (messages: readonly ChatMessage[], index: number) =>
   AGENT_SIDE.includes(messages[index].role) && (index === 0 || !AGENT_SIDE.includes(messages[index - 1].role));
 
-const MessageRow = memo(function MessageRow({ message }: { message: ChatMessage }) {
+const MessageRow = memo(function MessageRow({ message, agentId }: { message: ChatMessage; agentId: string }) {
   switch (message.role) {
     case "user":
       return (
@@ -38,7 +39,7 @@ const MessageRow = memo(function MessageRow({ message }: { message: ChatMessage 
       );
     }
     case "agent":
-      return <Markdown text={message.text ?? ""} className="msg msg-agent" />;
+      return <><Markdown text={message.text ?? ""} className="msg msg-agent" />{message.text && <ReadAloud agentId={agentId} text={message.text} messageId={String(message.id)} />}</>;
     case "tool": {
       const { verb, icon: Icon } = presentTool(message.tool);
       return (
@@ -80,7 +81,7 @@ const MessageRow = memo(function MessageRow({ message }: { message: ChatMessage 
 });
 
 interface MessageListProps {
-  agent: Pick<Agent, "name" | "figure" | "accent">;
+  agent: Pick<Agent, "id" | "name" | "figure" | "accent">;
   messages: readonly ChatMessage[];
   /** The agent is working on a reply. */
   pending: boolean;
@@ -104,7 +105,7 @@ export default function MessageList({ agent, messages, pending, empty }: Message
                 {agent.name}
               </div>
             )}
-            <MessageRow message={message} />
+            <MessageRow message={message} agentId={agent.id} />
           </div>
         ))}
         {pending && (

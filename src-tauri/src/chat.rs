@@ -873,6 +873,10 @@ pub(crate) struct TurnUsage {
 /// and the task engine all hear about it.
 pub(crate) fn turn_finished(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, text: Option<String>, usage: TurnUsage) {
     let usage = crate::spend::record(app, sink, agent_id, usage);
+    // Only replies in the developer's own chats can be read out; task workers stay quiet.
+    if let (true, Some(reply)) = (sink.persistent, text.as_deref()) {
+        crate::voices::reply(app, agent_id, reply);
+    }
     let (made, more) = crate::outputs::finished(agent_id);
     // Only files the agent may read without asking: nothing reaches the chat past the gate.
     let made: Vec<_> = made.into_iter().filter(|p| crate::bridge::may_read_freely(app, agent_id, p)).collect();

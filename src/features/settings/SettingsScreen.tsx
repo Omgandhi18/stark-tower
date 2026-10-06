@@ -3,6 +3,8 @@ import { EmptyState, SkeletonRows } from "../../design";
 import { useConfig } from "../../stores/config";
 import { useNavigation } from "../../stores/navigation";
 import DiagnosticsSettings from "./DiagnosticsSettings";
+import VoicesSettings from "./VoicesSettings";
+import NotificationsSettings from "./NotificationsSettings";
 import GeneralSettings from "./GeneralSettings";
 import PermissionsSettings from "./PermissionsSettings";
 import SpendSettings from "../spend/SpendSettings";
@@ -19,6 +21,8 @@ export default function SettingsScreen() {
 
   const content = (() => {
     switch (section) {
+      case "notifications":
+        return <NotificationsSettings />;
       case "providers":
         if (config) return <ProviderSettings config={config} />;
         return configError ? (
@@ -30,6 +34,8 @@ export default function SettingsScreen() {
         return <PermissionsSettings />;
       case "spend":
         return <SpendSettings />;
+      case "voices":
+        return <VoicesSettings />;
       case "power":
         return <PowerSettings />;
       case "themes":

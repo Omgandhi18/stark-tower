@@ -400,6 +400,20 @@ function install(scenario: Scenario) {
       return { agent_name: agent.name, provider: engine.label, model: agent.model || engine.model, sources, project_hint, notes: ["A snapshot of current local files; provider acceptance is based on discovery rules."] };
     },
     open_context_file: () => null,
+    mac_notification_status: () => ({ state: state.macNotificationPermission ?? "allowed", settings_url: state.macNotificationPermission === "system" ? null : "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=com.starkline.app" }),
+    request_mac_notifications: () => {
+      if (state.macNotificationPermission === "not_asked") state.macNotificationPermission = "allowed";
+      return commands.mac_notification_status({});
+    },
+    set_mac_notifications: (args) => {
+      state.config.mac_notifications = args.settings as Scenario["config"]["mac_notifications"];
+      return commitConfig();
+    },
+    test_mac_notification: () => {
+      if (state.macNotificationTestError) throw new Error(state.macNotificationTestError);
+      if (state.macNotificationPermission === "denied") throw new Error("Notifications are turned off for Starkline. Turn them on in System Settings → Notifications → Starkline, then try again.");
+      return null;
+    },
     get_config: () => state.config,
     spend_summary: () => state.spend,
     set_budget: (args) => {
@@ -433,6 +447,47 @@ function install(scenario: Scenario) {
       state.claims = state.claims.filter((c) => c.workspace !== tree.path);
       emit("workspaces://changed", null);
       emit("tasks://changed", null);
+    },
+    voice_status: () => state.voices,
+    download_voices: () => {
+      state.voices = { ...state.voices, model: "downloading", downloaded: 0, error: null };
+      emit("voices://status", state.voices);
+      return null;
+    },
+    cancel_voice_download: () => {
+      state.voices = { ...state.voices, model: "missing", downloaded: 0 };
+      emit("voices://status", state.voices);
+      return null;
+    },
+    remove_voices: () => {
+      state.voices = { ...state.voices, model: "missing", downloaded: 0, agent_id: null, token: null };
+      state.config.voices = { ...state.config.voices, enabled: false };
+      emit("voices://status", state.voices);
+      return commitConfig();
+    },
+    set_voice_settings: (args) => {
+      state.config.voices = args.settings as Scenario["config"]["voices"];
+      if (!state.config.voices?.enabled) {
+        state.voices = { ...state.voices, agent_id: null, token: null };
+        emit("voices://status", state.voices);
+      }
+      return commitConfig();
+    },
+    speak_voice: (args) => {
+      if (state.config.voices?.enabled && state.voices.model === "ready") {
+        state.voices = { ...state.voices, agent_id: String(args.agentId), token: String(args.token) };
+        emit("voices://status", state.voices);
+      }
+      return null;
+    },
+    stop_speaking: () => {
+      state.voices = { ...state.voices, agent_id: null, token: null };
+      emit("voices://status", state.voices);
+      return null;
+    },
+    voice_chat_visibility: (args) => {
+      state.voiceChat = args.agentId as string | null;
+      return null;
     },
     list_projects: () => state.projects,
     add_project: (args) => {

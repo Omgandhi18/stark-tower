@@ -163,6 +163,9 @@ pub fn on_run_event(app: &tauri::AppHandle, event: &tauri::RunEvent) {
                     servers.kill_all();
                 }
                 crate::simulator_extras::cleanup();
+                if let Some(state) = app.try_state::<crate::AppState>() {
+                    state.voices.shutdown(app);
+                }
                 crate::chat::kill_all(app);
                 crate::pty::kill_all(app);
                 app.state::<crate::AppState>().terminals.kill_all();

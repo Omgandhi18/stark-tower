@@ -2,6 +2,8 @@
 // by the `export_typescript_bindings` test). Re-exported here so the rest of the
 // app keeps importing from `./types` while the shapes can never drift from Rust.
 export type {
+  MacNotifications,
+  NotificationPermission,
   ActiveContext,
   ContextSource,
   DeliveryInfo,
@@ -17,6 +19,9 @@ export type {
   Attachment,
   AttachmentKind,
   Tone,
+  Voice,
+  VoiceSettings,
+  VoiceStatus,
   AppConfig,
   AuthConfig,
   Bug,

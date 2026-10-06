@@ -9,6 +9,8 @@ import {
   refreshCodeReviews,
   onCaptureOpenTask,
   onStudioChanged,
+  onVoiceStatus,
+  voiceChatVisibility,
   getConfig,
   listAgents,
   onAgentStatus,
@@ -29,6 +31,7 @@ import {
   onConversationsChanged,
   onHealthChanged,
   onNotificationsChanged,
+  onNotificationOpen,
   onPowerState,
   onReviewRequest,
   onReviewResolved,
@@ -39,6 +42,7 @@ import {
 import { errorMessage } from "../lib/errors";
 import { IS_TAURI } from "../lib/platform";
 import { useCodeReviews } from "../stores/codeReviews";
+import { useVoices } from "../stores/voices";
 import { useActivity } from "../stores/activity";
 import { useLooks } from "../stores/looks";
 import { useAgents } from "../stores/agents";
@@ -91,6 +95,17 @@ async function firstLoad(load: () => Promise<unknown>, onFailure: (error: unknow
 }
 
 export function useBackendSync() {
+  const route = useNavigation((s) => s.route);
+  const agentId = useNavigation((s) => s.agentId);
+  const otherVisibleAgent = useVoices((s) => route === "environment" || route === "task" ? s.viewing[route] ?? null : null);
+  const visibleAgent = route === "conversation" ? agentId : otherVisibleAgent;
+  useEffect(() => {
+    if (!IS_TAURI) return;
+    let unmounted = false;
+    void firstLoad(() => voiceChatVisibility(visibleAgent), report("voice chat visibility"), () => unmounted);
+    return () => { unmounted = true; };
+  }, [visibleAgent]);
+
   useEffect(() => {
     if (!IS_TAURI) return;
 
@@ -103,6 +118,7 @@ export function useBackendSync() {
     const first = (what: string, load: () => Promise<unknown>) => void firstLoad(load, report(what), stopped);
 
     first("custom looks", useLooks.getState().refresh);
+    first("voices", useVoices.getState().refresh);
     first("agents", () => listAgents().then(useAgents.getState().replace));
     void firstLoad(
       () => getConfig().then(useConfig.getState().apply),
@@ -130,6 +146,7 @@ export function useBackendSync() {
       onCodeReviewsChanged(useCodeReviews.getState().apply),
       onCaptureOpenTask((id) => useNavigation.getState().openTask(id)),
       onStudioChanged(() => useLooks.getState().refresh().catch(report("custom looks"))),
+      onVoiceStatus((s) => useVoices.getState().apply(s)),
       onAgentStatus((e) => useAgents.getState().setStatus(e.agentId, e.status)),
       onConfigChanged((c) => {
         useConfig.getState().apply(c);
@@ -150,6 +167,7 @@ export function useBackendSync() {
       onBugsChanged(() => useWorkspace.getState().refreshBugs().catch(report("bugs"))),
       onUpdateStatus((s) => useSystem.getState().applyUpdate(s)),
       onPowerState((p) => useSystem.getState().applyPower(p)),
+      onNotificationOpen((id) => useNavigation.getState().focusNotification(id)),
       onNotificationsChanged(() => useNotifications.getState().refresh().catch(report("notifications"))),
       onAutomationsChanged(() => useAutomations.getState().refreshAll().catch(report("automations"))),
       onRemindersChanged(() => useReminders.getState().refresh().catch(report("reminders"))),

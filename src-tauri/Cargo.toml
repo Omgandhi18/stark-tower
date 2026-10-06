@@ -42,6 +42,10 @@ base64 = "0.22"
 regex = "1"
 # Character Studio frames and sizes generated portraits locally.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# Agent voices: Kokoro speech through sherpa-onnx, run on this Mac.
+sherpa-onnx = "=1.13.8"
+# The model download streams to disk and is checked before extraction.
+sha2 = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -51,7 +55,9 @@ libc = "0.2"
 core-foundation = "0.10"
 # Screenshots of the built-in browser (WebKit draws the page; AppKit makes it a JPEG).
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSData", "NSDictionary", "NSError", "NSValue", "NSGeometry"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSString", "NSData", "NSDictionary", "NSError", "NSValue", "NSGeometry"] }
 objc2-app-kit = { version = "0.3", features = ["NSImage", "NSImageRep", "NSBitmapImageRep", "NSView", "NSResponder", "NSGraphics", "NSWindow", "NSColor"] }
 objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKSnapshotConfiguration", "block2", "objc2-app-kit"] }
 block2 = "0.6"
+# Bundled Mac notifications use UserNotifications, including foreground banners and clicks.
+objc2-user-notifications = { version = "0.3", features = ["block2", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "UNUserNotificationCenter"] }

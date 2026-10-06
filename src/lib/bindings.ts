@@ -276,6 +276,45 @@ async getTaskFileDiff(id: string, path: string) : Promise<Result<string, string>
 }
 },
 /**
+ * Whether macOS lets Starkline show notifications. Async: macOS answers on its own thread.
+ */
+async macNotificationStatus() : Promise<Result<NotificationPermission, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mac_notification_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Ask macOS to allow notifications (it prompts only the first time), waiting for the developer's answer.
+ */
+async requestMacNotifications() : Promise<Result<NotificationPermission, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("request_mac_notifications") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * What also reaches the developer as a notification on this Mac.
+ */
+async setMacNotifications(settings: MacNotifications) : Promise<AppConfig> {
+    return await TAURI_INVOKE("set_mac_notifications", { settings });
+},
+/**
+ * Show a test notification the way real ones arrive, whatever the toggles say.
+ */
+async testMacNotification() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("test_mac_notification") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * The Notification Centre's record, newest first.
  */
 async listNotifications(limit: number | null) : Promise<Notification[]> {
@@ -1014,6 +1053,65 @@ async openCaptureTask(id: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Whether the voices are downloaded (or downloading), and who is speaking.
+ */
+async voiceStatus() : Promise<VoiceStatus> {
+    return await TAURI_INVOKE("voice_status");
+},
+/**
+ * Download the voice model once, in the background; progress arrives as `voices://status`.
+ */
+async downloadVoices() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("download_voices") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async cancelVoiceDownload() : Promise<void> {
+    await TAURI_INVOKE("cancel_voice_download");
+},
+/**
+ * Delete the voice model and saved speech, and turn voices off.
+ */
+async removeVoices() : Promise<Result<AppConfig, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_voices") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setVoiceSettings(settings: VoiceSettings) : Promise<Result<AppConfig, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_voice_settings", { settings }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Say something now in an agent's voice: a voice preview, or a message read aloud.
+ */
+async speakVoice(agentId: string, text: string, token: string, voice: Voice | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("speak_voice", { agentId, text, token, voice }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stopSpeaking() : Promise<void> {
+    await TAURI_INVOKE("stop_speaking");
+},
+/**
+ * The agent whose chat is on screen, so its replies aren't read out while the developer reads them.
+ */
+async voiceChatVisibility(agentId: string | null) : Promise<void> {
+    await TAURI_INVOKE("voice_chat_visibility", { agentId });
+},
 async getConfig() : Promise<AppConfig> {
     return await TAURI_INVOKE("get_config");
 },
@@ -1094,7 +1192,7 @@ accent: string; figure: string; look?: string | null; home_x: number; home_y: nu
  * One roster member. `personality` is the editable system-prompt character;
  * app mechanics (delegation rules, the ask_human note) are appended in code.
  */
-export type AgentConfig = { id: string; name: string; role: string; kind: AgentKind; accent?: string; 
+export type AgentConfig = { voice?: Voice | null; id: string; name: string; role: string; kind: AgentKind; accent?: string; 
 /**
  * Sprite silhouette / pack ref ("masc" | "fem" | "synth" | custom id).
  */
@@ -1136,7 +1234,7 @@ export type AgentKind = "orchestrator" | "worker" |
  * Live status of an agent, drives the pixel sprite animation on the floor.
  */
 export type AgentStatus = "offline" | "idle" | "thinking" | "working" | "blocked"
-export type AppConfig = { version?: number; 
+export type AppConfig = { voices?: VoiceSettings; version?: number; 
 /**
  * Whether the user has completed (or skipped) the first-run setup wizard.
  */
@@ -1155,7 +1253,7 @@ standup_minutes?: number;
 /**
  * The developer allows Starkline to keep this Mac awake while agents work.
  */
-keep_awake?: boolean; budget?: Budget; worktrees_enabled?: boolean; worktree_setup?: Partial<{ [key in string]: WorktreeSetup }>; 
+keep_awake?: boolean; mac_notifications?: MacNotifications; budget?: Budget; worktrees_enabled?: boolean; worktree_setup?: Partial<{ [key in string]: WorktreeSetup }>; 
 /**
  * The global capture shortcut and the choices used in its small window.
  */
@@ -1360,6 +1458,7 @@ export type Host = { kind: HostKind; hostname: string; repository: string; remot
 export type HostKind = "github" | "gitlab" | "unknown"
 export type LedgerEntry = { id: number; ts: number; agent_id: string; kind: string; detail: string; load: number }
 export type Look = { id: string; choices: Choices; paths: Partial<{ [key in string]: string }>; progress: Partial<{ [key in string]: string }>; errors: Partial<{ [key in string]: string }>; revision: number; saved: boolean }
+export type MacNotifications = { enabled?: boolean; in_front?: boolean; reminders?: boolean; requests?: boolean; work?: boolean; code_review?: boolean; automations?: boolean; budget?: boolean; checks?: boolean; claims?: boolean }
 /**
  * A model an agent can run on.
  */
@@ -1416,6 +1515,7 @@ automation_id: number | null;
  * The reminder that went off.
  */
 reminder_id: number | null }
+export type NotificationPermission = { state: PermissionState; settings_url: string | null }
 export type Output = { folder: string; generation: number; cursor: number; lines: string[] }
 export type PathEntry = { path: string; dir: boolean }
 /**
@@ -1438,6 +1538,7 @@ rule: string;
  * "approval" or "never": how strongly the default held this back.
  */
 tier: string; uses: number; last_used: number | null; revoked: number | null }
+export type PermissionState = "allowed" | "denied" | "not_asked" | "provisional" | "system"
 export type PickerResult = { active: boolean; pick: BrowserPick | null; attachment?: Attachment | null }
 /**
  * One step of the owner's own plan (its to-do list).
@@ -1809,6 +1910,9 @@ enthusiasm: number;
  * Brief (0) to thorough.
  */
 detail: number }
+export type Voice = { name: string; speed: number; pitch: number }
+export type VoiceSettings = { enabled?: boolean; reminders?: boolean; ready?: boolean; needs_you?: boolean; failures?: boolean; replies?: boolean; background_only?: boolean; quiet_hours?: boolean; quiet_from?: string; quiet_to?: string; volume?: number }
+export type VoiceStatus = { model: string; downloaded: number; total: number; agent_id: string | null; token: string | null; error: string | null }
 export type WorkspaceInfo = { kind: string; path: string; project: string; branch: string; base: string; base_commit: string; decision: string; ahead: number; changes: FileChange[]; unmerged: string[]; removed: boolean; removable: boolean }
 export type Worktree = { path: string; project: string; branch: string; base: string; base_commit: string; task_id: string; created: number; removed: number | null }
 export type WorktreeSetup = { copy: string[]; command: string }

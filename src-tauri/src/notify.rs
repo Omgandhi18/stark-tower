@@ -2,41 +2,38 @@
 //! questions, reviews, finished or blocked work, missed automation runs) and
 //! what may interest them (failed checks, rules that let something through). Nothing is deleted on
 //! its own; needs-you items are settled when they're dealt with. When the
-//! window isn't in front, something that needs the developer also shows a
-//! macOS notification.
+//! developer's settings allow it, new items also show a system notification.
 
 use crate::bridge::ReviewRequest;
 use crate::ledger::{Automation, NewNotification, Reminder, Task};
 use tauri::{Emitter, Manager};
-use tauri_plugin_notification::NotificationExt;
 
 pub const NEEDS_YOU: &str = "needs_you";
 pub const UPDATE: &str = "update";
-const BODY_LIMIT: usize = 240;
+pub(crate) const BODY_LIMIT: usize = 240;
 
 fn changed(app: &tauri::AppHandle) {
     let _ = app.emit("notifications://changed", ());
 }
 
-fn window_in_front(app: &tauri::AppHandle) -> bool {
-    app.webview_windows().values().any(|w| w.is_focused().unwrap_or(false))
-}
-
-/// A macOS notification for something that needs the developer while they're elsewhere.
-fn banner(app: &tauri::AppHandle, title: &str, body: &str) {
-    if window_in_front(app) {
-        return;
-    }
-    if let Err(e) = app.notification().builder().title(title).body(body).show() {
-        eprintln!("[notify] couldn't show a notification: {e}");
-    }
-}
-
 fn add(app: &tauri::AppHandle, n: NewNotification, headline: &str) {
     let Some(state) = app.try_state::<crate::AppState>() else { return };
-    if state.ledger.add_notification(&n).is_some() {
-        if n.urgency == NEEDS_YOU {
-            banner(app, headline, n.title);
+    if let Some(stored) = state.ledger.add_notification(&n) {
+        crate::system_notifications::deliver(app, &stored, headline);
+        let name = crate::prompts::agent_name(app, n.agent_id);
+        let (kind, text) = match n.kind {
+            "task_ready" => ("ready", format!("{name} here: {} is ready for your review.", n.title)),
+            "approval" => ("needs_you", format!("{name} needs your OK: {}.", n.title)),
+            "question" => ("needs_you", format!("{name} has a question: {}.", n.title)),
+            "review" => ("needs_you", format!("{name} needs your review: {}.", n.title)),
+            "task_blocked" => ("failure", format!("{name} here: {} is blocked. {}", n.title, crate::chat::truncate(n.body, 180))),
+            "automation_failed" => ("failure", format!("{name} here: {}.", n.title)),
+            // An agent's own failed checks are routine while it works, so they stay quiet, as on the Mac.
+            _ => ("", String::new()),
+        };
+        if !kind.is_empty() {
+            let thing = format!("{}:{}", n.kind, n.review_id.or(n.task_id).unwrap_or(n.title));
+            crate::voices::notice(app, n.agent_id, &text, &thing, kind);
         }
         changed(app);
     }
@@ -83,7 +80,9 @@ pub fn review_opened(app: &tauri::AppHandle, review: &ReviewRequest) {
 /// The developer dealt with a review (or it went away with its agent).
 pub fn review_settled(app: &tauri::AppHandle, review_id: &str, outcome: &str) {
     let Some(state) = app.try_state::<crate::AppState>() else { return };
-    if state.ledger.handle_notifications(Some(review_id), None, &[], outcome) > 0 {
+    let ids = state.ledger.handle_notifications(Some(review_id), None, &[], outcome);
+    if !ids.is_empty() {
+        crate::system_notifications::forget(&ids);
         changed(app);
     }
 }
@@ -146,7 +145,9 @@ pub fn task_blocked(app: &tauri::AppHandle, task: &Task, reason: &str) {
 /// A finished or blocked task was dealt with (closed, continued, tried again).
 pub fn task_settled(app: &tauri::AppHandle, task_id: &str, outcome: &str) {
     let Some(state) = app.try_state::<crate::AppState>() else { return };
-    if state.ledger.handle_notifications(None, Some(task_id), &["task_ready", "task_blocked"], outcome) > 0 {
+    let ids = state.ledger.handle_notifications(None, Some(task_id), &["task_ready", "task_blocked"], outcome);
+    if !ids.is_empty() {
+        crate::system_notifications::forget(&ids);
         changed(app);
     }
 }
@@ -244,7 +245,9 @@ pub fn automation_failed(app: &tauri::AppHandle, a: &Automation, reason: &str) {
 /// The developer dealt with an automation (ran it, skipped the missed run, paused or deleted it).
 pub fn automation_settled(app: &tauri::AppHandle, automation_id: i64, outcome: &str) {
     let Some(state) = app.try_state::<crate::AppState>() else { return };
-    if state.ledger.handle_automation_notifications(automation_id, outcome) > 0 {
+    let ids = state.ledger.handle_automation_notifications(automation_id, outcome);
+    if !ids.is_empty() {
+        crate::system_notifications::forget(&ids);
         changed(app);
     }
 }
@@ -261,8 +264,7 @@ fn task_standing(status: &str) -> &'static str {
     }
 }
 
-/// A reminder came due: its agent reminds the developer. Unlike other
-/// notifications, the banner shows even while Starkline is in front: it's about the time.
+/// A reminder came due: its agent reminds the developer.
 pub fn reminder_due(app: &tauri::AppHandle, r: &Reminder, late_since: Option<&str>) {
     let Some(state) = app.try_state::<crate::AppState>() else { return };
     let name = crate::prompts::agent_name(app, &r.agent_id);
@@ -283,10 +285,12 @@ pub fn reminder_due(app: &tauri::AppHandle, r: &Reminder, late_since: Option<&st
         reminder_id: Some(r.id),
         ..Default::default()
     };
-    if state.ledger.add_notification(&n).is_some() {
-        if let Err(e) = app.notification().builder().title(format!("{name} reminds you")).body(&r.text).show() {
-            eprintln!("[notify] couldn't show a reminder: {e}");
-        }
+    if let Some(stored) = state.ledger.add_notification(&n) {
+        crate::system_notifications::deliver(app, &stored, &format!("{name} reminds you"));
+        let time = chrono::Local::now().format("%-I:%M %p");
+        let what = crate::chat::truncate(r.text.trim().trim_end_matches(['.', '!', '?']), 300);
+        let line = format!("It's {time}. You asked me to remind you: {what}.");
+        crate::voices::notice(app, &r.agent_id, &line, &format!("reminder:{}", r.id), "reminder");
         changed(app);
     }
 }
@@ -294,7 +298,9 @@ pub fn reminder_due(app: &tauri::AppHandle, r: &Reminder, late_since: Option<&st
 /// The developer dealt with a reminder (done, snoozed, moved or deleted it).
 pub fn reminder_settled(app: &tauri::AppHandle, reminder_id: i64, outcome: &str) {
     let Some(state) = app.try_state::<crate::AppState>() else { return };
-    if state.ledger.handle_reminder_notifications(reminder_id, outcome) > 0 {
+    let ids = state.ledger.handle_reminder_notifications(reminder_id, outcome);
+    if !ids.is_empty() {
+        crate::system_notifications::forget(&ids);
         changed(app);
     }
 }

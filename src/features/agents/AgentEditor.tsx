@@ -14,6 +14,8 @@ import AgentMemory from "./AgentMemory";
 import AgentPermissions from "./AgentPermissions";
 import AgentProviderFields from "./AgentProviderFields";
 import { ACCENTS, FIGURES } from "./appearance";
+import VoicePicker from "../voices/VoicePicker";
+import { defaultVoice } from "../voices/voiceModel";
 import ToneDials from "./ToneDials";
 
 type EditorTab = "profile" | "provider" | "permissions" | "memory" | "context";
@@ -203,6 +205,11 @@ export default function AgentEditor({ saved, config, live, onRemoved }: AgentEdi
                   helper="Starkline adds its own rules for delegating, messaging teammates and asking you."
                   onChange={(e) => set("personality", e.target.value)}
                 />
+              </fieldset>
+
+              <fieldset className="form-section">
+                <legend className="form-section-title">Voice</legend>
+                <VoicePicker agentId={saved.id} name={draft.name.trim() || saved.name} voice={draft.voice ?? defaultVoice(saved.id)} onChange={(voice) => set("voice", voice)} />
               </fieldset>
 
               <fieldset className="form-section">

@@ -103,6 +103,8 @@ pub struct EngineConfig {
 /// app mechanics (delegation rules, the ask_human note) are appended in code.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AgentConfig {
+    #[serde(default)]
+    pub voice: Option<crate::voices::Voice>,
     pub id: String,
     pub name: String,
     pub role: String,
@@ -189,6 +191,8 @@ pub fn is_outfits(outfits: &str) -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AppConfig {
+    #[serde(default)]
+    pub voices: crate::voices::VoiceSettings,
     #[serde(default = "cfg_version")]
     pub version: u32,
     /// Whether the user has completed (or skipped) the first-run setup wizard.
@@ -206,6 +210,8 @@ pub struct AppConfig {
     /// The developer allows Starkline to keep this Mac awake while agents work.
     #[serde(default)]
     pub keep_awake: bool,
+    #[serde(default)]
+    pub mac_notifications: crate::system_notifications::MacNotifications,
     #[serde(default)]
     pub budget: crate::spend::Budget,
     #[serde(default = "yes")]
@@ -404,6 +410,7 @@ pub fn default_agents() -> Vec<AgentConfig> {
             helpers: true,
             helper_model: String::new(),
             tone: Some(crate::tone::default_for(&a.id)),
+            voice: Some(crate::voices::default_for(&a.id)),
             id: a.id,
             name: a.name,
             role: a.role,
@@ -430,6 +437,7 @@ pub fn default_config() -> AppConfig {
     AppConfig {
         budget: crate::spend::Budget::default(),
         version: cfg_version(),
+        voices: crate::voices::VoiceSettings::default(),
         onboarded: false,
         lighting: default_lighting(),
         worktrees_enabled: true,
@@ -437,6 +445,7 @@ pub fn default_config() -> AppConfig {
         standup_minutes: 0,
         keep_awake: false,
         quick_capture: crate::capture::CaptureConfig::default(),
+        mac_notifications: crate::system_notifications::MacNotifications::default(),
         theme: default_theme(),
         outfits: default_outfits(),
         dev_servers: std::collections::HashMap::new(),
@@ -580,6 +589,7 @@ pub fn load(path: &std::path::Path) -> AppConfig {
                 a.personality = d;
             }
         }
+        a.voice = Some(a.voice.take().unwrap_or_else(|| crate::voices::default_for(&a.id)).clamped());
         if a.tone.is_none() {
             a.tone = Some(crate::tone::default_for(&a.id));
         }
@@ -699,6 +709,17 @@ pub fn save_checked(path: &std::path::Path, cfg: &AppConfig) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_and_partial_notification_settings_keep_defaults() {
+        use crate::system_notifications::MacNotifications;
+        let old: AppConfig = serde_json::from_str(r#"{"engines": [], "agents": []}"#).unwrap();
+        assert_eq!(old.mac_notifications, MacNotifications::default());
+        let partial: AppConfig = serde_json::from_str(r#"{"engines": [], "agents": [], "mac_notifications": {"enabled": false, "checks": true}}"#).unwrap();
+        assert_eq!(partial.mac_notifications, MacNotifications { enabled: false, checks: true, ..Default::default() });
+        let round_trip: AppConfig = serde_json::from_str(&serde_json::to_string(&partial).unwrap()).unwrap();
+        assert_eq!(partial.mac_notifications, round_trip.mac_notifications);
+    }
 
     fn tmp_dir(tag: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("stark-cfg-{tag}-{}", std::process::id()));
