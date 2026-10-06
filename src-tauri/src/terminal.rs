@@ -564,10 +564,11 @@ mod tests {
             .spawn(std::env::temp_dir().to_str().unwrap(), "/bin/bash", 80, 24)
             .unwrap();
         wait_ready(&manager, &info.id);
+        // macOS's bash 3.2 reads the `!` in `$!` as history expansion, so turn that off first.
         manager
             .write(
                 &info.id,
-                "sleep 30 & echo background-pid-$!; disown; exit\n",
+                "set +H\nsleep 30 & echo background-pid-$!; disown; exit\n",
             )
             .unwrap();
         let pattern = regex::Regex::new("background-pid-([0-9]+)").unwrap();
@@ -579,7 +580,7 @@ mod tests {
             if let Some(capture) = pattern.captures(&String::from_utf8_lossy(&output.data)) {
                 break capture[1].to_string();
             }
-            assert!(Instant::now() < deadline);
+            assert!(Instant::now() < deadline, "the background job's pid never appeared");
             std::thread::sleep(FRAME);
         };
         while manager.list()[0].alive {
