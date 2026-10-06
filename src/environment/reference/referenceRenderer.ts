@@ -11,6 +11,7 @@ import { characterArt, frameFor, motionOf, type CharacterArt } from "../life/cha
 import { Director, type CastMember, type Motion } from "../life/director";
 import { StationFrames } from "../life/stationFrames";
 import type { LifeEvent, OccluderJson } from "../life/types";
+import { fullUrl } from "./assetUrl";
 import type { Camera, Point, Size } from "./camera";
 import type { LightJson, Room } from "./rooms";
 
@@ -163,12 +164,13 @@ export async function createReferenceRenderer(host: HTMLElement, initialView: Si
     const art = figure && room.life.cast[slotId] ? characterArt(room.folder, figure) : null;
     if (art) arts.set(slotId, art);
   }
+  // Full addresses, so Pixi finds the files in the built app as well as on the dev server.
   const urls = [
     room.url(room.plate),
     ...stations.map(([, station]) => cutoutUrl(station.cutout)),
     ...scene.helpers.flatMap((h) => h.parts.map(cutoutUrl)),
     ...new Set([...arts.values()].map((art) => art.url)),
-  ];
+  ].map((url) => fullUrl(url));
   let loaded: Record<string, Texture>;
   try {
     loaded = (await Assets.load<Texture>(urls)) as Record<string, Texture>;
@@ -176,7 +178,7 @@ export async function createReferenceRenderer(host: HTMLElement, initialView: Si
     app.destroy(true);
     throw error;
   }
-  const texture = (url: string) => loaded[url];
+  const texture = (url: string) => loaded[fullUrl(url)];
 
   // Layers, back to front: plate, screen light, helper shadows, depth-sorted people and
   // furniture, the light pooling at their feet (cut-outs carry their own floor), overlay badges.
