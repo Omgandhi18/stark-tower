@@ -4,6 +4,7 @@ import { Button, EmptyState } from "../../design";
 import { errorMessage } from "../../lib/errors";
 import type { Agent, StoredMessage, Task } from "../../lib/types";
 import { selectThread, useChats, type ChatMessage, type MessageRole } from "../../stores/chats";
+import { useVoices } from "../../stores/voices";
 import ChatPanel from "../conversation/ChatPanel";
 import MessageList from "../conversation/MessageList";
 import { reopenChat } from "../conversation/chatActions";
@@ -34,6 +35,11 @@ export default function TaskConversation({ task, owner, messages, requester }: T
   const [error, setError] = useState<string | null>(null);
   const live = owner && task.conversation_id !== null && thread.hydrated && !thread.loading && thread.conversationId === task.conversation_id;
 
+  useEffect(() => {
+    useVoices.getState().viewChat("task", live ? task.assignee : null);
+    return () => useVoices.getState().viewChat("task", null);
+  }, [live, task.assignee]);
+
   // Find out which conversation the owner is in, so a current task can be talked in.
   useEffect(() => {
     if (!thread.hydrated) useChats.getState().hydrate(task.assignee).catch(() => undefined);
@@ -41,7 +47,7 @@ export default function TaskConversation({ task, owner, messages, requester }: T
 
   if (live) return <ChatPanel agentId={task.assignee} />;
 
-  const agent = owner ?? { name: task.assignee, figure: "", accent: "" };
+  const agent = owner ?? { id: task.assignee, name: task.assignee, figure: "", accent: "" };
   const delegated = !askedByDeveloper(task.requested_by);
 
   return (

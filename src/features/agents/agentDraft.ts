@@ -75,6 +75,7 @@ const EDITABLE: ReadonlyArray<keyof AgentConfig> = [
   "helpers",
   "helper_model",
   "tone",
+  "voice",
 ];
 
 /** Unset switches read as on, as the backend defaults them. */

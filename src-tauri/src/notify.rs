@@ -38,6 +38,21 @@ fn add(app: &tauri::AppHandle, n: NewNotification, headline: &str) {
         if n.urgency == NEEDS_YOU {
             banner(app, headline, n.title);
         }
+        let name = crate::prompts::agent_name(app, n.agent_id);
+        let (kind, text) = match n.kind {
+            "task_ready" => ("ready", format!("{name} here: {} is ready for your review.", n.title)),
+            "approval" => ("needs_you", format!("{name} needs your OK: {}.", n.title)),
+            "question" => ("needs_you", format!("{name} has a question: {}.", n.title)),
+            "review" => ("needs_you", format!("{name} needs your review: {}.", n.title)),
+            "task_blocked" => ("failure", format!("{name} here: {} is blocked. {}", n.title, crate::chat::truncate(n.body, 180))),
+            "check_failed" => ("failure", format!("{name} here: {} in {}.", n.title, n.body)),
+            "automation_failed" => ("failure", format!("{name} here: {}.", n.title)),
+            _ => ("", String::new()),
+        };
+        if !kind.is_empty() {
+            let thing = format!("{}:{}", n.kind, n.review_id.or(n.task_id).unwrap_or(n.title));
+            crate::voices::notice(app, n.agent_id, &text, &thing, kind);
+        }
         changed(app);
     }
 }
@@ -287,6 +302,10 @@ pub fn reminder_due(app: &tauri::AppHandle, r: &Reminder, late_since: Option<&st
         if let Err(e) = app.notification().builder().title(format!("{name} reminds you")).body(&r.text).show() {
             eprintln!("[notify] couldn't show a reminder: {e}");
         }
+        let time = chrono::Local::now().format("%-I:%M %p");
+        let what = crate::chat::truncate(r.text.trim().trim_end_matches(['.', '!', '?']), 300);
+        let line = format!("It's {time}. You asked me to remind you: {what}.");
+        crate::voices::notice(app, &r.agent_id, &line, &format!("reminder:{}", r.id), "reminder");
         changed(app);
     }
 }

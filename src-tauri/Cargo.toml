@@ -42,6 +42,10 @@ base64 = "0.22"
 regex = "1"
 # Character Studio frames and sizes generated portraits locally.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# Agent voices: Kokoro speech through sherpa-onnx, run on this Mac.
+sherpa-onnx = "=1.13.8"
+# The model download streams to disk and is checked before extraction.
+sha2 = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

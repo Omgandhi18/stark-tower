@@ -1,0 +1,7 @@
+.voice-picker { display: flex; align-items: end; flex-wrap: wrap; gap: var(--space-4); }
+.voice-picker .field { flex: 1; min-width: calc(var(--space-8) * 4); }
+.voice-note { color: var(--text-muted); font-size: var(--text-sm); flex-basis: 100%; }
+.voice-agent { border: 0; padding: var(--space-4) 0; margin: 0; }
+.voice-agent + .voice-agent { border-top: 1px solid var(--border); }
+.voice-agent legend { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
+.read-aloud { color: var(--text-muted); font-size: var(--text-sm); }

@@ -434,6 +434,47 @@ function install(scenario: Scenario) {
       emit("workspaces://changed", null);
       emit("tasks://changed", null);
     },
+    voice_status: () => state.voices,
+    download_voices: () => {
+      state.voices = { ...state.voices, model: "downloading", downloaded: 0, error: null };
+      emit("voices://status", state.voices);
+      return null;
+    },
+    cancel_voice_download: () => {
+      state.voices = { ...state.voices, model: "missing", downloaded: 0 };
+      emit("voices://status", state.voices);
+      return null;
+    },
+    remove_voices: () => {
+      state.voices = { ...state.voices, model: "missing", downloaded: 0, agent_id: null, token: null };
+      state.config.voices = { ...state.config.voices, enabled: false };
+      emit("voices://status", state.voices);
+      return commitConfig();
+    },
+    set_voice_settings: (args) => {
+      state.config.voices = args.settings as Scenario["config"]["voices"];
+      if (!state.config.voices?.enabled) {
+        state.voices = { ...state.voices, agent_id: null, token: null };
+        emit("voices://status", state.voices);
+      }
+      return commitConfig();
+    },
+    speak_voice: (args) => {
+      if (state.config.voices?.enabled && state.voices.model === "ready") {
+        state.voices = { ...state.voices, agent_id: String(args.agentId), token: String(args.token) };
+        emit("voices://status", state.voices);
+      }
+      return null;
+    },
+    stop_speaking: () => {
+      state.voices = { ...state.voices, agent_id: null, token: null };
+      emit("voices://status", state.voices);
+      return null;
+    },
+    voice_chat_visibility: (args) => {
+      state.voiceChat = args.agentId as string | null;
+      return null;
+    },
     list_projects: () => state.projects,
     add_project: (args) => {
       const path = String(args.path);

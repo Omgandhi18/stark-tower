@@ -410,3 +410,14 @@ export const studioCancel = (id: string) => ok(commands.studioCancel(id));
 export const studioApply = (agentId: string, id: string | null) => ok(commands.studioApply(agentId, id));
 export const onStudioProgress = (cb: (look: import("./bindings").Look) => void) => listen<import("./bindings").Look>("studio://progress", (e) => cb(e.payload));
 export const onStudioChanged = (cb: () => void) => listen("studio://changed", cb);
+
+// ---- Offline voices ----
+export const voiceStatus = () => commands.voiceStatus();
+export const downloadVoices = () => ok(commands.downloadVoices());
+export const cancelVoiceDownload = () => commands.cancelVoiceDownload();
+export const removeVoices = () => ok(commands.removeVoices());
+export const setVoiceSettings = (settings: import("./types").VoiceSettings) => ok(commands.setVoiceSettings(settings));
+export const speakVoice = (agentId: string, text: string, token: string, voice: import("./types").Voice | null = null) => ok(commands.speakVoice(agentId, text, token, voice));
+export const stopSpeaking = () => commands.stopSpeaking();
+export const voiceChatVisibility = (agentId: string | null) => commands.voiceChatVisibility(agentId);
+export const onVoiceStatus = (cb: (status: import("./types").VoiceStatus) => void): Promise<UnlistenFn> => listen<import("./types").VoiceStatus>("voices://status", (e) => cb(e.payload));

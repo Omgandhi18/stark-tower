@@ -47,6 +47,7 @@ mod workspaces;
 mod claims;
 mod tone;
 mod update;
+mod voices;
 
 use agents::{Agent, AgentKind, AgentStatus};
 use config::{AgentConfig, AppConfig, EngineConfig};
@@ -59,6 +60,7 @@ use tauri::{Emitter, Manager};
 
 /// Shared application state, managed by Tauri.
 pub struct AppState {
+    pub voices: voices::Voices,
     pub pty: PtyManager,
     pub terminals: terminal::TerminalManager,
     pub chat: chat::ChatManager,
@@ -1170,6 +1172,75 @@ fn set_keep_awake(app: tauri::AppHandle, state: tauri::State<AppState>, enabled:
     power::state(&app)
 }
 
+/// Whether the voices are downloaded (or downloading), and who is speaking.
+#[tauri::command]
+#[specta::specta]
+fn voice_status(state: tauri::State<AppState>) -> voices::VoiceStatus {
+    state.voices.status()
+}
+
+/// Download the voice model once, in the background; progress arrives as `voices://status`.
+#[tauri::command]
+#[specta::specta]
+fn download_voices(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
+    state.voices.download(app)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn cancel_voice_download(state: tauri::State<AppState>) {
+    state.voices.cancel_download();
+}
+
+/// Delete the voice model and saved speech, and turn voices off.
+#[tauri::command]
+#[specta::specta]
+async fn remove_voices(app: tauri::AppHandle) -> Result<AppConfig, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state.voices.remove(&app)?;
+        state.config.lock().unwrap().voices.enabled = false;
+        Ok(commit_config(&app, &state))
+    })
+    .await
+    .map_err(|_| "Couldn't remove voices. Try again.".to_string())?
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_voice_settings(app: tauri::AppHandle, state: tauri::State<AppState>, settings: voices::VoiceSettings) -> Result<AppConfig, String> {
+    settings.validate()?;
+    if settings.enabled && state.voices.status().model != "ready" {
+        return Err("Download voices before turning them on.".into());
+    }
+    // Turning voices off stops any speech and frees the model's memory.
+    if !settings.enabled {
+        state.voices.release(&app);
+    }
+    state.config.lock().unwrap().voices = settings;
+    Ok(commit_config(&app, &state))
+}
+
+/// Say something now in an agent's voice: a voice preview, or a message read aloud.
+#[tauri::command]
+#[specta::specta]
+fn speak_voice(app: tauri::AppHandle, state: tauri::State<AppState>, agent_id: String, text: String, token: String, voice: Option<voices::Voice>) -> Result<(), String> {
+    state.voices.speak(&app, &agent_id, &text, &token, "manual", voice)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn stop_speaking(app: tauri::AppHandle, state: tauri::State<AppState>) {
+    state.voices.stop(&app);
+}
+
+/// The agent whose chat is on screen, so its replies aren't read out while the developer reads them.
+#[tauri::command]
+#[specta::specta]
+fn voice_chat_visibility(state: tauri::State<AppState>, agent_id: Option<String>) {
+    state.voices.visible_chat(agent_id);
+}
+
 /// Everything agents are currently blocked on, oldest first.
 #[tauri::command]
 #[specta::specta]
@@ -1424,6 +1495,7 @@ fn update_agent(
 ) -> AppConfig {
     let old_look = state.config.lock().unwrap().agent(&agent.id).and_then(|a| a.look.clone());
     // A new agent starts at its default tone; the dials always stay in range.
+    agent.voice = Some(agent.voice.take().unwrap_or_else(|| voices::default_for(&agent.id)).clamped());
     agent.tone = Some(agent.tone.unwrap_or_else(|| tone::default_for(&agent.id)).clamped());
     // Turning an agent off ends its live session; its chats are kept.
     if !agent.enabled {
@@ -2162,6 +2234,14 @@ fn specta_builder() -> tauri_specta::Builder {
             resize_capture,
             remember_capture,
             open_capture_task,
+            voice_status,
+            download_voices,
+            cancel_voice_download,
+            remove_voices,
+            set_voice_settings,
+            speak_voice,
+            stop_speaking,
+            voice_chat_visibility,
             get_config,
             update_agent,
             remove_agent,
@@ -2249,6 +2329,7 @@ pub fn run() {
             app.manage(browser::Browser::default());
             app.manage(devserver::DevServers::default());
             app.manage(AppState {
+                voices: voices::Voices::new(data_dir.join("voices")),
                 pty: PtyManager::default(),
                 terminals: terminal::TerminalManager::default(),
                 chat: chat::ChatManager::default(),
@@ -2306,6 +2387,7 @@ pub fn run() {
             automations::start(app.handle().clone());
             reminders::start(app.handle().clone());
             hosting::start(app.handle().clone());
+            voices::start(app.handle().clone());
             // Copies of files attached to messages that were never sent go after a day.
             {
                 let h = app.handle().clone();

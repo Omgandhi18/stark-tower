@@ -75,9 +75,10 @@ export function OverflowMenu({ items, label, align = "end" }: OverflowMenuProps)
     const onPointer = (e: PointerEvent) => {
       if (!inside(e.target)) setLayer(null);
     };
-    // A menu stays where it opened, so it closes when what's under it moves.
+    // Close when the trigger moves; a chat following new messages doesn't move a menu elsewhere.
     const onMove = (e: Event) => {
-      if (!inside(e.target)) setLayer(null);
+      const trigger = triggerRef.current;
+      if (trigger && e.target instanceof Node && e.target.contains(trigger)) setLayer(null);
     };
     const onResize = () => setLayer(null);
     window.addEventListener("pointerdown", onPointer);

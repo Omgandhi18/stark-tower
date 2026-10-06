@@ -1,8 +1,10 @@
+import { useEffect } from "react";
 import { Maximize2, X } from "lucide-react";
 import { portraitKey, IconButton, KeepAlive, Portrait, StatusPill } from "../../design";
 import { AGENT_STATUS } from "../../lib/status";
 import { useAgents, selectAgent } from "../../stores/agents";
 import { useNavigation } from "../../stores/navigation";
+import { useVoices } from "../../stores/voices";
 import ChatPanel from "../conversation/ChatPanel";
 
 interface EnvironmentDrawerProps {
@@ -20,6 +22,10 @@ export default function EnvironmentDrawer({ open, agentId, onClose }: Environmen
   const openChats = useNavigation((s) => s.openChats);
   const openConversation = useNavigation((s) => s.openConversation);
   const status = agent ? AGENT_STATUS[agent.status] : null;
+  useEffect(() => {
+    useVoices.getState().viewChat("environment", open ? agentId : null);
+    return () => useVoices.getState().viewChat("environment", null);
+  }, [open, agentId]);
 
   return (
     <aside className="env-drawer" data-open={open} aria-label={agent ? `Conversation with ${agent.name}` : "Conversation"} inert={!open}>

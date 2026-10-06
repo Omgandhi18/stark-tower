@@ -1,4 +1,4 @@
-import { Wallet, Activity, Moon, Palette, Plug, ShieldCheck, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import { AudioLines, Wallet, Activity, Moon, Palette, Plug, ShieldCheck, SlidersHorizontal, type LucideIcon } from "lucide-react";
 import { cx, ICON_SIZE, ICON_STROKE } from "../../design";
 import { useNavigation, type SettingsSection } from "../../stores/navigation";
 
@@ -7,6 +7,7 @@ const SECTIONS: ReadonlyArray<{ id: SettingsSection; label: string; icon: Lucide
   { id: "providers", label: "Providers", icon: Plug },
   { id: "permissions", label: "Permissions", icon: ShieldCheck },
   { id: "spend", label: "Spend", icon: Wallet },
+  { id: "voices", label: "Voices", icon: AudioLines },
   { id: "power", label: "Power", icon: Moon },
   { id: "themes", label: "Theme Studio", icon: Palette },
   { id: "diagnostics", label: "Diagnostics", icon: Activity },

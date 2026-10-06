@@ -103,6 +103,8 @@ pub struct EngineConfig {
 /// app mechanics (delegation rules, the ask_human note) are appended in code.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AgentConfig {
+    #[serde(default)]
+    pub voice: Option<crate::voices::Voice>,
     pub id: String,
     pub name: String,
     pub role: String,
@@ -189,6 +191,8 @@ pub fn is_outfits(outfits: &str) -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AppConfig {
+    #[serde(default)]
+    pub voices: crate::voices::VoiceSettings,
     #[serde(default = "cfg_version")]
     pub version: u32,
     /// Whether the user has completed (or skipped) the first-run setup wizard.
@@ -404,6 +408,7 @@ pub fn default_agents() -> Vec<AgentConfig> {
             helpers: true,
             helper_model: String::new(),
             tone: Some(crate::tone::default_for(&a.id)),
+            voice: Some(crate::voices::default_for(&a.id)),
             id: a.id,
             name: a.name,
             role: a.role,
@@ -430,6 +435,7 @@ pub fn default_config() -> AppConfig {
     AppConfig {
         budget: crate::spend::Budget::default(),
         version: cfg_version(),
+        voices: crate::voices::VoiceSettings::default(),
         onboarded: false,
         lighting: default_lighting(),
         worktrees_enabled: true,
@@ -580,6 +586,7 @@ pub fn load(path: &std::path::Path) -> AppConfig {
                 a.personality = d;
             }
         }
+        a.voice = Some(a.voice.take().unwrap_or_else(|| crate::voices::default_for(&a.id)).clamped());
         if a.tone.is_none() {
             a.tone = Some(crate::tone::default_for(&a.id));
         }

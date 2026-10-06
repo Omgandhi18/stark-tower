@@ -2,6 +2,7 @@
 // two projects, work in every state, and one of each kind of request.
 // Test fixture only; the app itself never shows this data.
 import type { ConversationSpend, SpendSummary, SpendTotal, TerminalInfo } from "../src/lib/bindings";
+import { DEFAULT_VOICE_SETTINGS, defaultVoice } from "../src/features/voices/voiceModel";
 import type {
   AgentConfig,
   AgentStatus,
@@ -63,6 +64,8 @@ export interface Scenario {
   config: AppConfig;
   worktrees: Worktree[];
   claims: FileClaim[];
+  voices: import("../src/lib/types").VoiceStatus;
+  voiceChat?: string | null;
   statuses: Record<string, AgentStatus>;
   projects: ProjectsState;
   tasks: Task[];
@@ -180,11 +183,13 @@ const agent = (a: Omit<AgentConfig, "engine" | "model" | "enabled">): AgentConfi
   engine: "claude-code",
   model: "",
   enabled: true,
+  voice: defaultVoice(a.id),
   ...a,
 });
 
 const config: AppConfig = {
   quick_capture: { enabled: true, shortcut: "Super+Shift+Space", last_agent: null, last_project: null, last_reminder_agent: null },
+  voices: { ...DEFAULT_VOICE_SETTINGS },
   version: 4,
   onboarded: true,
   standup_minutes: 0,
@@ -712,6 +717,7 @@ export function defaultScenario(): Scenario {
     picking: false,
     simulatorExtras: {},
     devservers: { candidates: {}, servers: {}, output: {}, readyAddress: null },
+    voices: { model: "missing", downloaded: 0, total: 349906910, agent_id: null, token: null, error: null },
     simulator: {
       available: true,
       problem: null,
