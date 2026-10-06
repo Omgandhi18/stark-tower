@@ -195,6 +195,8 @@ pub struct Context {
     pub protected: Vec<PathBuf>,
     /// Folders the developer shares with agents (chat attachments): reading them is automatic.
     pub shared: Vec<PathBuf>,
+    /// Files that are the agent's own to keep (its memory), even inside a protected folder.
+    pub own: Vec<PathBuf>,
 }
 
 impl Context {
@@ -203,7 +205,14 @@ impl Context {
         let local_bins = std::fs::read_dir(project.join("node_modules/.bin"))
             .map(|dir| dir.filter_map(|e| e.ok()).filter_map(|e| e.file_name().into_string().ok()).collect())
             .unwrap_or_default();
-        Context { project, home: PathBuf::from(std::env::var("HOME").unwrap_or_default()), local_bins, protected: Vec::new(), shared: Vec::new() }
+        Context {
+            project,
+            home: PathBuf::from(std::env::var("HOME").unwrap_or_default()),
+            local_bins,
+            protected: Vec::new(),
+            shared: Vec::new(),
+            own: Vec::new(),
+        }
     }
 
     /// Also hold these folders back from agents, wherever they are.
@@ -217,6 +226,19 @@ impl Context {
         self.shared.extend(paths.into_iter().map(|p| normalize(&p)));
         self
     }
+
+    /// Let the agent read and change these files with its file tools (its memory file).
+    pub fn owning(mut self, paths: impl IntoIterator<Item = PathBuf>) -> Context {
+        self.own.extend(paths.into_iter().map(|p| normalize(&p)));
+        self
+    }
+
+    /// The agent's own file, reached with the file tools. Never through a link, which could point
+    /// it at something else; shell commands are judged as before.
+    fn owns(&self, raw: &str) -> bool {
+        let path = resolve(raw, &self.project, self);
+        self.own.contains(&path) && !std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink())
+    }
 }
 
 /// Assess one tool call from the agent's provider.
@@ -226,10 +248,16 @@ pub fn assess(tool: &str, input: &serde_json::Value, ctx: &Context) -> Assessmen
         "Bash" => assess_command(text("command"), ctx),
         "Read" | "Glob" | "Grep" | "LS" | "NotebookRead" => {
             let path = [text("file_path"), text("path"), text("notebook_path")].into_iter().find(|p| !p.is_empty()).unwrap_or("");
+            if ctx.owns(path) {
+                return Assessment::automatic();
+            }
             check_paths(&[path.to_string()], Access::Read, &ctx.project, ctx)
         }
         "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => {
             let path = [text("file_path"), text("notebook_path")].into_iter().find(|p| !p.is_empty()).unwrap_or("");
+            if ctx.owns(path) {
+                return Assessment::automatic();
+            }
             check_paths(&[path.to_string()], Access::Write, &ctx.project, ctx)
         }
         "WebFetch" => {
@@ -1348,9 +1376,41 @@ mod tests {
             local_bins: ["tsc", "vitest", "eslint", "playwright"].into_iter().map(String::from).collect(),
             protected: Vec::new(),
             shared: Vec::new(),
+            own: Vec::new(),
         }
         .protecting([PathBuf::from("/Users/dev/app/src-tauri/mcp"), PathBuf::from("/Users/dev/Library/Application Support/starkline")])
         .sharing([PathBuf::from("/Users/dev/Library/Application Support/starkline/attachments")])
+        .owning([PathBuf::from("/Users/dev/Library/Application Support/starkline/memory/jarvis.md")])
+    }
+
+    #[test]
+    fn an_agent_keeps_its_own_memory_file_and_nothing_else_there() {
+        let c = ctx();
+        let file = |path: &str| serde_json::json!({ "file_path": path });
+        let memory = "/Users/dev/Library/Application Support/starkline/memory/jarvis.md";
+        for tool in ["Read", "Write", "Edit"] {
+            assert_eq!(assess(tool, &file(memory), &c).tier, Tier::Automatic, "{tool}");
+        }
+        let other = file("/Users/dev/Library/Application Support/starkline/memory/friday.md");
+        assert_eq!(assess("Write", &other, &c).rule, Rule::Safeguards, "another agent's memory stays theirs");
+        assert_eq!(rule(&format!("echo note >> '{memory}'")), Rule::Safeguards, "shell writes are judged as before");
+        assert_eq!(rule(&format!("ln -sf ../config.json '{memory}'")), Rule::Safeguards, "it can't be linked elsewhere");
+
+        // A memory file that was made a link to something else is no longer the agent's own.
+        let dir = std::env::temp_dir().join(format!("stark-gate-own-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (real, linked) = (dir.join("policy.json"), dir.join("jarvis.md"));
+        std::fs::write(&real, "{}").unwrap();
+        let mut c = Context::for_project("/Users/dev/app").protecting([dir.clone()]).owning([linked.clone()]);
+        assert_eq!(assess("Write", &file(linked.to_str().unwrap()), &c).tier, Tier::Automatic);
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&real, &linked).unwrap();
+            assert_eq!(assess("Write", &file(linked.to_str().unwrap()), &c).rule, Rule::Safeguards);
+        }
+        c.own.clear();
+        assert_eq!(assess("Write", &file(linked.to_str().unwrap()), &c).rule, Rule::Safeguards);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

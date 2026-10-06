@@ -501,7 +501,12 @@ fn assess(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_json
         std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/mcp")),
     ];
     protected.extend(app.path().app_data_dir().ok());
-    let context = crate::gate::Context::for_project(&project).protecting(protected).sharing([crate::attachments::root(app)]);
+    // Each agent keeps its own memory file in there, which it's told to update.
+    let memory = Some(crate::prompts::memory_file_path(app, agent_id)).filter(|p| !p.is_empty());
+    let context = crate::gate::Context::for_project(&project)
+        .protecting(protected)
+        .sharing([crate::attachments::root(app)])
+        .owning(memory.map(std::path::PathBuf::from));
     (cwd, crate::gate::assess(tool, input, &context))
 }
 
