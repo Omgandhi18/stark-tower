@@ -445,6 +445,28 @@ async getMemory(agentId: string) : Promise<string> {
     return await TAURI_INVOKE("get_memory", { agentId });
 },
 /**
+ * Inspect current prompt sections and provider instruction files without blocking the UI.
+ */
+async activeContext(agentId: string, folder: string, taskId: string | null) : Promise<Result<ActiveContext, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("active_context", { agentId, folder, taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Developer-clicked file actions are limited to files in the inspector.
+ */
+async openContextFile(agentId: string, folder: string, path: string, reveal: boolean, taskId: string | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_context_file", { agentId, folder, path, reveal, taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Bugs agents have reported about the app, newest first.
  */
 async getBugs() : Promise<Bug[]> {
@@ -773,6 +795,7 @@ async resetConfig() : Promise<AppConfig> {
 
 /** user-defined types **/
 
+export type ActiveContext = { agent_name: string; provider: string; model: string; sources: ContextSource[]; project_hint: string | null; notes: string[] }
 /**
  * A member of the Starkline roster. `home_x`/`home_y` are tile coordinates
  * of the agent's desk on the pixel lab floor. `figure` selects the sprite
@@ -974,6 +997,7 @@ note: string }
  * The latest result of each distinct check.
  */
 export type CheckRun = { kind: string; command: string; passed: boolean; at: number; duration_ms: number | null; agent_id: string }
+export type ContextSource = { group: number; name: string; scope: string; delivery: string; accepted: boolean; conditional: boolean; path: string | null; characters: number; tokens: number; text: string; omitted_characters: number; markdown: boolean }
 /**
  * A saved chat — one continuous conversation with an agent, resumable later.
  */

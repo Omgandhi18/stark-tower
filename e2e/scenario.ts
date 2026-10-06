@@ -57,6 +57,8 @@ export interface Scenario {
   power: PowerState;
   files: Record<string, PathEntry[]>;
   memory: Record<string, string>;
+  /** Local instruction files the context inspector discovers, keyed by path. */
+  contextFiles: Record<string, string>;
   taskEvents: Record<string, TaskEvent[]>;
   plans: Record<string, PlanItem[]>;
   checks: Record<string, CheckRun[]>;
@@ -537,6 +539,9 @@ export function defaultScenario(): Scenario {
         { path: "src/components/SearchBox.tsx", dir: false },
         { path: "package.json", dir: false },
       ],
+    },
+    contextFiles: {
+      [`${APP}/CLAUDE.md`]: "# Project instructions\n\nUse the existing SearchBox component and run npm test.",
     },
     memory: {
       friday: "## checkout-web\n\n- Tests run with `npm test`; the settings suite is slow.\n- Prefer the existing `SearchBox` component.",

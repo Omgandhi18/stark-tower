@@ -228,6 +228,53 @@ function install(scenario: Scenario) {
     terminal_title: (args) => { const terminal = state.terminals.find((t) => t.id === args.id); if (terminal) terminal.title = String(args.title); return null; },
     terminal_close: (args) => { state.terminals = state.terminals.filter((t) => t.id !== args.id); terminalChannels.delete(String(args.id)); return null; },
     list_agents: () => roster(),
+    active_context: (args) => {
+      const agentId = String(args.agentId);
+      const agent = state.config.agents.find((a) => a.id === agentId);
+      if (!agent) throw "That agent is no longer in the roster.";
+      const engine = state.config.engines.find((e) => e.id === agent.engine) ?? state.config.engines[0];
+      const kind = engine.kind;
+      const provider = kind === "claude-code" ? "Claude Code" : kind === "codex" ? "Codex" : "OpenCode";
+      const folder = String(args.folder || conversationOf(agentId)?.cwd || state.projects.active);
+      const source = (group: number, name: string, scope: string, text: string, delivery: string, accepted = true, path: string | null = null) => ({
+        group, name, scope, delivery, accepted, conditional: false, path, characters: text.length,
+        tokens: Math.ceil(text.length / 4), text: text.slice(0, 20 * 1024), omitted_characters: Math.max(0, text.length - 20 * 1024), markdown: true,
+      });
+      const sent = kind === "claude-code" || kind === "codex" || kind === "opencode";
+      const delivery =
+        kind === "codex"
+          ? "Sent by Starkline as developer instructions"
+          : kind === "opencode"
+            ? "Sent by Starkline as an instructions file OpenCode adds to its system prompt (new sessions)"
+            : "Sent by Starkline in the system prompt";
+      const sources = [source(1, "Permission policy", "everywhere", "Project work runs automatically. Publishing requires your approval.", delivery, sent)];
+      for (const [path, text] of Object.entries(state.contextFiles)) {
+        const parent = path.slice(0, path.lastIndexOf("/"));
+        if (folder !== parent && !folder.startsWith(`${parent}/`)) continue;
+        const filename = path.split("/").pop() ?? "";
+        const accepted = kind === "claude-code" ? filename.startsWith("CLAUDE") : filename.startsWith("AGENTS");
+        sources.push(source(2, `${filename} in ${parent.split("/").pop()}`, folder === parent ? "this folder" : "this project", text, `${accepted ? "Read by" : "Not read by"} ${provider}${accepted ? " itself" : ""}`, accepted, path));
+      }
+      sources.push(source(3, `${agent.name}'s personality and tone`, "this agent", `${agent.personality || agent.role}\n\nTone: ${JSON.stringify(agent.tone)}`, delivery, sent));
+      if (state.memory[agentId]) sources.push(source(3, `${agent.name}'s memory`, "this agent", state.memory[agentId], delivery, sent));
+      const task = args.taskId ? state.tasks.find((t) => t.id === args.taskId && t.assignee === agentId) : state.tasks.find((t) => t.assignee === agentId && t.cwd === folder && t.status === "doing");
+      if (task) {
+        sources.push(source(4, task.parent_id ? "Delegation request" : "Task request", "this task", task.prompt, "Sent with the task's first message"));
+        const request = task.conversation_id ? state.transcripts[task.conversation_id]?.find((m) => m.role === "user") : undefined;
+        for (const attachment of request?.attachments ?? []) {
+          const inline = attachment.kind === "image" || (kind === "claude-code" && attachment.kind === "pdf");
+          const item = source(4, attachment.name, "this task", SAMPLE_TEXT[attachment.kind] || `Attached file: ${attachment.name}`, inline ? "Sent with the task's first message as a document or image" : "Named with the task's first message; its tools can read the file", true, attachment.path);
+          item.conditional = !inline;
+          item.markdown = attachment.kind === "markdown";
+          sources.push(item);
+        }
+      }
+      if (agent.kind === "orchestrator") sources.push(source(4, "Team and projects (each message)", "this agent", state.config.agents.map((a) => a.name).join("\n"), "Sent with each message"));
+      const filename = kind === "claude-code" ? "CLAUDE.md" : "AGENTS.md";
+      const project_hint = sources.some((s) => s.group === 2 && s.accepted) ? null : `${provider} reads ${filename} from the project. ${folder.split("/").pop()} doesn't have one. Add ${filename} to give it project instructions.`;
+      return { agent_name: agent.name, provider: engine.label, model: agent.model || engine.model, sources, project_hint, notes: ["A snapshot of current local files; provider acceptance is based on discovery rules."] };
+    },
+    open_context_file: () => null,
     get_config: () => state.config,
     list_projects: () => state.projects,
     add_project: (args) => {

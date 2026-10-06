@@ -1,0 +1,29 @@
+.context-sheet {
+  margin: 0 0 0 auto;
+  width: min(760px, 100vw);
+  max-height: 100dvh;
+  height: 100dvh;
+  border-radius: var(--radius-card) 0 0 var(--radius-card);
+}
+.context-sheet .dialog-surface { max-height: 100%; height: 100%; display: flex; flex-direction: column; }
+.context-sheet .dialog-content { flex: 1; min-height: 0; overflow-y: auto; }
+.context-panel { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.context-toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-3); }
+.context-toolbar h2 { font-size: var(--text-lg); margin: 0 0 var(--space-2); }
+.context-note, .context-precedence, .context-size, .context-delivery { font-size: var(--text-sm); color: var(--text-secondary); }
+.context-note { margin: var(--space-2) 0; }
+.context-precedence { margin: 0; }
+.context-group h3 { font-size: var(--text-md); margin: 0 0 var(--space-3); }
+.context-source { border: 1px solid var(--border); border-radius: var(--radius-control); margin-bottom: var(--space-2); }
+.context-source summary { cursor: pointer; padding: var(--space-3); }
+.context-source summary:focus-visible, .context-notes summary:focus-visible { outline: 2px solid var(--accent); outline-offset: var(--space-1); }
+.context-source-heading { display: inline; font-size: var(--text-base); }
+.context-delivery, .context-size { display: block; margin-top: var(--space-2); }
+.context-size { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.context-ignored { color: var(--state-attention); }
+.context-source-body { border-top: 1px solid var(--border-subtle); padding: var(--space-3); overflow-wrap: anywhere; }
+.context-source-body pre { font-family: var(--font-mono); font-size: var(--text-sm); white-space: pre-wrap; }
+.context-file-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
+.context-path { flex-basis: 100%; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-secondary); }
+.context-error { color: var(--state-danger); font-size: var(--text-sm); }
+.context-notes summary { cursor: pointer; font-size: var(--text-sm); color: var(--text-secondary); }

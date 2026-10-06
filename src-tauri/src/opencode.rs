@@ -368,6 +368,41 @@ impl OpenCode {
     }
 }
 
+const INLINE_CONFIG: &str = "OPENCODE_CONFIG_CONTENT";
+
+/// An inline OpenCode config that adds `file` to its instructions, keeping whatever inline
+/// config was already set. OpenCode adds an inline config's instructions to the developer's
+/// own (their opencode.json and the project's AGENTS.md), so nothing of theirs is replaced.
+fn with_instructions(existing: Option<&str>, file: &std::path::Path) -> String {
+    let mut config = existing.and_then(|s| serde_json::from_str::<Value>(s).ok()).filter(Value::is_object).unwrap_or_else(|| json!({}));
+    let path = Value::String(file.to_string_lossy().into());
+    match config.get_mut("instructions").and_then(Value::as_array_mut) {
+        Some(list) if list.contains(&path) => {}
+        Some(list) => list.push(path),
+        None => config["instructions"] = json!([path]),
+    }
+    config.to_string()
+}
+
+/// ACP has no system prompt, so Starkline's instructions for the agent (who they are, their
+/// memory, how Starkline's tools work) go in a file OpenCode reads as instructions. It's
+/// rewritten at every launch, so it carries the agent's current memory and tone.
+fn pass_instructions(app: &tauri::AppHandle, cmd: &mut Command, launch: &Launch) -> Result<(), String> {
+    if launch.system_prompt.trim().is_empty() {
+        return Ok(());
+    }
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("opencode");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let name: String = launch.agent_id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+    let file = dir.join(format!("{name}.md"));
+    std::fs::write(&file, &launch.system_prompt).map_err(|e| e.to_string())?;
+    // An inline config from the engine's settings wins over one inherited from Starkline's environment.
+    let set_here = cmd.get_envs().find(|(k, _)| *k == INLINE_CONFIG).and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()));
+    let existing = set_here.or_else(|| std::env::var(INLINE_CONFIG).ok());
+    cmd.env(INLINE_CONFIG, with_instructions(existing.as_deref(), &file));
+    Ok(())
+}
+
 /// Spawn `opencode acp`, read it on its own thread, and shake hands.
 fn connect(app: &tauri::AppHandle, launch: &Launch, sink: Sink, gen: Option<u64>) -> Result<(Child, Arc<OpenCode>), String> {
     let mut cmd = Command::new(&launch.program);
@@ -375,6 +410,7 @@ fn connect(app: &tauri::AppHandle, launch: &Launch, sink: Sink, gen: Option<u64>
     chat::provider_env(&mut cmd, launch);
     cmd.env("OPENCODE_PERMISSION", permissions().to_string());
     cmd.env("OPENCODE_DISABLE_AUTOUPDATE", "1");
+    pass_instructions(app, &mut cmd, launch).map_err(|e| format!("Starkline couldn't write this agent's instructions for OpenCode: {e}"))?;
     chat::detach(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| format!("OpenCode couldn't start: {e}"))?;
     let stdin = child.stdin.take().ok_or("OpenCode has no input stream.")?;
@@ -564,6 +600,21 @@ mod tests {
         assert!(call_failed(&json!({ "status": "completed", "rawOutput": { "metadata": { "exit": 1 } } })));
         assert!(!call_failed(&json!({ "status": "completed", "rawOutput": { "metadata": { "exit": 0 } } })));
         assert!(!call_failed(&json!({ "status": "completed" })));
+    }
+
+    #[test]
+    fn instructions_join_any_inline_config_without_replacing_it() {
+        let file = std::path::Path::new("/data/opencode/friday.md");
+        let fresh: Value = serde_json::from_str(&with_instructions(None, file)).unwrap();
+        assert_eq!(fresh, json!({ "instructions": ["/data/opencode/friday.md"] }));
+        let theirs = r#"{"model":"anthropic/claude","instructions":["docs/rules.md"]}"#;
+        let merged: Value = serde_json::from_str(&with_instructions(Some(theirs), file)).unwrap();
+        assert_eq!(merged, json!({ "model": "anthropic/claude", "instructions": ["docs/rules.md", "/data/opencode/friday.md"] }));
+        // Launching twice doesn't list the file twice, and unreadable config is set aside.
+        let again: Value = serde_json::from_str(&with_instructions(Some(&merged.to_string()), file)).unwrap();
+        assert_eq!(again["instructions"].as_array().unwrap().len(), 2);
+        let broken: Value = serde_json::from_str(&with_instructions(Some("not json"), file)).unwrap();
+        assert_eq!(broken, fresh);
     }
 
     /// Talks to the real OpenCode with this Mac's sign-in, in a throwaway git folder:

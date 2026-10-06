@@ -11,6 +11,7 @@ import { useNavigation } from "../../stores/navigation";
 import { folderName } from "../../stores/workspace";
 import { providerLabel } from "../agents/display";
 import { useTerminal } from "../../stores/terminal";
+import ContextButton from "../context/ContextButton";
 import RemindMeButton from "../reminders/RemindMeButton";
 import type { StateTone } from "../../lib/status";
 
@@ -78,6 +79,7 @@ export default function TaskHeader({ detail, owner, requester, state, now }: Tas
             Talk to {name}
           </Button>
           <IconButton icon={SquareTerminal} label="Terminal" aria-pressed={terminalOpen} onClick={toggleTerminal} />
+          <ContextButton agentId={task.assignee} name={name} folder={task.cwd} taskId={task.id} />
           <RemindMeButton task={task} ownerName={name} />
           {task.status === "done" && (
             <Button variant="review" icon={CheckCheck} onClick={markReviewed}>

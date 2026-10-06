@@ -205,61 +205,46 @@ VERTICAL slices — each shippable on its own, no forward dependencies — and g
 ask_human; (4) delegate one slice at a time to the right specialist. Skip all this for small, \
 clear tasks. Route every human checkpoint through ask_human, never a browser.";
 
-/// Assemble an agent's full system prompt: its editable personality, plus the
-/// app mechanics its engine can actually use. JARVIS also gets the live project
-/// map and, on an MCP engine, the delegation mechanics + planning playbook. The
-/// ask_human note is appended only when the engine speaks our MCP bridge.
-pub(crate) fn system_prompt_for(app: &tauri::AppHandle, agent_id: &str) -> String {
-    let personality = personality_for(app, agent_id);
-    let mcp = agent_engine(app, agent_id).supports_mcp;
+/// Named pieces shared by the launch prompt and the context inspector.
+pub(crate) struct PromptSection {
+    pub key: &'static str,
+    pub text: String,
+}
 
-    let mut s = if agent_is_orchestrator(app, agent_id) {
-        // Identity comes from config (so a renamed orchestrator introduces itself
-        // correctly). The team roster + project map are NOT baked in here — they
-        // change while a session is live, so they'd go stale and (worse) bust the
-        // prompt cache. They ride each user turn instead (orchestrator_turn_context).
-        let name = agent_name(app, agent_id);
-        let mut s = format!("You are {name}, the orchestrator of this agent lab. {personality}");
-        if mcp {
-            s.push_str("\n\n");
-            s.push_str(JARVIS_MECHANICS);
-            s.push_str("\n\n");
-            s.push_str(JARVIS_PLAYBOOK);
-            s.push_str("\n\n");
-            s.push_str(ASK_HUMAN_NOTE);
-            s.push_str("\n\n");
-            s.push_str(PERMISSION_NOTE);
-            s.push_str("\n\n");
-            s.push_str(MESSAGE_NOTE);
-            s.push_str("\n\n");
-            s.push_str(SHARE_NOTE);
-            s.push_str("\n\nYour current team and the projects you can delegate into are provided \
-with each of the user's messages under [CURRENT TEAM & PROJECTS] — always use that list; it supersedes \
-any roster mentioned earlier in this conversation.");
+fn assemble_sections(personality: String, name: &str, orchestrator: bool, mcp: bool, memory: String) -> Vec<PromptSection> {
+    let mut sections = vec![PromptSection {
+        key: "identity",
+        text: if orchestrator { format!("You are {name}, the orchestrator of this agent lab. {personality}") } else { personality },
+    }];
+    if mcp {
+        if orchestrator {
+            sections.push(PromptSection { key: "delegation", text: JARVIS_MECHANICS.into() });
+            sections.push(PromptSection { key: "planning", text: JARVIS_PLAYBOOK.into() });
         }
-        s
-    } else {
-        let mut s = personality;
-        if mcp {
-            s.push_str("\n\n");
-            s.push_str(ASK_HUMAN_NOTE);
-            s.push_str("\n\n");
-            s.push_str(PERMISSION_NOTE);
-            s.push_str("\n\n");
-            s.push_str(MESSAGE_NOTE);
-            s.push_str("\n\n");
-            s.push_str(SHARE_NOTE);
+        for (key, text) in [("ask_human", ASK_HUMAN_NOTE), ("permission", PERMISSION_NOTE), ("messaging", MESSAGE_NOTE), ("sharing", SHARE_NOTE)] {
+            sections.push(PromptSection { key, text: text.into() });
         }
-        s
-    };
-
-    // Durable memory (all agents): the curation instruction + the current file.
-    let mem = memory_block(app, agent_id);
-    if !mem.is_empty() {
-        s.push_str("\n\n");
-        s.push_str(&mem);
+        if orchestrator {
+            sections.push(PromptSection { key: "live_state", text: "Your current team and the projects you can delegate into are provided with each of the user's messages under [CURRENT TEAM & PROJECTS] — always use that list; it supersedes any roster mentioned earlier in this conversation.".into() });
+        }
     }
-    s
+    if !memory.is_empty() {
+        sections.push(PromptSection { key: "memory", text: memory });
+    }
+    sections
+}
+
+pub(crate) fn system_prompt_sections(app: &tauri::AppHandle, agent_id: &str) -> Vec<PromptSection> {
+    assemble_sections(personality_for(app, agent_id), &agent_name(app, agent_id), agent_is_orchestrator(app, agent_id), agent_engine(app, agent_id).supports_mcp, memory_block(app, agent_id))
+}
+
+fn join_sections(sections: &[PromptSection]) -> String {
+    sections.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join("\n\n")
+}
+
+/// The provider launch and inspector use the same pieces, including memory and tone.
+pub(crate) fn system_prompt_for(app: &tauri::AppHandle, agent_id: &str) -> String {
+    join_sections(&system_prompt_sections(app, agent_id))
 }
 
 /// Absolute path to an agent's durable memory file.
@@ -315,4 +300,33 @@ pub(crate) fn orchestrator_turn_context(app: &tauri::AppHandle, agent_id: &str) 
         s.push_str(&map);
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sections_are_exactly_the_launch_prompt() {
+        for orchestrator in [false, true] {
+            for mcp in [false, true] {
+                let sections = assemble_sections("Personality and tone".into(), "FRIDAY", orchestrator, mcp, "Memory".into());
+                let mut expected = if orchestrator { "You are FRIDAY, the orchestrator of this agent lab. Personality and tone".to_string() } else { "Personality and tone".to_string() };
+                if mcp {
+                    if orchestrator {
+                        expected.push_str(&format!("\n\n{JARVIS_MECHANICS}\n\n{JARVIS_PLAYBOOK}"));
+                    }
+                    expected.push_str(&format!("\n\n{ASK_HUMAN_NOTE}\n\n{PERMISSION_NOTE}\n\n{MESSAGE_NOTE}\n\n{SHARE_NOTE}"));
+                    if orchestrator {
+                        expected.push_str("\n\nYour current team and the projects you can delegate into are provided with each of the user's messages under [CURRENT TEAM & PROJECTS] — always use that list; it supersedes any roster mentioned earlier in this conversation.");
+                    }
+                }
+                expected.push_str("\n\nMemory");
+                assert_eq!(join_sections(&sections), expected);
+                assert_eq!(sections.last().unwrap().key, "memory");
+                assert_eq!(sections.iter().any(|s| s.key == "permission"), mcp);
+            }
+        }
+        assert_eq!(assemble_sections("Identity".into(), "Worker", false, false, String::new()).len(), 1);
+    }
 }

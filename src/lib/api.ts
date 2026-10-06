@@ -339,3 +339,8 @@ export const terminalList = () => commands.terminalList();
 export const terminalAttach = (id: string, channel: Parameters<typeof commands.terminalAttach>[1]) => ok(commands.terminalAttach(id, channel));
 
 export const terminalTitle = (id: string, title: string) => ok(commands.terminalTitle(id, title));
+
+// ---- Active context ----
+/** Current prompt pieces and the provider's local instruction sources. */
+export const activeContext = (agentId: string, folder: string, taskId?: string) => ok(commands.activeContext(agentId, folder, taskId ?? null));
+export const openContextFile = (agentId: string, folder: string, path: string, reveal: boolean, taskId?: string) => ok(commands.openContextFile(agentId, folder, path, reveal, taskId ?? null));

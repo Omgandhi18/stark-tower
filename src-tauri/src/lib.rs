@@ -7,6 +7,7 @@ mod browser;
 mod chat;
 mod codex;
 mod config;
+mod context;
 mod delegation;
 mod engine;
 mod floor;
@@ -1204,6 +1205,28 @@ fn review_task(app: tauri::AppHandle, id: String) -> Result<(), String> {
     tasks::review(&app, &id)
 }
 
+/// Inspect current prompt sections and provider instruction files without blocking the UI.
+#[tauri::command]
+#[specta::specta]
+async fn active_context(app: tauri::AppHandle, agent_id: String, folder: String, task_id: Option<String>) -> Result<context::ActiveContext, String> {
+    tauri::async_runtime::spawn_blocking(move || context::snapshot(&app, &agent_id, &folder, task_id.as_deref())).await.map_err(|_| "The context couldn't be read. Refresh to try again.".to_string())?
+}
+
+/// Developer-clicked file actions are limited to files in the inspector.
+#[tauri::command]
+#[specta::specta]
+async fn open_context_file(app: tauri::AppHandle, agent_id: String, folder: String, path: String, reveal: bool, task_id: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_opener::OpenerExt;
+        let snapshot = context::snapshot(&app, &agent_id, &folder, task_id.as_deref())?;
+        if !snapshot.sources.iter().any(|s| s.path.as_deref() == Some(&path)) {
+            return Err("That file is no longer in this context. Refresh and try again.".into());
+        }
+        if reveal { app.opener().reveal_item_in_dir(&path) } else { app.opener().open_path(&path, None::<&str>) }
+            .map_err(|_| "The file couldn't be opened. Check that it still exists and try again.".into())
+    }).await.map_err(|_| "The file couldn't be opened. Try again.".to_string())?
+}
+
 /// An agent's durable memory (the markdown it curates across sessions).
 #[tauri::command]
 #[specta::specta]
@@ -1667,6 +1690,8 @@ fn specta_builder() -> tauri_specta::Builder {
             skip_missed_run,
             list_automation_runs,
             get_memory,
+            active_context,
+            open_context_file,
             get_bugs,
             set_bug_status,
             run_maintenance,
