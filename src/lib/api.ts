@@ -344,6 +344,8 @@ export const terminalTitle = (id: string, title: string) => ok(commands.terminal
 /** Current prompt pieces and the provider's local instruction sources. */
 export const activeContext = (agentId: string, folder: string, taskId?: string) => ok(commands.activeContext(agentId, folder, taskId ?? null));
 export const openContextFile = (agentId: string, folder: string, path: string, reveal: boolean, taskId?: string) => ok(commands.openContextFile(agentId, folder, path, reveal, taskId ?? null));
+
+// ---- Spend ----
 export const spendSummary = () => ok(commands.spendSummary());
 export const setBudget = (budget: Budget) => ok(commands.setBudget(budget));
 export const conversationSpend = (id: number) => ok(commands.conversationSpend(id));
