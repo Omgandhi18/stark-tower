@@ -338,6 +338,7 @@ function install(scenario: Scenario) {
     },
     simulator_frame: () => state.simulator.frame,
     simulator_tap: () => null,
+    simulator_swipe: () => null,
     simulator_type: () => null,
     simulator_home: () => null,
     simulator_open_app: () => null,

@@ -73,13 +73,68 @@ test.describe("preview: simulator", () => {
     await expect(screen).toBeVisible();
 
     await screen.click({ position: { x: 10, y: 10 } });
-    const tap = (await calls(page, "simulator_tap")).pop()?.args as { udid: string; name: string; x: number; y: number };
-    expect(tap).toMatchObject({ udid: "SIM-17PRO", name: "iPhone 17 Pro" });
+    const tap = (await calls(page, "simulator_tap")).pop()?.args as { udid: string; name: string; x: number; y: number; width: number };
+    expect(tap).toMatchObject({ udid: "SIM-17PRO", name: "iPhone 17 Pro", width: 195 });
     expect(tap.x).toBeGreaterThan(0);
+
+    // A drag is a swipe, from where it started to where it ended.
+    const box = await screen.boundingBox();
+    if (!box) throw new Error("no screen");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.8);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.3, { steps: 5 });
+    await page.mouse.up();
+    const swipe = (await calls(page, "simulator_swipe")).pop()?.args as { fromY: number; toY: number; width: number };
+    expect(swipe.fromY).toBeGreaterThan(swipe.toY);
+    expect(swipe.width).toBe(195);
 
     await preview.getByRole("textbox", { name: "Type on the simulator" }).fill("hello");
     await preview.getByRole("button", { name: "Send" }).click();
     expect((await calls(page, "simulator_type")).pop()?.args).toEqual({ udid: "SIM-17PRO", text: "hello" });
+  });
+
+  test("fits a full-size iPhone screen inside the panel", async ({ page }) => {
+    await openFriday(page);
+    // An iPhone 17 Pro screenshot is 1206 by 2622 pixels.
+    await page.evaluate(() => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1206;
+      canvas.height = 2622;
+      const g = canvas.getContext("2d");
+      if (g) {
+        g.fillStyle = "#1b3a5c";
+        g.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      const fake = (window as unknown as { __fake: { state: { simulator: { frame: string } } } }).__fake;
+      fake.state.simulator.frame = canvas.toDataURL("image/jpeg", 0.4).split(",")[1];
+    });
+    await page.getByRole("button", { name: "Show the browser and simulator" }).click();
+    const preview = page.getByRole("complementary", { name: "Preview" });
+    await preview.getByRole("tab", { name: "Simulator" }).click();
+    const screen = preview.getByRole("img", { name: "iPhone 17 Pro's screen" });
+    await expect(screen).toBeVisible();
+    await expect.poll(() => screen.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1206);
+    const shown = await screen.boundingBox();
+    const panel = await preview.boundingBox();
+    if (!shown || !panel) throw new Error("not laid out");
+    expect(shown.y + shown.height).toBeLessThanOrEqual(panel.y + panel.height);
+    expect(shown.width).toBeLessThanOrEqual(panel.width);
+    // Scaled down whole, not cropped: the picture keeps its shape.
+    expect(shown.height / shown.width).toBeCloseTo(2622 / 1206, 1);
+  });
+
+  test("says how to tap from here when nothing can send taps", async ({ page }) => {
+    const scenario = defaultScenario();
+    await openFriday(page, { ...scenario, simulator: { ...scenario.simulator, touch: false } });
+    await page.getByRole("button", { name: "Show the browser and simulator" }).click();
+    const preview = page.getByRole("complementary", { name: "Preview" });
+    await preview.getByRole("tab", { name: "Simulator" }).click();
+    const note = preview.getByRole("note");
+    await expect(note.locator("code")).toHaveText("brew install cameroncooke/axe/axe");
+    await expect(preview.getByRole("textbox", { name: "Type on the simulator" })).toHaveCount(0);
+    const before = (await calls(page, "simulator_status")).length;
+    await note.getByRole("button", { name: "Check again" }).click();
+    await expect.poll(async () => (await calls(page, "simulator_status")).length).toBeGreaterThan(before);
   });
 
   test("boots a simulator that isn't running", async ({ page }) => {

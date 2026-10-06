@@ -1,8 +1,9 @@
 //! The iOS Simulator beside a conversation, through Xcode's `simctl`: the
 //! simulators there are, booting one, its screen (screenshots taken a few times a
 //! second while the panel shows it), and opening links and apps on it. Taps,
-//! typing and the Home button go through idb (Meta's iOS Development Bridge)
-//! when it's installed; without it, the Simulator app takes them. Agents get the
+//! swipes, typing and the Home button go through AXe (one Homebrew install), or
+//! idb (Meta's iOS Development Bridge) when that's what's there; without either,
+//! the Simulator app takes them. Agents get the
 //! same through the `simulator` tool, to see what their app looks like.
 
 use serde::Serialize;
@@ -12,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 const XCRUN: &str = "/usr/bin/xcrun";
 const NO_XCODE: &str = "The iOS Simulator needs Xcode. Install it from the App Store and open it once to finish setting up.";
-const NO_IDB: &str = "Taps and typing from Starkline need idb: run `brew install facebook/fb/idb-companion` and `pip3 install fb-idb` in Terminal. Until then, use the Simulator app.";
+const NO_TOUCH: &str = "To tap, swipe and type from Starkline, install AXe: run `brew install cameroncooke/axe/axe` in Terminal (idb works too). Until then, use Open in Simulator.";
 
 static SHOT: AtomicU64 = AtomicU64::new(0);
 
@@ -39,7 +40,7 @@ pub struct SimulatorStatus {
     /// What's missing, when something is.
     pub problem: Option<String>,
     pub devices: Vec<SimDevice>,
-    /// idb is installed, so taps and typing go through from Starkline.
+    /// AXe or idb is installed, so taps, swipes and typing go through from Starkline.
     pub touch: bool,
 }
 
@@ -111,6 +112,63 @@ fn idb() -> Option<String> {
     crate::chat::resolve_program("idb")
 }
 
+/// What sends taps, swipes and typing to a simulator.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Toucher {
+    Axe,
+    Idb,
+}
+
+/// AXe if it's installed, else idb, with the program's path.
+fn toucher() -> Option<(Toucher, String)> {
+    crate::chat::resolve_program("axe").map(|p| (Toucher::Axe, p)).or_else(|| idb().map(|p| (Toucher::Idb, p)))
+}
+
+/// Something done on the device's screen, in points from its top left.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Gesture {
+    Tap { x: f64, y: f64 },
+    Swipe { from: (f64, f64), to: (f64, f64) },
+    Text(String),
+    Home,
+}
+
+/// A gesture's command line (after the program), as each tool spells it. Text goes after
+/// `--`, so words that start with a dash are typed rather than read as options.
+fn gesture_args(tool: Toucher, gesture: &Gesture, udid: &str) -> Vec<String> {
+    let n = |v: f64| format!("{}", v.round());
+    let words = |w: &[&str]| w.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let mut args = match (tool, gesture) {
+        (Toucher::Axe, Gesture::Tap { x, y }) => vec!["tap".into(), "-x".into(), n(*x), "-y".into(), n(*y)],
+        (Toucher::Axe, Gesture::Swipe { from, to }) => {
+            vec!["swipe".into(), "--start-x".into(), n(from.0), "--start-y".into(), n(from.1), "--end-x".into(), n(to.0), "--end-y".into(), n(to.1)]
+        }
+        (Toucher::Axe, Gesture::Text(_)) => words(&["type"]),
+        (Toucher::Axe, Gesture::Home) => words(&["button", "home"]),
+        (Toucher::Idb, Gesture::Tap { x, y }) => vec!["ui".into(), "tap".into(), n(*x), n(*y)],
+        (Toucher::Idb, Gesture::Swipe { from, to }) => vec!["ui".into(), "swipe".into(), n(from.0), n(from.1), n(to.0), n(to.1)],
+        (Toucher::Idb, Gesture::Text(_)) => words(&["ui", "text"]),
+        (Toucher::Idb, Gesture::Home) => words(&["ui", "button", "HOME"]),
+    };
+    args.extend(["--udid".to_string(), udid.to_string()]);
+    if let Gesture::Text(text) = gesture {
+        args.extend(["--".to_string(), text.clone()]);
+    }
+    args
+}
+
+/// Do something on the device's screen.
+pub fn gesture(udid: &str, g: &Gesture) -> Result<(), String> {
+    let (tool, program) = toucher().ok_or(NO_TOUCH)?;
+    let out = Command::new(&program).args(gesture_args(tool, g, udid)).output().map_err(|e| format!("{program} couldn't run: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        let said = String::from_utf8_lossy(&out.stderr).to_string() + &String::from_utf8_lossy(&out.stdout);
+        Err(first_line(&said))
+    }
+}
+
 pub fn status() -> SimulatorStatus {
     let unavailable = |problem: &str| SimulatorStatus { available: false, problem: Some(problem.to_string()), devices: vec![], touch: false };
     if !cfg!(target_os = "macos") {
@@ -120,7 +178,7 @@ pub fn status() -> SimulatorStatus {
         Ok(out) if out.status.success() => {
             let devices = parse_devices(&String::from_utf8_lossy(&out.stdout));
             let problem = devices.is_empty().then(|| "Xcode has no iOS simulators yet. Add one in Xcode under Window > Devices and Simulators.".to_string());
-            SimulatorStatus { available: true, problem, devices, touch: idb().is_some() }
+            SimulatorStatus { available: true, problem, devices, touch: toucher().is_some() }
         }
         _ => unavailable(NO_XCODE),
     }
@@ -175,53 +233,54 @@ pub fn launch(udid: &str, bundle_id: &str) -> Result<(), String> {
     checked(&["launch", udid, bundle_id]).map(|_| ())
 }
 
-fn idb_run(udid: &str, args: &[&str]) -> Result<(), String> {
-    let program = idb().ok_or(NO_IDB)?;
-    let out = Command::new(program).args(args).args(["--udid", udid]).output().map_err(|e| format!("idb couldn't run: {e}"))?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(first_line(&String::from_utf8_lossy(&out.stderr)))
-    }
+/// The width of the device's screen in points, as AXe's accessibility tree gives it.
+fn points_wide(udid: &str) -> Option<f64> {
+    let (Toucher::Axe, program) = toucher()? else { return None };
+    let out = Command::new(program).args(["describe-ui", "--udid", udid]).output().ok()?;
+    let tree: Value = serde_json::from_slice(&out.stdout).ok()?;
+    let root = if tree.is_array() { tree.get(0)? } else { &tree };
+    root.pointer("/frame/width").and_then(|w| w.as_f64()).filter(|w| *w > 0.0)
 }
 
-/// Pixels per point on the device's screen: idb says, else iPads are 2x and iPhones 3x.
-fn scale(udid: &str, name: &str) -> f64 {
+/// Pixels per point on the device's screen. idb says, or AXe gives the width in points;
+/// failing both, iPads and iPhones with narrow (2x) screens are 2x and the rest 3x.
+pub fn scale(udid: &str, name: &str, pixels_wide: f64) -> f64 {
     if let Some(known) = scales().lock().unwrap().get(udid) {
         return *known;
     }
-    let described = idb().and_then(|program| Command::new(program).args(["describe", "--json", "--udid", udid]).output().ok());
-    let density = described
-        .and_then(|out| serde_json::from_slice::<Value>(&out.stdout).ok())
-        .and_then(|v| v.pointer("/screen_dimensions/density").and_then(|d| d.as_f64()))
-        .filter(|d| *d > 0.0);
-    match density {
-        Some(d) => {
-            scales().lock().unwrap().insert(udid.to_string(), d);
-            d
+    let from_idb = || {
+        let out = Command::new(idb()?).args(["describe", "--json", "--udid", udid]).output().ok()?;
+        serde_json::from_slice::<Value>(&out.stdout).ok()?.pointer("/screen_dimensions/density").and_then(|d| d.as_f64()).filter(|d| *d > 0.0)
+    };
+    let measured = from_idb().or_else(|| points_wide(udid).filter(|_| pixels_wide > 0.0).map(|points| (pixels_wide / points).round()));
+    match measured {
+        Some(s) if s >= 1.0 => {
+            scales().lock().unwrap().insert(udid.to_string(), s);
+            s
         }
-        None if name.contains("iPad") => 2.0,
-        None => 3.0,
+        _ => guessed_scale(name, pixels_wide),
     }
 }
 
-/// A tap at a point on the screen, in points.
-pub fn tap(udid: &str, x: f64, y: f64) -> Result<(), String> {
-    idb_run(udid, &["ui", "tap", &format!("{}", x.round()), &format!("{}", y.round())])
+/// iPads, and the iPhones with narrow screens (SE, XR, 11), are 2x; the rest are 3x.
+pub fn guessed_scale(name: &str, pixels_wide: f64) -> f64 {
+    if name.contains("iPad") || (pixels_wide > 0.0 && pixels_wide <= 828.0) {
+        2.0
+    } else {
+        3.0
+    }
 }
 
-/// A tap at a pixel of a screenshot (where the developer clicked it).
-pub fn tap_pixel(udid: &str, name: &str, x: f64, y: f64) -> Result<(), String> {
-    let s = scale(udid, name);
-    tap(udid, x / s, y / s)
+/// A tap where the developer clicked a screenshot, in its pixels.
+pub fn tap_pixel(udid: &str, name: &str, x: f64, y: f64, pixels_wide: f64) -> Result<(), String> {
+    let s = scale(udid, name, pixels_wide);
+    gesture(udid, &Gesture::Tap { x: x / s, y: y / s })
 }
 
-pub fn type_text(udid: &str, text: &str) -> Result<(), String> {
-    idb_run(udid, &["ui", "text", text])
-}
-
-pub fn home(udid: &str) -> Result<(), String> {
-    idb_run(udid, &["ui", "button", "HOME"])
+/// A swipe where the developer dragged across a screenshot, in its pixels.
+pub fn swipe_pixel(udid: &str, name: &str, from: (f64, f64), to: (f64, f64), pixels_wide: f64) -> Result<(), String> {
+    let s = scale(udid, name, pixels_wide);
+    gesture(udid, &Gesture::Swipe { from: (from.0 / s, from.1 / s), to: (to.0 / s, to.1 / s) })
 }
 
 /// The device an agent means: by id or name, else the one that's running.
@@ -260,7 +319,7 @@ pub fn act(app: &tauri::AppHandle, action: &str, args: &Value) -> Result<crate::
                 return Err(s.problem.unwrap_or_else(|| NO_XCODE.into()));
             }
             let list = s.devices.iter().map(|d| format!("{} ({}){} id {}", d.name, d.runtime, if d.booted { ", running," } else { "," }, d.udid)).collect::<Vec<_>>().join("\n");
-            let touch = if s.touch { "Taps and typing work (idb is installed)." } else { "Taps and typing need idb, which isn't installed." };
+            let touch = if s.touch { "Taps, swipes and typing work." } else { "Taps, swipes and typing need AXe (or idb), which isn't installed." };
             Ok(Outcome::Text(format!("{list}\n\n{touch}")))
         }
         "boot" => {
@@ -291,30 +350,59 @@ pub fn act(app: &tauri::AppHandle, action: &str, args: &Value) -> Result<crate::
             reveal(&d.udid);
             Ok(Outcome::Text(format!("Launched {} on {}.", text("bundle_id"), d.name)))
         }
-        "tap" => {
+        "tap" | "swipe" => {
             let d = device(&text("device"), true)?;
             let at = |key: &str| args.get(key).and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())));
             let (Some(x), Some(y)) = (at("x"), at("y")) else { return Err("Give `x` and `y`, in points from the screen's top left.".into()) };
-            tap(&d.udid, x, y)?;
-            Ok(Outcome::Text(format!("Tapped ({x}, {y}) on {}. Take a screenshot to see what happened.", d.name)))
+            if action == "tap" {
+                gesture(&d.udid, &Gesture::Tap { x, y })?;
+                return Ok(Outcome::Text(format!("Tapped ({x}, {y}) on {}. Take a screenshot to see what happened.", d.name)));
+            }
+            let (Some(to_x), Some(to_y)) = (at("to_x"), at("to_y")) else { return Err("A swipe also needs `to_x` and `to_y`, where it ends.".into()) };
+            gesture(&d.udid, &Gesture::Swipe { from: (x, y), to: (to_x, to_y) })?;
+            Ok(Outcome::Text(format!("Swiped from ({x}, {y}) to ({to_x}, {to_y}) on {}.", d.name)))
         }
         "type" => {
             let d = device(&text("device"), true)?;
-            type_text(&d.udid, &text("text"))?;
+            gesture(&d.udid, &Gesture::Text(text("text")))?;
             Ok(Outcome::Text(format!("Typed on {}.", d.name)))
         }
         "home" => {
             let d = device(&text("device"), true)?;
-            home(&d.udid)?;
+            gesture(&d.udid, &Gesture::Home)?;
             Ok(Outcome::Text(format!("Went to {}'s home screen.", d.name)))
         }
-        other => Err(format!("The simulator has no \"{other}\" action. Use devices, boot, screenshot, open_url, install, launch, tap, type or home.")),
+        other => Err(format!("The simulator has no \"{other}\" action. Use devices, boot, screenshot, open_url, install, launch, tap, swipe, type or home.")),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gestures_are_spelled_as_each_tool_takes_them() {
+        let tap = Gesture::Tap { x: 120.4, y: 300.6 };
+        assert_eq!(gesture_args(Toucher::Axe, &tap, "U"), ["tap", "-x", "120", "-y", "301", "--udid", "U"]);
+        assert_eq!(gesture_args(Toucher::Idb, &tap, "U"), ["ui", "tap", "120", "301", "--udid", "U"]);
+        let swipe = Gesture::Swipe { from: (200.0, 600.0), to: (200.0, 200.0) };
+        assert_eq!(
+            gesture_args(Toucher::Axe, &swipe, "U"),
+            ["swipe", "--start-x", "200", "--start-y", "600", "--end-x", "200", "--end-y", "200", "--udid", "U"]
+        );
+        assert_eq!(gesture_args(Toucher::Idb, &swipe, "U"), ["ui", "swipe", "200", "600", "200", "200", "--udid", "U"]);
+        // Words starting with a dash are typed, not read as options.
+        assert_eq!(gesture_args(Toucher::Axe, &Gesture::Text("-hi".into()), "U"), ["type", "--udid", "U", "--", "-hi"]);
+        assert_eq!(gesture_args(Toucher::Idb, &Gesture::Home, "U"), ["ui", "button", "HOME", "--udid", "U"]);
+        assert_eq!(gesture_args(Toucher::Axe, &Gesture::Home, "U"), ["button", "home", "--udid", "U"]);
+    }
+
+    #[test]
+    fn guesses_the_screen_scale_when_no_tool_says() {
+        assert_eq!(guessed_scale("iPhone 17 Pro", 1206.0), 3.0);
+        assert_eq!(guessed_scale("iPhone SE (3rd generation)", 750.0), 2.0);
+        assert_eq!(guessed_scale("iPad Air 13-inch (M3)", 2048.0), 2.0);
+    }
 
     #[test]
     fn names_runtimes_as_xcode_does() {
