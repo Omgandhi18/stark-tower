@@ -837,3 +837,8 @@ The developer asked for "an inbuilt browser and an ios simulator like Claude Des
   - The browser view and the simulator need macOS, so the end-to-end tests drive the panels against a stand-in backend.
   - The macOS screenshot code was type-checked and linted against the macOS target. The rest builds and runs its tests on the macOS CI.
   - Address handling, page reading, script safety (every script hands back a JSON string, so a page can't return something WebKit can't serialize), and the simulator's device list have unit tests.
+
+### 2026-10-06: the app's own icon, and reminders beside your work
+
+- **Icon.** Starkline had Tauri's default icon. The new one is a dark night sky with a single futuristic tower: a landing platform near the top, a glowing cyan core, and a low skyline at its foot. Codex drew it from a composition sketch, alongside a glossy and a pixel-art version. This one won because it still reads at 32 px, where the other two thin out into a line. It sits in Apple's icon grid: a 1024 canvas with an 824 px rounded-square body, a soft shadow and a faint rim light. Every size is generated from `src-tauri/icons/source/icon-1024.png` with `npx tauri icon`. The menu-bar tray icon stays the monochrome template.
+- **Upcoming reminders on Work's right-hand rail**, below Attention: any that went off (with Done and Snooze), then the next few coming up, with a link to the rest and a + to set one. The attention cards scroll above it, so the reminders stay in view however many cards there are.

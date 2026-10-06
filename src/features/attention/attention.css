@@ -1,13 +1,21 @@
 .attention-rail {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
   width: 320px;
   flex: none;
   min-height: 0;
-  padding: var(--space-4);
   border-left: 1px solid var(--border-subtle);
   background: var(--surface-sunken);
+}
+
+/* What needs you scrolls; your reminders stay in view below it. */
+.attention-scroll {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  padding: var(--space-4);
   overflow-y: auto;
 }
 

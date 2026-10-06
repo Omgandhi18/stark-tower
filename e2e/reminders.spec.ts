@@ -83,3 +83,26 @@ test.describe("reminders", () => {
     expect(input.due).toBe(Date.parse("2026-10-06T09:00:00+05:30"));
   });
 });
+
+test.describe("reminders on Work's right-hand rail", () => {
+  test("lists what's coming up, and opens Reminders to set one", async ({ page }) => {
+    await openApp(page);
+    const rail = page.getByRole("region", { name: "Upcoming reminders" });
+    await expect(rail.getByText("Review EDITH's release notes")).toBeVisible();
+    await expect(rail.getByText("Today at 6:00 PM · EDITH")).toBeVisible();
+    await expect(rail.getByText("Tomorrow at 9:30 AM · JARVIS")).toBeVisible();
+    // A finished one isn't coming up.
+    await expect(rail.getByText("Renew the staging certificate")).toHaveCount(0);
+    await rail.getByRole("button", { name: "Set a reminder" }).click();
+    await expect(page.getByRole("form", { name: "New reminder" })).toBeVisible();
+  });
+
+  test("a reminder that went off can be dealt with from the rail", async ({ page }) => {
+    await openApp(page, withDueReminder(defaultScenario()));
+    const rail = page.getByRole("region", { name: "Upcoming reminders" });
+    await expect(rail.getByText("VERONICA reminded you 2m ago")).toBeVisible();
+    await rail.getByRole("button", { name: "Done" }).click();
+    expect(await lastCall(page, "complete_reminder")).toEqual({ id: 9 });
+    await expect(rail.getByText("Check the staging deploy")).toHaveCount(0);
+  });
+});

@@ -132,3 +132,49 @@
 @media (prefers-reduced-motion: reduce) {
   .reminder-toast { animation: none; }
 }
+
+/* ---- Upcoming reminders in Work's right-hand rail --------------------------------------- */
+.rail-reminders {
+  display: grid;
+  flex: none;
+  align-content: start;
+  gap: var(--space-2);
+  max-height: 45%;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  overflow-y: auto;
+}
+.rail-reminders-empty { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
+.rail-reminders-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  cursor: pointer;
+}
+.rail-reminders-link:hover { text-decoration: underline; }
+.rail-reminder-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.rail-reminder {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface-raised);
+}
+.rail-reminder.is-due { border-color: var(--accent); background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface-raised); }
+.rail-reminder-main { display: grid; flex: 1; min-width: 0; gap: 2px; }
+.rail-reminder-text {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--text-sm);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+.rail-reminder-when { display: flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: var(--text-xs); }
+.rail-reminder-actions { display: flex; gap: var(--space-2); margin-top: 6px; }
+.rail-reminders-more { justify-self: start; }
