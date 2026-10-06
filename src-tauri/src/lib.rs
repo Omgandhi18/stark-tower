@@ -40,6 +40,7 @@ mod snapshot;
 mod spend;
 #[cfg(target_os = "macos")]
 mod capture_mac;
+mod studio;
 mod tasks;
 mod terminal;
 mod workspaces;
@@ -1310,6 +1311,88 @@ fn open_capture_task(
     capture::hide(&app)
 }
 
+#[tauri::command]
+#[specta::specta]
+async fn studio_available() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(studio::available)
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+#[specta::specta]
+fn studio_looks(studio: tauri::State<studio::Studio>) -> Vec<studio::Look> {
+    studio.list()
+}
+#[tauri::command]
+#[specta::specta]
+fn studio_job(studio: tauri::State<studio::Studio>, id: String) -> Result<studio::Look, String> {
+    studio.get(&id)
+}
+#[tauri::command]
+#[specta::specta]
+fn studio_draw(
+    app: tauri::AppHandle,
+    studio: tauri::State<studio::Studio>,
+    choices: studio::Choices,
+    id: Option<String>,
+    theme: Option<String>,
+) -> Result<studio::Look, String> {
+    studio.start(app, choices, id, theme)
+}
+#[tauri::command]
+#[specta::specta]
+fn studio_cancel(
+    state: tauri::State<AppState>,
+    studio: tauri::State<studio::Studio>,
+    id: String,
+) -> Result<(), String> {
+    if state
+        .config
+        .lock()
+        .unwrap()
+        .agents
+        .iter()
+        .any(|a| a.look.as_ref() == Some(&id))
+    {
+        return Ok(());
+    }
+    studio.remove(&id)
+}
+#[tauri::command]
+#[specta::specta]
+fn studio_apply(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    studio: tauri::State<studio::Studio>,
+    agent_id: String,
+    id: Option<String>,
+) -> Result<AppConfig, String> {
+    let mut cfg = state.config.lock().unwrap();
+    let agent = cfg
+        .agents
+        .iter_mut()
+        .find(|a| a.id == agent_id)
+        .ok_or("That agent is no longer in the roster.")?;
+    let look = id.as_deref().map(|id| studio.save(id)).transpose()?;
+    let old = agent.look.clone();
+    agent.look = id.clone();
+    if let Some(look) = look {
+        agent.figure = look.choices.figure;
+        if let Some(accent) = look.choices.options.get("personal accent") {
+            agent.accent = accent.clone();
+        }
+    }
+    let unused = old.filter(|old| {
+        Some(old) != id.as_ref() && !cfg.agents.iter().any(|a| a.look.as_ref() == Some(old))
+    });
+    drop(cfg);
+    if let Some(old) = unused {
+        studio.remove(&old)?;
+    }
+    let _ = app.emit("studio://changed", ());
+    Ok(commit_config(&app, &state))
+}
+
 // ---- configuration (engines + roster) --------------------------------------
 
 /// Persist config, refresh the derived roster, and notify the UI.
@@ -1339,6 +1422,7 @@ fn update_agent(
     state: tauri::State<AppState>,
     mut agent: AgentConfig,
 ) -> AppConfig {
+    let old_look = state.config.lock().unwrap().agent(&agent.id).and_then(|a| a.look.clone());
     // A new agent starts at its default tone; the dials always stay in range.
     agent.tone = Some(agent.tone.unwrap_or_else(|| tone::default_for(&agent.id)).clamped());
     // Turning an agent off ends its live session; its chats are kept.
@@ -1352,17 +1436,36 @@ fn update_agent(
             None => cfg.agents.push(agent),
         }
     }
+    cleanup_look(&app, &state, old_look);
     commit_config(&app, &state)
+}
+
+fn cleanup_look(app: &tauri::AppHandle, state: &AppState, old: Option<String>) {
+    if let Some(id) = old {
+        if !state
+            .config
+            .lock()
+            .unwrap()
+            .agents
+            .iter()
+            .any(|a| a.look.as_ref() == Some(&id))
+        {
+            let _ = app.state::<studio::Studio>().remove(&id);
+            let _ = app.emit("studio://changed", ());
+        }
+    }
 }
 
 #[tauri::command]
 #[specta::specta]
 fn remove_agent(app: tauri::AppHandle, state: tauri::State<AppState>, id: String) -> AppConfig {
+    let old_look = state.config.lock().unwrap().agent(&id).and_then(|a| a.look.clone());
     stop_by_developer(&app, &id);
     {
         let mut cfg = state.config.lock().unwrap();
         cfg.agents.retain(|a| a.id != id);
     }
+    cleanup_look(&app, &state, old_look);
     commit_config(&app, &state)
 }
 
@@ -1454,11 +1557,17 @@ fn set_standup_minutes(
 #[tauri::command]
 #[specta::specta]
 fn reset_config(app: tauri::AppHandle, state: tauri::State<AppState>) -> AppConfig {
-    {
+    // The capture shortcut is the Mac's, not the team's, so a reset keeps it; custom looks go with their agents.
+    let looks: Vec<_> = {
         let mut cfg = state.config.lock().unwrap();
+        let looks = cfg.agents.iter().filter_map(|a| a.look.clone()).collect();
         let capture = cfg.quick_capture.clone();
         *cfg = config::default_config();
         cfg.quick_capture = capture;
+        looks
+    };
+    for look in looks {
+        cleanup_look(&app, &state, Some(look));
     }
     commit_config(&app, &state)
 }
@@ -2039,6 +2148,12 @@ fn specta_builder() -> tauri_specta::Builder {
             review_respond,
             pending_reviews,
             runtime_health,
+            studio_available,
+            studio_draw,
+            studio_looks,
+            studio_job,
+            studio_cancel,
+            studio_apply,
             power_state,
             set_keep_awake,
             set_capture_shortcut,
@@ -2130,6 +2245,7 @@ pub fn run() {
             let floor_dir = floor::init(&data_str, &agent_ids);
             floor::start_committer(floor_dir.clone());
 
+            app.manage(studio::Studio::new(data_dir.join("looks")));
             app.manage(browser::Browser::default());
             app.manage(devserver::DevServers::default());
             app.manage(AppState {

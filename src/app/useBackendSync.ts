@@ -8,6 +8,7 @@ import {
   onCodeReviewsChanged,
   refreshCodeReviews,
   onCaptureOpenTask,
+  onStudioChanged,
   getConfig,
   listAgents,
   onAgentStatus,
@@ -39,6 +40,7 @@ import { errorMessage } from "../lib/errors";
 import { IS_TAURI } from "../lib/platform";
 import { useCodeReviews } from "../stores/codeReviews";
 import { useActivity } from "../stores/activity";
+import { useLooks } from "../stores/looks";
 import { useAgents } from "../stores/agents";
 import { useAttention } from "../stores/attention";
 import { useAutomations } from "../stores/automations";
@@ -100,6 +102,7 @@ export function useBackendSync() {
     const stopped = () => unmounted;
     const first = (what: string, load: () => Promise<unknown>) => void firstLoad(load, report(what), stopped);
 
+    first("custom looks", useLooks.getState().refresh);
     first("agents", () => listAgents().then(useAgents.getState().replace));
     void firstLoad(
       () => getConfig().then(useConfig.getState().apply),
@@ -126,6 +129,7 @@ export function useBackendSync() {
     const subscriptions: Array<Promise<UnlistenFn>> = [
       onCodeReviewsChanged(useCodeReviews.getState().apply),
       onCaptureOpenTask((id) => useNavigation.getState().openTask(id)),
+      onStudioChanged(() => useLooks.getState().refresh().catch(report("custom looks"))),
       onAgentStatus((e) => useAgents.getState().setStatus(e.agentId, e.status)),
       onConfigChanged((c) => {
         useConfig.getState().apply(c);

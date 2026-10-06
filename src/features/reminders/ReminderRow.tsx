@@ -1,5 +1,5 @@
 import { Check, Pencil, Repeat, SquareArrowOutUpRight, Trash2 } from "lucide-react";
-import { Button, OverflowMenu, Portrait, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
+import { portraitKey, Button, OverflowMenu, Portrait, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
 import type { Agent, Reminder, Task } from "../../lib/types";
 import { formatRelative } from "../../lib/time";
 import { describeWhen } from "./reminderModel";
@@ -34,7 +34,7 @@ export default function ReminderRow({ reminder: r, agent, task, due, now, onDone
 
   return (
     <li className="reminder-row">
-      <Portrait name={name} figure={agent?.figure} accent={agent?.accent} size={32} />
+      <Portrait name={name} figure={portraitKey(agent)} accent={agent?.accent} size={32} />
       <div className="reminder-row-main">
         <span className="reminder-row-text">{r.text}</span>
         <span className="reminder-row-meta">

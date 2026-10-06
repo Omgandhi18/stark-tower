@@ -40,6 +40,8 @@ chrono = "0.4"
 # Chat attachments: pasted files arrive as base64; replies are scanned for files the agent made.
 base64 = "0.22"
 regex = "1"
+# Character Studio frames and sizes generated portraits locally.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

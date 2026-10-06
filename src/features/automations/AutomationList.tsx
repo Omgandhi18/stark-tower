@@ -1,5 +1,5 @@
 import { CalendarPlus, Plus, Search } from "lucide-react";
-import { Button, EmptyState, Portrait, Toggle, cx, ICON_SIZE, ICON_STROKE } from "../../design";
+import { portraitKey, Button, EmptyState, Portrait, Toggle, cx, ICON_SIZE, ICON_STROKE } from "../../design";
 import { formatRelative } from "../../lib/time";
 import type { Agent, Automation } from "../../lib/types";
 import { folderName } from "../../stores/workspace";
@@ -90,7 +90,7 @@ export default function AutomationList(props: AutomationListProps) {
               return (
                 <li key={a.id} className={cx("automation-row", a.id === selected && "is-selected", !a.enabled && "is-paused")}>
                   <button type="button" className="automation-row-main" aria-current={a.id === selected ? "true" : undefined} onClick={() => onSelect(a.id)}>
-                    <Portrait name={agent?.name ?? a.agent_id} figure={agent?.figure} accent={agent?.accent} size={40} />
+                    <Portrait name={agent?.name ?? a.agent_id} figure={portraitKey(agent)} accent={agent?.accent} size={40} />
                     <span className="automation-row-text">
                       <span className="automation-row-name">{a.name}</span>
                       <span className="automation-row-meta">

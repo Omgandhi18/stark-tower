@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, FolderOpen, MessageSquarePlus, PanelRight, SquareTerminal } from "lucide-react";
-import { Button, IconButton, Portrait, SelectField, StatusPill } from "../../design";
+import { portraitKey, Button, IconButton, Portrait, SelectField, StatusPill } from "../../design";
 import { errorMessage } from "../../lib/errors";
 import { formatTokens } from "../../lib/format";
 import { AGENT_STATUS } from "../../lib/status";
@@ -56,7 +56,7 @@ export default function ConversationHeader({ agent }: { agent: Agent }) {
   return (
     <header className="conversation-header">
       <IconButton icon={ArrowLeft} label="Back to Work" onClick={() => navigate("work")} />
-      <Portrait name={agent.name} figure={agent.figure} accent={agent.accent} size={40} status={agent.status} />
+      <Portrait name={agent.name} figure={portraitKey(agent)} accent={agent.accent} size={40} status={agent.status} />
       <div className="conversation-who">
         <h1 className="conversation-name">{agent.name}</h1>
         <p className="conversation-role">

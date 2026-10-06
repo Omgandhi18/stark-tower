@@ -1,6 +1,6 @@
 import { memo, type ReactNode } from "react";
 import { ArrowDown, Brain, CircleAlert, Share2, Sparkles } from "lucide-react";
-import { Button, Markdown, Portrait, ICON_SIZE, ICON_STROKE } from "../../design";
+import { portraitKey, Button, Markdown, Portrait, ICON_SIZE, ICON_STROKE } from "../../design";
 import { AttachmentGallery } from "../attachments/AttachmentView";
 import { presentTool } from "../../lib/tools";
 import type { Agent } from "../../lib/types";
@@ -100,7 +100,7 @@ export default function MessageList({ agent, messages, pending, empty }: Message
           <div key={message.id} className="msg-slot">
             {startsAgentRun(messages, i) && (
               <div className="msg-author">
-                <Portrait name={agent.name} figure={agent.figure} accent={agent.accent} size={24} />
+                <Portrait name={agent.name} figure={portraitKey(agent)} accent={agent.accent} size={24} />
                 {agent.name}
               </div>
             )}

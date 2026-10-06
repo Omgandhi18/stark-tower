@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { Portrait, cx } from "../../design";
+import { portraitKey, Portrait, cx } from "../../design";
 import { AGENT_STATUS } from "../../lib/status";
 import type { Agent } from "../../lib/types";
 import { useActivity } from "../../stores/activity";
@@ -29,7 +29,7 @@ export default function SceneAgentCard({ agent, placement, docked = false }: Sce
   if (docked) {
     return (
       <div className="scene-card is-docked" role="status" style={{ ...placement, width: DOCKED_CARD_WIDTH }}>
-        <Portrait name={agent.name} figure={agent.figure} accent={agent.accent} size={64} status={agent.status} />
+        <Portrait name={agent.name} figure={portraitKey(agent)} accent={agent.accent} size={64} status={agent.status} />
         <span className="scene-card-text">
           <span className="scene-card-head">
             <span className="scene-card-name">{agent.name}</span>
@@ -43,7 +43,7 @@ export default function SceneAgentCard({ agent, placement, docked = false }: Sce
   }
   return (
     <div className="scene-card" role="status" style={{ ...placement, width: SCENE_CARD_WIDTH }}>
-      <Portrait name={agent.name} figure={agent.figure} accent={agent.accent} size={32} status={agent.status} />
+      <Portrait name={agent.name} figure={portraitKey(agent)} accent={agent.accent} size={32} status={agent.status} />
       <span className="scene-card-text">
         <span className="scene-card-head">
           <span className="scene-card-name">{agent.name}</span>

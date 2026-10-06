@@ -921,6 +921,49 @@ async pendingReviews() : Promise<ReviewRequest[]> {
 async runtimeHealth() : Promise<RuntimeHealth> {
     return await TAURI_INVOKE("runtime_health");
 },
+async studioAvailable() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_available") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async studioDraw(choices: Choices, id: string | null, theme: string | null) : Promise<Result<Look, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_draw", { choices, id, theme }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async studioLooks() : Promise<Look[]> {
+    return await TAURI_INVOKE("studio_looks");
+},
+async studioJob(id: string) : Promise<Result<Look, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_job", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async studioCancel(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_cancel", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async studioApply(agentId: string, id: string | null) : Promise<Result<AppConfig, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_apply", { agentId, id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Whether Starkline is keeping this Mac awake, and why.
  */
@@ -1046,7 +1089,7 @@ export type Agent = { id: string; name: string; role: string; kind: AgentKind; e
 /**
  * Hex accent color for the pixel sprite.
  */
-accent: string; figure: string; home_x: number; home_y: number; status: AgentStatus }
+accent: string; figure: string; look?: string | null; home_x: number; home_y: number; status: AgentStatus }
 /**
  * One roster member. `personality` is the editable system-prompt character;
  * app mechanics (delegation rules, the ask_human note) are appended in code.
@@ -1055,7 +1098,7 @@ export type AgentConfig = { id: string; name: string; role: string; kind: AgentK
 /**
  * Sprite silhouette / pack ref ("masc" | "fem" | "synth" | custom id).
  */
-figure?: string; 
+figure?: string; look?: string | null; 
 /**
  * Engine id this agent runs on (must match an EngineConfig.id).
  */
@@ -1253,6 +1296,7 @@ export type CaptureConfig = { enabled: boolean; shortcut: string; last_agent: st
  */
 export type CheckRun = { kind: string; command: string; passed: boolean; at: number; duration_ms: number | null; agent_id: string }
 export type Choice = { selected: string; custom: string }
+export type Choices = { figure: string; options: Partial<{ [key in string]: string }>; note: string }
 export type CodeReviewItem = { id: string; cwd: string; host_kind: HostKind; number: number; title: string; url: string; branch: string; head: string; 
 /**
  * failed | changes | comments | review
@@ -1315,6 +1359,7 @@ export type FileClaim = { workspace: string; path: string; agent_id: string; tas
 export type Host = { kind: HostKind; hostname: string; repository: string; remote: string; connection: string | null }
 export type HostKind = "github" | "gitlab" | "unknown"
 export type LedgerEntry = { id: number; ts: number; agent_id: string; kind: string; detail: string; load: number }
+export type Look = { id: string; choices: Choices; paths: Partial<{ [key in string]: string }>; progress: Partial<{ [key in string]: string }>; errors: Partial<{ [key in string]: string }>; revision: number; saved: boolean }
 /**
  * A model an agent can run on.
  */

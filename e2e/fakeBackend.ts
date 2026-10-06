@@ -97,6 +97,7 @@ function install(scenario: Scenario) {
         engine: a.engine ?? "",
         accent: a.accent ?? "",
         figure: a.figure ?? "",
+        look: a.look ?? null,
         home_x: a.home_x,
         home_y: a.home_y,
         status: state.statuses[a.id] ?? "offline",
@@ -218,7 +219,54 @@ function install(scenario: Scenario) {
     return server;
   };
 
+  const studio = state.studio ??= { available: true, looks: {} };
+  let nextLook = 1;
+  const cancelledLooks = new Set<string>();
   const commands: Record<string, (args: Json) => unknown> = {
+    studio_available: () => {
+      if (!studio.available) throw "Starkline asks Codex to draw new looks, with your own Codex sign-in. Install Codex, then run `codex login` in Terminal.";
+      return null;
+    },
+    studio_looks: () => Object.values(studio.looks).filter((look) => look.saved),
+    studio_job: (args) => studio.looks[String(args.id)],
+    studio_draw: (args) => {
+      if (!studio.available) throw "Install Codex, then run codex login in Terminal.";
+      const id = args.id ? String(args.id) : `look-fake-${nextLook++}`;
+      const look = studio.looks[id] ??= { id, choices: args.choices as import("../src/lib/bindings").Choices, paths: {}, progress: {}, errors: {}, revision: 0, saved: false };
+      look.revision++;
+      const themes = args.theme ? [String(args.theme)] : ["own", "studio-office", "mori-cafe"];
+      for (const theme of themes) {
+        delete look.errors[theme];
+        look.progress[theme] = "queued";
+        window.setTimeout(() => {
+          if (cancelledLooks.has(id)) return;
+          look.progress[theme] = "drawing"; emit("studio://progress", look);
+        }, 50);
+        window.setTimeout(() => {
+          if (cancelledLooks.has(id)) return;
+          if (studio.failTheme === theme) { look.progress[theme] = "failed"; look.errors[theme] = "Codex couldn't draw this look. Try again.\nImage service is busy."; }
+          else { look.progress[theme] = "ready"; look.paths[theme] = theme === "own" ? "/src/assets/portraits/helperbot.png" : `/src/assets/themes/${theme}/portraits/helperbot.png`; }
+          emit("studio://progress", look);
+        }, 400);
+      }
+      return look;
+    },
+    studio_cancel: (args) => { const id = String(args.id); if (!state.config.agents.some((a) => a.look === id)) { cancelledLooks.add(id); delete studio.looks[id]; } return null; },
+    studio_apply: (args) => {
+      const agent = state.config.agents.find((a) => a.id === args.agentId);
+      if (!agent) throw "That agent is no longer in the roster.";
+      const old = agent.look;
+      const id = args.id ? String(args.id) : null;
+      if (id) {
+        const look = studio.looks[id];
+        if (!look || ["own", "studio-office", "mori-cafe"].some((t) => look.progress[t] !== "ready")) throw "Wait for all three looks to finish before using them.";
+        look.saved = true; agent.figure = look.choices.figure;
+        agent.accent = look.choices.options["personal accent"] ?? agent.accent;
+      }
+      agent.look = id;
+      if (old && old !== id && !state.config.agents.some((a) => a.look === old)) delete studio.looks[old];
+      emit("studio://changed", null); return commitConfig();
+    },
     "plugin:event|listen": (args) => {
       const event = String(args.event);
       const set = listeners.get(event) ?? new Set<number>();
@@ -922,12 +970,16 @@ function install(scenario: Scenario) {
       const next = args.agent as Scenario["config"]["agents"][number];
       next.tone ??= usualTone(next.id);
       const index = state.config.agents.findIndex((a) => a.id === next.id);
+      const old = state.config.agents[index]?.look;
       if (index >= 0) state.config.agents[index] = next;
       else state.config.agents.push(next);
+      if (old && !state.config.agents.some((a) => a.look === old)) { delete studio.looks[old]; emit("studio://changed", null); }
       return commitConfig();
     },
     remove_agent: (args) => {
+      const old = state.config.agents.find((a) => a.id === args.id)?.look;
       state.config.agents = state.config.agents.filter((a) => a.id !== args.id);
+      if (old && !state.config.agents.some((a) => a.look === old)) { delete studio.looks[old]; emit("studio://changed", null); }
       return commitConfig();
     },
     update_engine: (args) => {

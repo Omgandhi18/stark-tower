@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { FolderOpen } from "lucide-react";
-import { Button, InlineCode, Portrait, cx, ICON_SIZE, ICON_STROKE } from "../../design";
+import { portraitKey, Button, InlineCode, Portrait, cx, ICON_SIZE, ICON_STROKE } from "../../design";
 import { errorMessage } from "../../lib/errors";
 import { formatRelative } from "../../lib/time";
 import { isPermissionRequest, type ReviewRequest } from "../../lib/types";
@@ -54,7 +54,7 @@ export default function AttentionCard({ review, now }: AttentionCardProps) {
       </header>
 
       <div className="attention-who">
-        <Portrait name={name} figure={agent?.figure} accent={agent?.accent} size={24} />
+        <Portrait name={name} figure={portraitKey(agent)} accent={agent?.accent} size={24} />
         <span className="attention-agent">{name}</span>
         <span className="attention-verb">{p.verb}</span>
       </div>

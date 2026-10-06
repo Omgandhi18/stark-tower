@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { History, Trash2, UsersRound } from "lucide-react";
-import { OverflowMenu, Portrait, SectionHeader, SkeletonRows, Tag, cx } from "../../design";
+import { portraitKey, OverflowMenu, Portrait, SectionHeader, SkeletonRows, Tag, cx } from "../../design";
 import { errorMessage } from "../../lib/errors";
 import { AGENT_STATUS } from "../../lib/status";
 import { formatRelative } from "../../lib/time";
@@ -32,7 +32,7 @@ function AgentRow({ agent, current, waiting }: { agent: Agent; current: boolean;
         aria-current={current ? "page" : undefined}
         onClick={() => openConversation(agent.id)}
       >
-        <Portrait name={agent.name} figure={agent.figure} accent={agent.accent} size={32} status={agent.status} />
+        <Portrait name={agent.name} figure={portraitKey(agent)} accent={agent.accent} size={32} status={agent.status} />
         <span className="rail-text">
           <span className="rail-name">{agent.name}</span>
           <span className={cx("rail-line", waiting && "is-waiting")}>{line}</span>

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { AlarmClockOff, Bell, CalendarClock, FolderOpen, ListChecks, MoonStar, Pencil, Play, ShieldCheck, Timer, Trash2, type LucideIcon } from "lucide-react";
-import { OverflowMenu, Portrait, StatusPill, Toggle, ICON_SIZE, ICON_STROKE } from "../../design";
+import { portraitKey, OverflowMenu, Portrait, StatusPill, Toggle, ICON_SIZE, ICON_STROKE } from "../../design";
 import type { Agent, Automation } from "../../lib/types";
 import { folderName } from "../../stores/workspace";
 import { automationHealth, describeMissed, describeNotify, describeSchedule, formatMinutes } from "./automationModel";
@@ -49,7 +49,7 @@ export default function AutomationDetail({ automation: a, agent, onToggle, onEdi
       </header>
 
       <div className="automation-identity">
-        <Portrait name={owner} figure={agent?.figure} accent={agent?.accent} size={64} />
+        <Portrait name={owner} figure={portraitKey(agent)} accent={agent?.accent} size={64} />
         <div className="automation-identity-text">
           <h1 id="automation-detail-name" className="automation-name">
             {a.name}

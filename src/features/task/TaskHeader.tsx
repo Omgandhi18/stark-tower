@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ArrowLeft, CheckCheck, Clock, Folder, FolderOpen, MessageSquareText, Play, ShieldCheck, Square, SquareTerminal, X } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { Button, IconButton, OverflowMenu, Portrait, StatusPill, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
+import { portraitKey, Button, IconButton, OverflowMenu, Portrait, StatusPill, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
 import { seeCodeReview, chatStop, closeTask, resumeTask, reviewTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { formatElapsed } from "../../lib/time";
@@ -107,7 +107,7 @@ export default function TaskHeader({ detail, owner, requester, state, now }: Tas
         <div className="task-fact">
           <dt>Owner</dt>
           <dd>
-            <Portrait name={name} figure={owner?.figure} accent={owner?.accent} size={24} status={owner?.status} />
+            <Portrait name={name} figure={portraitKey(owner)} accent={owner?.accent} size={24} status={owner?.status} />
             {name}
           </dd>
         </div>

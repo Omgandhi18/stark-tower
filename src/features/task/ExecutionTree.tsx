@@ -1,5 +1,5 @@
 import { Bot } from "lucide-react";
-import { Portrait, SectionHeader, Tag, cx, ICON_SIZE, ICON_STROKE } from "../../design";
+import { portraitKey, Portrait, SectionHeader, Tag, cx, ICON_SIZE, ICON_STROKE } from "../../design";
 import type { Agent, Task, TaskDetail } from "../../lib/types";
 import { useActivity } from "../../stores/activity";
 import { useAgents } from "../../stores/agents";
@@ -24,7 +24,7 @@ function Node({ agent, agentId, role, line, files, current, onOpen, tone, claims
   const name = agent?.name ?? agentId;
   const body = (
     <>
-      <Portrait name={name} figure={agent?.figure} accent={agent?.accent} size={40} status={agent?.status} />
+      <Portrait name={name} figure={portraitKey(agent)} accent={agent?.accent} size={40} status={agent?.status} />
       <span className="execution-text">
         <span className="execution-name">
           {name}

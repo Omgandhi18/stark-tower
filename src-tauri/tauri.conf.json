@@ -32,7 +32,7 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/attachments/**"]
+        "scope": ["$APPDATA/attachments/**", "$APPDATA/looks/**"]
       }
     }
   },

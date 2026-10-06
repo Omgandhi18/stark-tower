@@ -51,6 +51,7 @@ const ago = (minutes: number) => NOW - minutes * MINUTE;
 export interface Scenario {
   spend: SpendSummary;
   conversationSpend: Record<number, ConversationSpend>;
+  studio?: { available: boolean; looks: Record<string, import("../src/lib/bindings").Look>; failTheme?: string };
   /** How long after the page loads the backend starts answering (the launch race); by default at once. */
   backendReadyAfterMs?: number;
   captureVisible?: boolean;

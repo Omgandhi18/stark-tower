@@ -181,7 +181,7 @@ impl Probes {
 }
 
 /// Ask each provider's CLI in its own words whether it's signed in.
-fn probe_sign_in(kind: &str, path: &str) -> Option<SignIn> {
+pub(crate) fn probe_sign_in(kind: &str, path: &str) -> Option<SignIn> {
     match kind {
         "claude-code" => run(path, &["auth", "status"]).and_then(|(_, out)| parse_claude_status(&out)),
         "codex" => run(path, &["login", "status"]).map(|(ok, out)| parse_codex_status(ok, &out)),
@@ -256,10 +256,16 @@ fn run(path: &str, args: &[&str]) -> Option<(bool, String)> {
         .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .ok()?;
     let mut stdout = child.stdout.take()?;
+    let mut stderr = child.stderr.take()?;
+    let errors = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = stderr.read_to_string(&mut text);
+        text
+    });
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut text = String::new();
@@ -269,7 +275,9 @@ fn run(path: &str, args: &[&str]) -> Option<(bool, String)> {
     match rx.recv_timeout(PROBE_TIMEOUT) {
         Ok(text) => {
             let ok = child.wait().map(|s| s.success()).unwrap_or(false);
-            Some((ok, text))
+            let errors = errors.join().unwrap_or_default();
+            // Codex reports login status on stderr; prefer stdout for JSON providers.
+            Some((ok, if text.trim().is_empty() { errors } else { text }))
         }
         Err(_) => {
             let _ = child.kill();
@@ -298,6 +306,15 @@ mod tests {
         // /bin/echo prints its arguments back, which is enough to prove the probe runs.
         assert_eq!(run("/bin/echo", &["--version"]), Some((true, "--version\n".into())));
         assert_eq!(run("/nonexistent/cli", &["--version"]), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reads_codex_status_from_stderr() {
+        let (ok, text) = run("/bin/sh", &["-c", "printf 'Logged in using ChatGPT\\n' >&2"]).unwrap();
+        assert!(parse_codex_status(ok, &text).signed_in);
+        let (_, text) = run("/bin/sh", &["-c", "printf '{\"loggedIn\":true}'; printf warning >&2"]).unwrap();
+        assert!(parse_claude_status(&text).unwrap().signed_in);
     }
 
     #[test]

@@ -400,3 +400,13 @@ export const openCaptureTask = (id: string) => ok(commands.openCaptureTask(id));
 export const onCaptureShown = (cb: () => void): Promise<UnlistenFn> => listen("capture://shown", () => cb());
 export const onCaptureError = (cb: (error: string) => void): Promise<UnlistenFn> => listen<string>("capture://error", (event) => cb(event.payload));
 export const onCaptureOpenTask = (cb: (id: string) => void): Promise<UnlistenFn> => listen<string>("capture://open-task", (event) => cb(event.payload));
+
+// Character Studio uses the developer's Codex sign-in; portraits stay local.
+export const studioAvailable = () => ok(commands.studioAvailable());
+export const studioJob = (id: string) => ok(commands.studioJob(id));
+export const studioLooks = () => commands.studioLooks();
+export const studioDraw = (choices: import("./bindings").Choices, id: string | null, theme: string | null) => ok(commands.studioDraw(choices, id, theme));
+export const studioCancel = (id: string) => ok(commands.studioCancel(id));
+export const studioApply = (agentId: string, id: string | null) => ok(commands.studioApply(agentId, id));
+export const onStudioProgress = (cb: (look: import("./bindings").Look) => void) => listen<import("./bindings").Look>("studio://progress", (e) => cb(e.payload));
+export const onStudioChanged = (cb: () => void) => listen("studio://changed", cb);

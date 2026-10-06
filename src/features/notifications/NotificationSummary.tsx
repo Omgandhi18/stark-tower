@@ -1,7 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
 import { AlarmClock, CalendarClock, Check, CheckCheck, Play, RotateCcw, SkipForward, SquareArrowOutUpRight, X } from "lucide-react";
-import { Button, InlineCode, Portrait, StatusPill } from "../../design";
+import { portraitKey, Button, InlineCode, Portrait, StatusPill } from "../../design";
 import { seeCodeReview, closeTask, completeReminder, resumeTask, reviewTask, runAutomationNow, skipMissedRun, snoozeReminder, startTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { formatRelative } from "../../lib/time";
@@ -54,7 +54,7 @@ export default function NotificationSummary({ notification: n, agent, now }: Not
         <div>
           <dt>From</dt>
           <dd>
-            <Portrait name={name} figure={agent?.figure} accent={agent?.accent} size={24} />
+            <Portrait name={name} figure={portraitKey(agent)} accent={agent?.accent} size={24} />
             {name}
           </dd>
         </div>

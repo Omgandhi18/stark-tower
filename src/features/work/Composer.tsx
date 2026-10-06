@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { CornerDownLeft, SendHorizontal, Sparkles } from "lucide-react";
-import { IconButton, Kbd, Portrait, cx, ICON_SIZE, ICON_STROKE } from "../../design";
+import { portraitKey, IconButton, Kbd, Portrait, cx, ICON_SIZE, ICON_STROKE } from "../../design";
 import { startTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { useAgents, selectOrchestrator } from "../../stores/agents";
@@ -149,7 +149,7 @@ export default function Composer({ project, attachments }: ComposerProps) {
                   pick(a.name);
                 }}
               >
-                <Portrait name={a.name} figure={a.figure} accent={a.accent} size={24} />
+                <Portrait name={a.name} figure={portraitKey(a)} accent={a.accent} size={24} />
                 <span className="mention-name">{a.name}</span>
                 <span className="mention-role">{a.role}</span>
                 {i === highlight && (

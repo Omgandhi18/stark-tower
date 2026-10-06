@@ -112,6 +112,8 @@ pub struct AgentConfig {
     /// Sprite silhouette / pack ref ("masc" | "fem" | "synth" | custom id).
     #[serde(default)]
     pub figure: String,
+    #[serde(default)]
+    pub look: Option<String>,
     /// Engine id this agent runs on (must match an EngineConfig.id).
     #[serde(default = "default_engine_id")]
     pub engine: String,
@@ -153,6 +155,7 @@ impl AgentConfig {
             engine: self.engine.clone(),
             accent: self.accent.clone(),
             figure: self.figure.clone(),
+            look: self.look.clone(),
             home_x: self.home_x,
             home_y: self.home_y,
             status: AgentStatus::Offline,
@@ -407,6 +410,7 @@ pub fn default_agents() -> Vec<AgentConfig> {
             kind: a.kind,
             accent: a.accent,
             figure: a.figure,
+            look: a.look,
             engine: a.engine,
             home_x: a.home_x,
             home_y: a.home_y,

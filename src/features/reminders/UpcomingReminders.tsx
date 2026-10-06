@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { AlarmClock, Check, Plus, Repeat } from "lucide-react";
-import { Button, IconButton, Portrait, SectionHeader, ICON_SIZE, ICON_STROKE } from "../../design";
+import { portraitKey, Button, IconButton, Portrait, SectionHeader, ICON_SIZE, ICON_STROKE } from "../../design";
 import { completeReminder, snoozeReminder } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { formatRelative } from "../../lib/time";
@@ -60,7 +60,7 @@ export default function UpcomingReminders({ now }: { now: number }) {
             const name = agent?.name ?? r.agent_id;
             return (
               <li key={r.id} className="rail-reminder is-due">
-                <Portrait name={name} figure={agent?.figure} accent={agent?.accent} size={24} />
+                <Portrait name={name} figure={portraitKey(agent)} accent={agent?.accent} size={24} />
                 <div className="rail-reminder-main">
                   <span className="rail-reminder-text">{r.text}</span>
                   <span className="rail-reminder-when">
@@ -81,7 +81,7 @@ export default function UpcomingReminders({ now }: { now: number }) {
             const name = agent?.name ?? r.agent_id;
             return (
               <li key={r.id} className="rail-reminder">
-                <Portrait name={name} figure={agent?.figure} accent={agent?.accent} size={24} />
+                <Portrait name={name} figure={portraitKey(agent)} accent={agent?.accent} size={24} />
                 <div className="rail-reminder-main">
                   <span className="rail-reminder-text">{r.text}</span>
                   <span className="rail-reminder-when">

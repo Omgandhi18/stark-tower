@@ -1,5 +1,5 @@
 import { BellOff, CheckCheck, Search } from "lucide-react";
-import { Button, EmptyState, InlineCode, Portrait, SelectField, Tag, cx, ICON_SIZE, ICON_STROKE } from "../../design";
+import { portraitKey, Button, EmptyState, InlineCode, Portrait, SelectField, Tag, cx, ICON_SIZE, ICON_STROKE } from "../../design";
 import { formatRelative } from "../../lib/time";
 import type { Agent, Notification } from "../../lib/types";
 import { needsYou } from "../../stores/notifications";
@@ -72,7 +72,7 @@ export default function NotificationList({ view, items, agents, selectedId, onSe
                         aria-current={n.id === selectedId ? "true" : undefined}
                         onClick={() => onSelect(n.id)}
                       >
-                        <Portrait name={name} figure={agent?.figure} accent={agent?.accent} size={40} />
+                        <Portrait name={name} figure={portraitKey(agent)} accent={agent?.accent} size={40} />
                         <span className="notification-text">
                           <span className="notification-who">
                             <span className="notification-agent">{name}</span>
