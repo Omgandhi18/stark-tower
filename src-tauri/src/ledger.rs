@@ -158,7 +158,7 @@ pub struct NewTask<'a> {
 pub struct Notification {
     pub id: i64,
     pub ts: i64,
-    /// approval | question | review | task_ready | task_blocked | check_failed | rule_used
+    /// approval | question | review | task_ready | task_blocked | check_failed | rule_used | auto_mode
     pub kind: String,
     /// needs_you | update
     pub urgency: String,
@@ -656,6 +656,8 @@ impl Ledger {
             )",
             [],
         )?;
+        // Auto mode: what would ask the developer first goes ahead in this conversation.
+        ensure_column(&conn, "conversations", "auto_mode", "INTEGER NOT NULL DEFAULT 0")?;
         // Migrate: add messages.conversation_id, then backfill one conversation
         // per agent for any pre-conversation transcript.
         let has_conv = conn
@@ -841,6 +843,20 @@ impl Ledger {
         let conn = self.conn.lock().unwrap();
         conn.query_row(&format!("SELECT {CONVERSATION_COLUMNS} FROM conversations c WHERE c.id = ?1"), [id], conversation_row)
             .ok()
+    }
+
+    /// Whether a conversation is in auto mode.
+    pub fn auto_mode(&self, conversation: i64) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row("SELECT auto_mode FROM conversations WHERE id = ?1", [conversation], |r| r.get::<_, bool>(0))
+            .unwrap_or(false)
+    }
+
+    /// Put a conversation in auto mode or take it out of it. False when there's no such conversation.
+    pub fn set_auto_mode(&self, conversation: i64, on: bool) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("UPDATE conversations SET auto_mode = ?2 WHERE id = ?1", rusqlite::params![conversation, on])
+            .is_ok_and(|n| n > 0)
     }
 
     /// All saved chats, most-recently-active first.

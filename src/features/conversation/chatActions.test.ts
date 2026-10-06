@@ -19,6 +19,7 @@ const question: ReviewRequest = {
   rule: null,
   tier: null,
   taskId: null,
+  conversationId: null,
   grant: null,
   project: null,
   created: 1,

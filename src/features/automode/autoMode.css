@@ -1,0 +1,43 @@
+/* Auto mode: what would ask the developer goes ahead in a conversation. */
+.auto-mode {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface-raised);
+}
+
+.auto-mode.is-on {
+  border-color: var(--state-attention);
+  background: var(--state-attention-soft);
+}
+
+.auto-mode-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.auto-mode-error {
+  margin: 0;
+  color: var(--state-danger);
+  font-size: var(--text-sm);
+}
+
+/* Under the message box: the chip, and its popover with the switch in it. */
+.composer-chip.is-auto,
+.composer-chip.is-auto:hover,
+.composer-chip.is-auto[aria-expanded="true"] {
+  color: var(--state-attention);
+}
+
+.chip-popover.auto-mode-popover {
+  width: 320px;
+}
+
+.auto-mode-popover .auto-mode {
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 0;
+}

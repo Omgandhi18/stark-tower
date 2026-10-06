@@ -1,6 +1,7 @@
 mod agents;
 mod attachments;
 mod automations;
+mod automode;
 mod breaker;
 mod bridge;
 mod browser;
@@ -1300,6 +1301,20 @@ fn review_respond(state: tauri::State<AppState>, id: String, decision: String) {
     }
 }
 
+/// Whether a conversation is in auto mode, where what would ask goes ahead.
+#[tauri::command]
+#[specta::specta]
+fn auto_mode(state: tauri::State<AppState>, conversation_id: i64) -> bool {
+    state.ledger.auto_mode(conversation_id)
+}
+
+/// Turn auto mode on or off for a conversation, and the work delegated from its task.
+#[tauri::command]
+#[specta::specta]
+fn set_auto_mode(app: tauri::AppHandle, conversation_id: i64, on: bool) -> Result<(), String> {
+    automode::set(&app, conversation_id, on)
+}
+
 #[tauri::command]
 #[specta::specta]
 fn spend_summary(state: tauri::State<AppState>) -> Result<spend::SpendSummary, String> {
@@ -2259,6 +2274,8 @@ fn specta_builder() -> tauri_specta::Builder {
             list_files,
             review_respond,
             pending_reviews,
+            auto_mode,
+            set_auto_mode,
             runtime_health,
             studio_available,
             studio_draw,

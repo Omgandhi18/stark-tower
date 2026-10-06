@@ -91,6 +91,11 @@
   color: var(--text-secondary);
 }
 
+.task-fact.is-auto-mode dd,
+.task-fact.is-auto-mode dd svg {
+  color: var(--state-attention);
+}
+
 /* ---- Body ---------------------------------------------------------------------- */
 .task-body {
   display: flex;
@@ -486,6 +491,10 @@ button.execution-button:hover {
   min-height: 0;
   padding: var(--space-4);
   overflow-y: auto;
+}
+
+.task-rail-auto-mode {
+  margin-bottom: var(--space-3);
 }
 
 .rail-changes {

@@ -37,6 +37,8 @@ pub struct ReviewRequest {
     pub tier: Option<String>,
     /// The task the agent is working on, if any.
     pub task_id: Option<String>,
+    /// The conversation it came from: the task's, else the agent's chat.
+    pub conversation_id: Option<i64>,
     /// For `command` and `permission`: what a rule from this request would allow
     /// ("`npm install` commands"); None when no rule can safely cover it.
     pub grant: Option<String>,
@@ -417,6 +419,7 @@ fn handle_review(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_js
         .and_then(|c| c.as_array())
         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
+    let task = crate::tasks::active_task_for(app, &agent_id);
     let rx = open_review(
         app,
         ReviewRequest {
@@ -430,7 +433,8 @@ fn handle_review(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_js
             cwd: app.state::<crate::AppState>().workdirs.lock().unwrap().get(&agent_id).cloned(),
             rule: None,
             tier: None,
-            task_id: crate::tasks::active_task_for(app, &agent_id),
+            conversation_id: crate::automode::conversation_for(app, &agent_id, task.as_deref()),
+            task_id: task,
             grant: None,
             project: None,
             created: now_ms(),
@@ -602,15 +606,40 @@ enum Choice {
     Deny,
     Once,
     Grant(crate::policy::Scope),
+    /// Auto mode came on while it waited.
+    Auto,
 }
+
+/// The decision a waiting request gets when auto mode comes on.
+const AUTO_MODE: &str = "Allow (auto mode)";
 
 fn choice_of(decision: &str) -> Choice {
     match decision {
         "Allow for task" => Choice::Grant(crate::policy::Scope::Task),
         "Allow in project" => Choice::Grant(crate::policy::Scope::Project),
         "Allow everywhere" => Choice::Grant(crate::policy::Scope::Everywhere),
+        AUTO_MODE => Choice::Auto,
         d if d.starts_with("Allow") => Choice::Once,
         _ => Choice::Deny,
+    }
+}
+
+/// Auto mode came on in these conversations: what's waiting there that it covers goes ahead.
+pub fn allow_waiting(app: &tauri::AppHandle, conversations: &[i64]) {
+    let state = app.state::<crate::AppState>();
+    let covered: Vec<String> = state
+        .pending_reviews
+        .lock()
+        .unwrap()
+        .values()
+        .filter(|r| r.tier.as_deref() == Some(crate::gate::Tier::Approval.as_str()))
+        .filter(|r| r.conversation_id.is_some_and(|c| conversations.contains(&c)))
+        .map(|r| r.id.clone())
+        .collect();
+    for id in covered {
+        if let Some(tx) = state.reviews.lock().unwrap().remove(&id) {
+            let _ = tx.send(AUTO_MODE.into());
+        }
     }
 }
 
@@ -677,6 +706,16 @@ pub fn decide(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_
         }
     }
 
+    // In auto mode what would ask goes ahead; what never runs on its own still asks.
+    let conversation = crate::automode::conversation_for(app, &agent_id, task.as_deref());
+    if crate::automode::allows(app, conversation, assessment.tier) {
+        let e = state.ledger.record(&agent_id, "permission", &format!("allowed by auto mode · {}", truncate(&subject, 46)), 1);
+        let _ = app.emit("ledger://entry", e);
+        crate::tasks::decision(app, &agent_id, &format!("{} (auto mode)", truncate(&subject, 80)), "Allow", Some(true));
+        crate::notify::auto_mode_used(app, &agent_id, task.as_deref(), &folder, assessment.rule.title(), &subject);
+        return match crate::claims::allowed(app, &agent_id, &tool, &input) { Ok(()) => Verdict::allow(), Err(reason) => Verdict { approved: false, reason } };
+    }
+
     let id = format!("rv-{}", REVIEW_SEQ.fetch_add(1, Ordering::Relaxed));
     let rx = open_review(
         app,
@@ -692,6 +731,7 @@ pub fn decide(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_
             rule: Some(assessment.rule.label().into()),
             tier: Some(assessment.tier.as_str().into()),
             task_id: task.clone(),
+            conversation_id: conversation,
             grant: key.as_ref().map(|k| k.display.clone()),
             project: Some(project.clone()),
             created: now_ms(),
@@ -711,6 +751,7 @@ pub fn decide(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_
         Choice::Deny if decision.is_empty() => "No longer needed".to_string(),
         Choice::Deny => "Denied".to_string(),
         Choice::Once => "Allowed once".to_string(),
+        Choice::Auto => "Allowed by auto mode".to_string(),
         Choice::Grant(scope) => {
             // The rule comes from this exact request, never from what the UI or agent sent.
             let (task_id, project_root) = match scope {
@@ -748,4 +789,20 @@ pub fn decide(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_
         if let Err(reason) = crate::claims::allowed(app, &agent_id, &tool, &input) { return Verdict { approved: false, reason }; }
     }
     Verdict { approved, reason }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_decision_reads_as_the_developer_meant_it() {
+        assert!(matches!(choice_of("Allow"), Choice::Once));
+        assert!(matches!(choice_of("Allow for task"), Choice::Grant(crate::policy::Scope::Task)));
+        assert!(matches!(choice_of("Allow in project"), Choice::Grant(crate::policy::Scope::Project)));
+        assert!(matches!(choice_of("Allow everywhere"), Choice::Grant(crate::policy::Scope::Everywhere)));
+        assert!(matches!(choice_of(AUTO_MODE), Choice::Auto));
+        assert!(matches!(choice_of("Deny"), Choice::Deny));
+        assert!(matches!(choice_of(""), Choice::Deny), "the agent went away");
+    }
 }

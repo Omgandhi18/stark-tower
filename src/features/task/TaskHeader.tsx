@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { ArrowLeft, CheckCheck, Clock, Folder, FolderOpen, MessageSquareText, Play, ShieldCheck, Square, SquareTerminal, X } from "lucide-react";
+import { ArrowLeft, CheckCheck, Clock, FastForward, Folder, FolderOpen, MessageSquareText, Play, ShieldCheck, Square, SquareTerminal, X } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { portraitKey, Button, IconButton, OverflowMenu, Portrait, StatusPill, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
+import { cx, portraitKey, Button, IconButton, OverflowMenu, Portrait, StatusPill, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
+import { AUTO_MODE_GOES_AHEAD, AUTO_MODE_STILL_ASKS, useAutoModeOf } from "../automode/autoMode";
 import { seeCodeReview, chatStop, closeTask, resumeTask, reviewTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { formatElapsed } from "../../lib/time";
@@ -18,6 +19,8 @@ import RemindMeButton from "../reminders/RemindMeButton";
 import type { StateTone } from "../../lib/status";
 
 const report = (what: string) => (e: unknown) => console.error(`[task] couldn't ${what}`, e);
+
+const ASK_FIRST = "Project work runs on its own; installs, branches and files outside the project need you; publishing never runs on its own.";
 
 interface TaskHeaderProps {
   detail: TaskDetail;
@@ -35,6 +38,7 @@ export default function TaskHeader({ detail, owner, requester, state, now }: Tas
   const navigate = useNavigation((s) => s.navigate);
   const openConversation = useNavigation((s) => s.openConversation);
   const { task } = detail;
+  const autoMode = useAutoModeOf(task.conversation_id) === true;
   const started = task.started ?? task.ts;
   const elapsed = formatElapsed((task.finished ?? now) - started);
   const name = owner?.name ?? task.assignee;
@@ -138,14 +142,15 @@ export default function TaskHeader({ detail, owner, requester, state, now }: Tas
           <dt>Asked by</dt>
           <dd>{requester}</dd>
         </div>
-        <div
-          className="task-fact"
-          title="Project work runs on its own; installs, branches and files outside the project need you; publishing never runs on its own."
-        >
+        <div className={cx("task-fact", autoMode && "is-auto-mode")} title={autoMode ? `${AUTO_MODE_GOES_AHEAD} ${AUTO_MODE_STILL_ASKS}` : ASK_FIRST}>
           <dt>Permissions</dt>
           <dd>
-            <ShieldCheck aria-hidden size={ICON_SIZE.sm} strokeWidth={ICON_STROKE} />
-            Default
+            {autoMode ? (
+              <FastForward aria-hidden size={ICON_SIZE.sm} strokeWidth={ICON_STROKE} />
+            ) : (
+              <ShieldCheck aria-hidden size={ICON_SIZE.sm} strokeWidth={ICON_STROKE} />
+            )}
+            {autoMode ? "Auto mode" : "Ask first"}
           </dd>
         </div>
       </dl>

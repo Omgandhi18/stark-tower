@@ -4,6 +4,7 @@ import { Button, InlineCode, TextArea } from "../../design";
 import { isPermissionRequest, type ReviewRequest } from "../../lib/types";
 import { choicesFor, decisionText } from "../attention/presentation";
 import GrantDialog from "./GrantDialog";
+import { grantDecision } from "./grantScope";
 
 interface DecisionBarProps {
   review: ReviewRequest;
@@ -53,7 +54,7 @@ export default function DecisionBar({ review, agentName, busy, onDecide, onOpenC
             onCancel={() => setGranting(false)}
             onConfirm={(scope) => {
               setGranting(false);
-              onDecide(scope === "project" ? "Allow in project" : "Allow everywhere");
+              onDecide(grantDecision(scope));
             }}
           />
         )}

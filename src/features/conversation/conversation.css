@@ -614,10 +614,12 @@
   white-space: nowrap;
 }
 
-/* The agent's model and effort, each opening its own picker. */
+/* The agent's model, effort and permissions, each opening its own picker. In a narrow
+   panel they shrink, shortening their text, so the send button stays in view. */
 .composer-chip {
   display: inline-flex;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   align-items: center;
   gap: 5px;
   max-width: 168px;
@@ -633,8 +635,19 @@
 }
 .composer-chip:hover { background: var(--surface-hover); color: var(--text); }
 .composer-chip[aria-expanded="true"] { border-color: var(--border); background: var(--surface-selected); color: var(--text); }
+.composer-chip > svg { flex: none; }
 .composer-chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .composer-chip-chevron { flex: none; color: var(--text-muted); }
+/* A side panel has room for each chip's icon only. Its words stay for screen readers, and its title says what it changes. */
+.chat-panel.is-compact .composer-chip { position: relative; }
+.chat-panel.is-compact .composer-chip-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
 
 .chip-popover.effort-popover { width: 300px; padding: 12px 14px 4px; }
 .chip-popover-note {

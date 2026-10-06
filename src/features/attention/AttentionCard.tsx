@@ -8,6 +8,8 @@ import { useAgents, selectAgent } from "../../stores/agents";
 import { useAttention } from "../../stores/attention";
 import { useNavigation } from "../../stores/navigation";
 import { folderName } from "../../stores/workspace";
+import GrantDialog from "../notifications/GrantDialog";
+import { grantDecision } from "../notifications/grantScope";
 import { excerpt, presentReview } from "./presentation";
 
 interface AttentionCardProps {
@@ -26,6 +28,7 @@ export default function AttentionCard({ review, now }: AttentionCardProps) {
   const focusReview = useNavigation((s) => s.focusReview);
   const openConversation = useNavigation((s) => s.openConversation);
   const [busy, setBusy] = useState(false);
+  const [granting, setGranting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const p = presentReview(review);
   const Icon = p.icon;
@@ -87,6 +90,11 @@ export default function AttentionCard({ review, now }: AttentionCardProps) {
             <Button variant="secondary" size="sm" disabled={busy} onClick={() => decide("Deny")}>
               Deny
             </Button>
+            {review.grant && (
+              <Button variant="secondary" size="sm" disabled={busy} onClick={() => setGranting(true)}>
+                Always allow…
+              </Button>
+            )}
             <Button variant="attention" size="sm" disabled={busy} onClick={() => decide("Allow")}>
               Allow once
             </Button>
@@ -101,6 +109,19 @@ export default function AttentionCard({ review, now }: AttentionCardProps) {
           </Button>
         )}
       </div>
+      {isPermissionRequest(review) && review.grant && (
+        <GrantDialog
+          open={granting}
+          review={review}
+          agentName={name}
+          scopes={review.taskId ? ["task", "project", "everywhere"] : undefined}
+          onCancel={() => setGranting(false)}
+          onConfirm={(scope) => {
+            setGranting(false);
+            void decide(grantDecision(scope));
+          }}
+        />
+      )}
     </article>
   );
 }

@@ -298,7 +298,7 @@ mod tests {
                     }
                 }
             }
-            for kind in ["rule_used", "unknown", ""] {
+            for kind in ["rule_used", "auto_mode", "unknown", ""] {
                 for front in [false, true] {
                     assert!(!settings.shows(kind, front));
                 }

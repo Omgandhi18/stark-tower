@@ -179,6 +179,14 @@ function install(scenario: Scenario) {
     emit("notifications://changed", null);
   };
 
+  // A decided review leaves the queue and settles its notification.
+  const settleReview = (id: string, outcome: string) => {
+    state.notifications = state.notifications.map((n) => (n.review_id === id && n.handled === null ? { ...n, handled: Date.now(), outcome, read: true } : n));
+    emit("notifications://changed", null);
+    state.reviews = state.reviews.filter((r) => r.id !== id);
+    emit("review://resolved", id);
+  };
+
   let nextTerminal = state.terminals.length;
   const terminalChannels = new Map<string, { callback: number; index: number }>();
   const terminalOutput = (id: string, text: string, exit_code: number | null = null) => {
@@ -1005,12 +1013,35 @@ function install(scenario: Scenario) {
         "Allow in project": "Always allowed in this project",
         "Allow everywhere": "Always allowed everywhere",
       };
-      state.notifications = state.notifications.map((n) =>
-        n.review_id === args.id && n.handled === null ? { ...n, handled: Date.now(), outcome: outcomes[decision] ?? decision.slice(0, 80), read: true } : n,
-      );
-      emit("notifications://changed", null);
-      state.reviews = state.reviews.filter((r) => r.id !== args.id);
-      emit("review://resolved", args.id);
+      settleReview(String(args.id), outcomes[decision] ?? decision.slice(0, 80));
+      return null;
+    },
+    auto_mode: (args) => (state.autoMode ?? []).includes(Number(args.conversationId)),
+    set_auto_mode: (args) => {
+      const id = Number(args.conversationId);
+      const on = Boolean(args.on);
+      // Work delegated from the conversation's task follows it.
+      const reached = [id];
+      const root = state.tasks.find((t) => t.conversation_id === id && !["closed", "reviewed"].includes(t.status));
+      const queue = root ? [root.id] : [];
+      while (queue.length) {
+        const parent = queue.shift();
+        for (const child of state.tasks.filter((t) => t.parent_id === parent)) {
+          if (child.conversation_id !== null) reached.push(child.conversation_id);
+          queue.push(child.id);
+        }
+      }
+      const inAutoMode = new Set(state.autoMode ?? []);
+      for (const conversationId of reached) {
+        if (on) inAutoMode.add(conversationId);
+        else inAutoMode.delete(conversationId);
+        emit("automode://changed", { conversationId, on });
+      }
+      state.autoMode = [...inAutoMode];
+      if (on) {
+        const covered = state.reviews.filter((r) => r.tier === "approval" && r.conversationId !== null && reached.includes(r.conversationId));
+        for (const review of covered) settleReview(review.id, "Allowed by auto mode");
+      }
       return null;
     },
     runtime_health: () => state.health,
