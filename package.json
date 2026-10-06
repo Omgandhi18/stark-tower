@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:app": "tauri build --bundles app",
     "assets:chroma": "node scripts/chroma-key.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
