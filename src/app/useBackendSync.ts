@@ -7,11 +7,17 @@ import {
   onSpendChanged,
   onCodeReviewsChanged,
   refreshCodeReviews,
+  onCaptureOpenTask,
+  onStudioChanged,
   getConfig,
   listAgents,
   onAgentStatus,
   onAutomationsChanged,
   browserPage,
+  browserNavigate,
+  devserverList,
+  onDevserverChanged,
+  onDevserverOutput,
   onBrowserChanged,
   onBrowserReveal,
   onSimulatorReveal,
@@ -34,12 +40,15 @@ import { errorMessage } from "../lib/errors";
 import { IS_TAURI } from "../lib/platform";
 import { useCodeReviews } from "../stores/codeReviews";
 import { useActivity } from "../stores/activity";
+import { useLooks } from "../stores/looks";
 import { useAgents } from "../stores/agents";
 import { useAttention } from "../stores/attention";
 import { useAutomations } from "../stores/automations";
+import { useDevServers } from "../stores/devservers";
 import { usePreview } from "../stores/preview";
 import { useReminders } from "../stores/reminders";
 import { useChats } from "../stores/chats";
+import { useNavigation } from "../stores/navigation";
 import { useConfig } from "../stores/config";
 import { useNotifications } from "../stores/notifications";
 import { useSystem } from "../stores/system";
@@ -93,6 +102,7 @@ export function useBackendSync() {
     const stopped = () => unmounted;
     const first = (what: string, load: () => Promise<unknown>) => void firstLoad(load, report(what), stopped);
 
+    first("custom looks", useLooks.getState().refresh);
     first("agents", () => listAgents().then(useAgents.getState().replace));
     void firstLoad(
       () => getConfig().then(useConfig.getState().apply),
@@ -110,6 +120,7 @@ export function useBackendSync() {
     first("notifications", useNotifications.getState().refresh);
     first("automations", useAutomations.getState().refresh);
     first("reminders", useReminders.getState().refresh);
+    first("dev servers", () => devserverList().then((servers) => servers.forEach(useDevServers.getState().apply)));
     first("browser", () => browserPage().then(usePreview.getState().applyPage));
     first("runtime health", system.refreshHealth);
     first("keep-awake state", system.refreshPower);
@@ -117,6 +128,8 @@ export function useBackendSync() {
 
     const subscriptions: Array<Promise<UnlistenFn>> = [
       onCodeReviewsChanged(useCodeReviews.getState().apply),
+      onCaptureOpenTask((id) => useNavigation.getState().openTask(id)),
+      onStudioChanged(() => useLooks.getState().refresh().catch(report("custom looks"))),
       onAgentStatus((e) => useAgents.getState().setStatus(e.agentId, e.status)),
       onConfigChanged((c) => {
         useConfig.getState().apply(c);
@@ -140,6 +153,14 @@ export function useBackendSync() {
       onNotificationsChanged(() => useNotifications.getState().refresh().catch(report("notifications"))),
       onAutomationsChanged(() => useAutomations.getState().refreshAll().catch(report("automations"))),
       onRemindersChanged(() => useReminders.getState().refresh().catch(report("reminders"))),
+      onDevserverChanged((server) => {
+        const previous = useDevServers.getState().servers[server.folder];
+        useDevServers.getState().apply(server);
+        if (server.status === "running" && server.address && (previous?.generation !== server.generation || previous?.address !== server.address || previous?.status !== "running")) {
+          if (server.open_page || !usePreview.getState().page.url) browserNavigate(server.address).catch(report("dev server page"));
+        }
+      }),
+      onDevserverOutput((output) => useDevServers.getState().append(output)),
       onBrowserChanged((page) => usePreview.getState().applyPage(page)),
       onBrowserReveal(() => usePreview.getState().show("browser")),
       onSimulatorReveal((udid) => {

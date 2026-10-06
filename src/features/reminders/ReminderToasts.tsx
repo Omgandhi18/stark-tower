@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
-import { Button, IconButton, Portrait, registerOverlay } from "../../design";
+import { portraitKey, Button, IconButton, Portrait, registerOverlay } from "../../design";
 import { completeReminder, onReminderDue, snoozeReminder } from "../../lib/api";
 import type { Reminder } from "../../lib/types";
 import { useAgents } from "../../stores/agents";
@@ -49,7 +49,7 @@ export default function ReminderToasts() {
         const name = agent?.name ?? r.agent_id;
         return (
           <div key={r.id} className="reminder-toast" role="alert">
-            <Portrait name={name} figure={agent?.figure} accent={agent?.accent} size={40} />
+            <Portrait name={name} figure={portraitKey(agent)} accent={agent?.accent} size={40} />
             <div className="reminder-toast-main">
               <span className="reminder-toast-who">{name} reminds you</span>
               <span className="reminder-toast-text">{r.text}</span>

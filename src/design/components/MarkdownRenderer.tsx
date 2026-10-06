@@ -1,10 +1,11 @@
-import { useRef, useState, type ComponentPropsWithoutRef } from "react";
+import { Fragment, useRef, useState, type ComponentPropsWithoutRef } from "react";
 import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Check, Copy } from "lucide-react";
+import { splitDetails } from "../markdownDetails";
 import { cx } from "../cx";
 import { IconButton } from "./Button";
 
@@ -60,13 +61,25 @@ interface MarkdownRendererProps {
   className?: string;
 }
 
-/** Agent-written markdown: GitHub flavour, highlighted code, safe links. */
+/** Agent-written markdown: GitHub flavour, highlighted code, safe links. Collapsed code (a pick's HTML) shows closed. */
 export default function MarkdownRenderer({ text, className }: MarkdownRendererProps) {
   return (
     <div className={cx("markdown selectable", className)}>
-      <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={REHYPE} components={COMPONENTS}>
-        {text}
-      </ReactMarkdown>
+      {splitDetails(text).map((part, index) => {
+        const content = (
+          <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={REHYPE} components={COMPONENTS}>
+            {part.text}
+          </ReactMarkdown>
+        );
+        return part.summary ? (
+          <details key={index}>
+            <summary>{part.summary}</summary>
+            {content}
+          </details>
+        ) : (
+          <Fragment key={index}>{content}</Fragment>
+        );
+      })}
     </div>
   );
 }

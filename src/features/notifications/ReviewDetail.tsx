@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { FolderOpen, Scale } from "lucide-react";
-import { InlineCode, Markdown, Portrait, cx, ICON_SIZE, ICON_STROKE } from "../../design";
+import { portraitKey, InlineCode, Markdown, Portrait, cx, ICON_SIZE, ICON_STROKE } from "../../design";
 import { errorMessage } from "../../lib/errors";
 import { formatRelative } from "../../lib/time";
 import { isPermissionRequest, type Agent, type ReviewRequest } from "../../lib/types";
@@ -47,7 +47,7 @@ export default function ReviewDetail({ review, agent, now }: ReviewDetailProps) 
           {p.label}
         </span>
         <span className="review-detail-who">
-          <Portrait name={name} figure={agent?.figure} accent={agent?.accent} size={24} status={agent?.status} />
+          <Portrait name={name} figure={portraitKey(agent)} accent={agent?.accent} size={24} status={agent?.status} />
           {name} {p.verb}
         </span>
         <time dateTime={new Date(review.created).toISOString()}>{formatRelative(review.created, now)}</time>

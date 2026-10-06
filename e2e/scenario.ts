@@ -9,6 +9,9 @@ import type {
   Automation,
   AutomationRun,
   BrowserPage,
+  Candidates,
+  Server,
+  Output,
   Bug,
   CheckRun,
   Conversation,
@@ -26,6 +29,8 @@ import type {
   ReviewRequest,
   RuntimeHealth,
   SimulatorStatus,
+  BrowserPick,
+  ExtraState,
   StoredMessage,
   DeliveryInfo,
   CodeReviews,
@@ -46,8 +51,15 @@ const ago = (minutes: number) => NOW - minutes * MINUTE;
 export interface Scenario {
   spend: SpendSummary;
   conversationSpend: Record<number, ConversationSpend>;
+  studio?: { available: boolean; looks: Record<string, import("../src/lib/bindings").Look>; failTheme?: string };
   /** How long after the page loads the backend starts answering (the launch race); by default at once. */
   backendReadyAfterMs?: number;
+  captureVisible?: boolean;
+  captureHeight?: number;
+  captureError?: string;
+  takenShortcuts?: string[];
+  commandErrors?: Record<string, string>;
+  openedCaptureTask?: string;
   config: AppConfig;
   worktrees: Worktree[];
   claims: FileClaim[];
@@ -94,6 +106,10 @@ export interface Scenario {
   /** The built-in browser's page. */
   browser: BrowserPage;
   terminals: Array<TerminalInfo & { output: number[]; offset: number; input: string }>;
+  browserPick: BrowserPick | null;
+  picking: boolean;
+  simulatorExtras: Record<string, ExtraState>;
+  devservers: { candidates: Record<string, Candidates>; servers: Record<string, Server>; output: Record<string, Output>; readyAddress: string | null };
   /** Xcode's simulators, and a screenshot standing in for every frame. */
   simulator: SimulatorStatus & { frame: string };
 }
@@ -168,6 +184,7 @@ const agent = (a: Omit<AgentConfig, "engine" | "model" | "enabled">): AgentConfi
 });
 
 const config: AppConfig = {
+  quick_capture: { enabled: true, shortcut: "Super+Shift+Space", last_agent: null, last_project: null, last_reminder_agent: null },
   version: 4,
   onboarded: true,
   standup_minutes: 0,
@@ -691,6 +708,10 @@ export function defaultScenario(): Scenario {
     reminders: reminders(),
     terminals: [],
     browser: { url: "", title: "", loading: false },
+    browserPick: null,
+    picking: false,
+    simulatorExtras: {},
+    devservers: { candidates: {}, servers: {}, output: {}, readyAddress: null },
     simulator: {
       available: true,
       problem: null,
@@ -972,4 +993,36 @@ export function codeReviewScenario(kind: "github" | "gitlab" = "github"): Scenar
   const url = kind === "github" ? "https://github.com/team/app/pull/128" : "https://gitlab.example.com/team/sub/app/-/merge_requests/45";
   scenario.codeReviews = { has_host:true, connections:[], items:[{ id:url, cwd:task.cwd, host_kind:kind, number:kind === "github" ? 128 : 45, title:"Fix the login redirect", url, branch:"fix/login", head:"abc123", reason:"failed", updated:"2026-10-06T10:00:00Z", failed_checks:["Tests"], agent_id:"friday", task_id:task.id }] };
   return scenario;
+}
+
+/** Dev commands only appear in scenarios that give the project a package file. */
+export function withDevCommands(s: Scenario): Scenario {
+  s.devservers.candidates[APP] = {
+    folder: APP,
+    options: [
+      { id: "package:dev", label: "dev", command: "npm run dev", cwd: APP, env: {}, port: null },
+      { id: "package:start", label: "start", command: "npm run start", cwd: APP, env: {}, port: null },
+    ],
+    selected: "package:start",
+    custom: "",
+  };
+  s.config.dev_servers = { [APP]: { selected: "package:start", custom: "" } };
+  return s;
+}
+
+/** A page element waiting for the developer's next pick. */
+export function withBrowserPick(s: Scenario): Scenario {
+  s.browser = {url:"http://localhost:5173/settings",title:"Settings",loading:false};
+  s.browserPick = {
+    selector:"#save",tag:"button",id:"save",classes:["primary"],role:"button",accessible_name:"Save changes",text:"Save changes",attributes:{type:"submit"},
+    styles:{"background-color":"rgb(20, 120, 110)",color:"rgb(255, 255, 255)","font-size":"14px","line-height":"20px","font-family":"Inter","font-weight":"600",padding:"8px 16px","border-radius":"8px"},
+    bounds:{x:840,y:412,width:120,height:32},url:s.browser.url,title:s.browser.title,viewport:{width:1280,height:800},device_pixel_ratio:2,outer_html:'<button id="save" class="primary">Save changes</button>',
+  };
+  return s;
+}
+
+/** A running device whose app was last launched through Starkline. */
+export function withSimulatorControls(s: Scenario): Scenario {
+  s.simulatorExtras["SIM-17PRO"] = {recording:null,saved:null,appearance:"light",last_bundle:"com.example.app",status_bar:false,logs:""};
+  return s;
 }

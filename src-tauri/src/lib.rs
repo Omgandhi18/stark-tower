@@ -8,7 +8,9 @@ mod chat;
 mod codex;
 mod config;
 mod context;
+mod capture;
 mod delegation;
+mod devserver;
 mod engine;
 mod floor;
 mod gate;
@@ -32,9 +34,13 @@ mod rpc;
 mod schedule;
 mod secrets;
 mod simulator;
+mod simulator_extras;
 #[cfg(target_os = "macos")]
 mod snapshot;
 mod spend;
+#[cfg(target_os = "macos")]
+mod capture_mac;
+mod studio;
 mod tasks;
 mod terminal;
 mod workspaces;
@@ -637,8 +643,8 @@ fn list_automation_runs(app: tauri::AppHandle, id: i64) -> Vec<ledger::Automatio
 /// made on the main thread, which this waits for.
 #[tauri::command]
 #[specta::specta]
-async fn browser_show(app: tauri::AppHandle, bounds: browser::Bounds) -> Result<(), String> {
-    browser::show(&app, bounds)
+async fn browser_show(app: tauri::AppHandle, bounds: browser::Bounds, zoom: Option<f64>) -> Result<(), String> {
+    browser::show(&app, bounds, zoom.unwrap_or(1.0))
 }
 
 /// Hide the built-in browser (its panel closed, or something is drawn over it).
@@ -667,6 +673,72 @@ async fn browser_go(app: tauri::AppHandle, action: String) -> Result<(), String>
 #[specta::specta]
 fn browser_page(app: tauri::AppHandle) -> browser::BrowserPage {
     browser::page(&app)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn devserver_candidates(app: tauri::AppHandle, folder: String) -> Result<devserver::Candidates, String> {
+    devserver::candidates(&app, &folder)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn devserver_select(app: tauri::AppHandle, folder: String, selected: String, custom: String) -> Result<devserver::Candidates, String> {
+    devserver::select(&app, &folder, &selected, &custom)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn devserver_start(app: tauri::AppHandle, folder: String, option: Option<String>, command: Option<String>) -> Result<devserver::Server, String> {
+    let candidate = devserver::resolve(&app, &folder, option.as_deref(), command.as_deref())?;
+    app.state::<devserver::DevServers>().start(Some(app.clone()), &folder, candidate, false)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn devserver_stop(app: tauri::AppHandle, folder: String) -> Result<devserver::Server, String> {
+    app.state::<devserver::DevServers>().stop(&folder)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn devserver_restart(app: tauri::AppHandle, folder: String) -> Result<devserver::Server, String> {
+    let manager = app.state::<devserver::DevServers>();
+    let option = manager.restart_option(&folder)?;
+    manager.start(Some(app.clone()), &folder, option, true)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn devserver_list(app: tauri::AppHandle) -> Vec<devserver::Server> {
+    app.state::<devserver::DevServers>().list()
+}
+
+#[tauri::command]
+#[specta::specta]
+fn devserver_logs(app: tauri::AppHandle, folder: String) -> Result<devserver::Output, String> {
+    app.state::<devserver::DevServers>().logs(&folder)
+}
+
+/// start | poll | cancel pointing at something on the page.
+#[tauri::command]
+#[specta::specta]
+async fn browser_picker(app: tauri::AppHandle, action: String) -> Result<browser::PickerResult, String> {
+    browser::picker(&app, &action)
+}
+
+/// What's at a point on the simulator panel's picture, in the picture's pixels.
+#[tauri::command]
+#[specta::specta]
+async fn simulator_point(udid: String, name: String, x: f64, y: f64, width: f64) -> Result<simulator::SimulatorPoint, String> {
+    simulator::point(&udid, &name, x, y, width)
+}
+
+/// The simulator panel's extra controls: recording, logs, appearance, location, push and the status bar.
+#[tauri::command]
+#[specta::specta]
+async fn simulator_extra(app: tauri::AppHandle, udid: String, action: String, args: simulator_extras::ExtraArgs) -> Result<simulator_extras::ExtraState, String> {
+    simulator_extras::control(&app, &udid, &action, &serde_json::to_value(args).map_err(|e| e.to_string())?)
 }
 
 /// The iOS simulators Xcode has, and whether taps can go through from here.
@@ -1157,6 +1229,170 @@ fn conversation_spend(state: tauri::State<AppState>, conversation_id: i64) -> Re
     state.ledger.conversation_spend(conversation_id)
 }
 
+#[tauri::command]
+#[specta::specta]
+async fn set_capture_shortcut(
+    app: tauri::AppHandle,
+    enabled: bool,
+    shortcut: String,
+) -> Result<AppConfig, String> {
+    capture::configure(&app, enabled, &shortcut)?;
+    let state = app.state::<AppState>();
+    {
+        let mut config = state.config.lock().unwrap();
+        config.quick_capture.enabled = enabled;
+        config.quick_capture.shortcut = shortcut;
+    }
+    lifecycle::update_capture_menu(&app);
+    Ok(commit_config(&app, &state))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn capture_error(app: tauri::AppHandle) -> Option<String> {
+    app.state::<capture::Runtime>()
+        .error
+        .lock()
+        .unwrap()
+        .clone()
+}
+
+#[tauri::command]
+#[specta::specta]
+fn hide_capture(app: tauri::AppHandle) -> Result<(), String> {
+    capture::hide(&app)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn resize_capture(app: tauri::AppHandle, height: f64) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("capture") {
+        window
+            .set_size(tauri::LogicalSize::new(640.0, height.clamp(200.0, 420.0)))
+            .map_err(|_| "Quick capture couldn't be resized.".to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+fn remember_capture(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    agent_id: String,
+    project: Option<String>,
+    reminder: bool,
+) -> AppConfig {
+    {
+        let mut config = state.config.lock().unwrap();
+        if reminder {
+            config.quick_capture.last_reminder_agent = Some(agent_id);
+        } else {
+            config.quick_capture.last_agent = Some(agent_id);
+            config.quick_capture.last_project = project;
+        }
+    }
+    commit_config(&app, &state)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn open_capture_task(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    id: String,
+) -> Result<(), String> {
+    if state.ledger.task(&id).is_none() {
+        return Err("That task couldn't be found. Open Work to see your tasks.".into());
+    }
+    lifecycle::show_main(&app);
+    app.emit_to("main", "capture://open-task", id)
+        .map_err(|_| "The task couldn't be opened. Open it from Work.".to_string())?;
+    capture::hide(&app)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn studio_available() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(studio::available)
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+#[specta::specta]
+fn studio_looks(studio: tauri::State<studio::Studio>) -> Vec<studio::Look> {
+    studio.list()
+}
+#[tauri::command]
+#[specta::specta]
+fn studio_job(studio: tauri::State<studio::Studio>, id: String) -> Result<studio::Look, String> {
+    studio.get(&id)
+}
+#[tauri::command]
+#[specta::specta]
+fn studio_draw(
+    app: tauri::AppHandle,
+    studio: tauri::State<studio::Studio>,
+    choices: studio::Choices,
+    id: Option<String>,
+    theme: Option<String>,
+) -> Result<studio::Look, String> {
+    studio.start(app, choices, id, theme)
+}
+#[tauri::command]
+#[specta::specta]
+fn studio_cancel(
+    state: tauri::State<AppState>,
+    studio: tauri::State<studio::Studio>,
+    id: String,
+) -> Result<(), String> {
+    if state
+        .config
+        .lock()
+        .unwrap()
+        .agents
+        .iter()
+        .any(|a| a.look.as_ref() == Some(&id))
+    {
+        return Ok(());
+    }
+    studio.remove(&id)
+}
+#[tauri::command]
+#[specta::specta]
+fn studio_apply(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    studio: tauri::State<studio::Studio>,
+    agent_id: String,
+    id: Option<String>,
+) -> Result<AppConfig, String> {
+    let mut cfg = state.config.lock().unwrap();
+    let agent = cfg
+        .agents
+        .iter_mut()
+        .find(|a| a.id == agent_id)
+        .ok_or("That agent is no longer in the roster.")?;
+    let look = id.as_deref().map(|id| studio.save(id)).transpose()?;
+    let old = agent.look.clone();
+    agent.look = id.clone();
+    if let Some(look) = look {
+        agent.figure = look.choices.figure;
+        if let Some(accent) = look.choices.options.get("personal accent") {
+            agent.accent = accent.clone();
+        }
+    }
+    let unused = old.filter(|old| {
+        Some(old) != id.as_ref() && !cfg.agents.iter().any(|a| a.look.as_ref() == Some(old))
+    });
+    drop(cfg);
+    if let Some(old) = unused {
+        studio.remove(&old)?;
+    }
+    let _ = app.emit("studio://changed", ());
+    Ok(commit_config(&app, &state))
+}
+
 // ---- configuration (engines + roster) --------------------------------------
 
 /// Persist config, refresh the derived roster, and notify the UI.
@@ -1186,6 +1422,7 @@ fn update_agent(
     state: tauri::State<AppState>,
     mut agent: AgentConfig,
 ) -> AppConfig {
+    let old_look = state.config.lock().unwrap().agent(&agent.id).and_then(|a| a.look.clone());
     // A new agent starts at its default tone; the dials always stay in range.
     agent.tone = Some(agent.tone.unwrap_or_else(|| tone::default_for(&agent.id)).clamped());
     // Turning an agent off ends its live session; its chats are kept.
@@ -1199,17 +1436,36 @@ fn update_agent(
             None => cfg.agents.push(agent),
         }
     }
+    cleanup_look(&app, &state, old_look);
     commit_config(&app, &state)
+}
+
+fn cleanup_look(app: &tauri::AppHandle, state: &AppState, old: Option<String>) {
+    if let Some(id) = old {
+        if !state
+            .config
+            .lock()
+            .unwrap()
+            .agents
+            .iter()
+            .any(|a| a.look.as_ref() == Some(&id))
+        {
+            let _ = app.state::<studio::Studio>().remove(&id);
+            let _ = app.emit("studio://changed", ());
+        }
+    }
 }
 
 #[tauri::command]
 #[specta::specta]
 fn remove_agent(app: tauri::AppHandle, state: tauri::State<AppState>, id: String) -> AppConfig {
+    let old_look = state.config.lock().unwrap().agent(&id).and_then(|a| a.look.clone());
     stop_by_developer(&app, &id);
     {
         let mut cfg = state.config.lock().unwrap();
         cfg.agents.retain(|a| a.id != id);
     }
+    cleanup_look(&app, &state, old_look);
     commit_config(&app, &state)
 }
 
@@ -1301,7 +1557,18 @@ fn set_standup_minutes(
 #[tauri::command]
 #[specta::specta]
 fn reset_config(app: tauri::AppHandle, state: tauri::State<AppState>) -> AppConfig {
-    *state.config.lock().unwrap() = config::default_config();
+    // The capture shortcut is the Mac's, not the team's, so a reset keeps it; custom looks go with their agents.
+    let looks: Vec<_> = {
+        let mut cfg = state.config.lock().unwrap();
+        let looks = cfg.agents.iter().filter_map(|a| a.look.clone()).collect();
+        let capture = cfg.quick_capture.clone();
+        *cfg = config::default_config();
+        cfg.quick_capture = capture;
+        looks
+    };
+    for look in looks {
+        cleanup_look(&app, &state, Some(look));
+    }
     commit_config(&app, &state)
 }
 
@@ -1808,6 +2075,9 @@ fn specta_builder() -> tauri_specta::Builder {
             permission_policy,
             provider_capabilities,
             provider_models,
+            browser_picker,
+            simulator_point,
+            simulator_extra,
             simulator_status,
             simulator_boot,
             simulator_shutdown,
@@ -1822,6 +2092,13 @@ fn specta_builder() -> tauri_specta::Builder {
             browser_navigate,
             browser_go,
             browser_page,
+            devserver_candidates,
+            devserver_select,
+            devserver_start,
+            devserver_stop,
+            devserver_restart,
+            devserver_list,
+            devserver_logs,
             list_reminders,
             save_reminder,
             complete_reminder,
@@ -1871,8 +2148,20 @@ fn specta_builder() -> tauri_specta::Builder {
             review_respond,
             pending_reviews,
             runtime_health,
+            studio_available,
+            studio_draw,
+            studio_looks,
+            studio_job,
+            studio_cancel,
+            studio_apply,
             power_state,
             set_keep_awake,
+            set_capture_shortcut,
+            capture_error,
+            hide_capture,
+            resize_capture,
+            remember_capture,
+            open_capture_task,
             get_config,
             update_agent,
             remove_agent,
@@ -1893,6 +2182,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -1955,7 +2245,9 @@ pub fn run() {
             let floor_dir = floor::init(&data_str, &agent_ids);
             floor::start_committer(floor_dir.clone());
 
+            app.manage(studio::Studio::new(data_dir.join("looks")));
             app.manage(browser::Browser::default());
+            app.manage(devserver::DevServers::default());
             app.manage(AppState {
                 pty: PtyManager::default(),
                 terminals: terminal::TerminalManager::default(),
@@ -1994,6 +2286,7 @@ pub fn run() {
             // Agents are given read access to the attachments folder, so it always exists.
             std::fs::create_dir_all(attachments::root(app.handle())).ok();
             // Only now is there anything for the page to talk to.
+            capture::start(app.handle());
             lifecycle::create_main(app)?;
             start_power_monitor(app.handle().clone());
 

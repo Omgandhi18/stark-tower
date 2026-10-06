@@ -183,3 +183,46 @@ test("reports claims the app refuses as errors", async () => {
     assert.match(result.content[0].text, /inside your workspace/);
   } finally { app.close(); }
 });
+
+for (const action of ["list", "start", "stop", "restart", "logs", "status"]) {
+  test(`dev_server forwards ${action} with the agent and relays the result`, async () => {
+    const app = await fakeApp(() => ({ result: "server result" }));
+    try {
+      const result = await callTool(app.sock, "dev_server", { action, command: "npm run dev", filter: "error" });
+      assert.equal(app.requests[0].type, "dev_server");
+      assert.equal(app.requests[0].agentId, "friday");
+      assert.equal(app.requests[0].action, action);
+      assert.equal(app.requests[0].command, "npm run dev");
+      assert.equal(app.requests[0].filter, "error");
+      assert.equal(result.content[0].text, "server result");
+    } finally { app.close(); }
+  });
+}
+
+test("dev_server relays a denied start as an error", async () => {
+  const app = await fakeApp(() => ({ error: "The developer declined this command." }));
+  try {
+    const result = await callTool(app.sock, "dev_server", { action: "start" });
+    assert.equal(app.requests[0].command, "");
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /declined/);
+  } finally { app.close(); }
+});
+
+for (const [action, args] of [
+  ["record_start", {}], ["record_stop", {}],
+  ["logs", { minutes: 3, predicate: 'subsystem == "app"', process: "My App" }],
+  ["appearance", { mode: "dark" }], ["location", { latitude: 51.5, longitude: -0.12 }],
+  ["location", { clear: true }], ["push", { bundle_id: "com.example.app", payload: '{"aps":{"alert":"Hello"}}' }],
+  ["status_bar", { enabled: true }],
+]) {
+  test(`simulator forwards ${action} and its arguments`, async () => {
+    const app = await fakeApp(() => ({ result: action === "record_stop" ? "/attachments/movie.mp4" : "Done" }));
+    try {
+      const result = await callTool(app.sock, "simulator", {action, device:"iPhone 17 Pro", ...args});
+      const wanted = {type:"simulator", agentId:"friday", token:TOKEN, action, device:"iPhone 17 Pro", ...args};
+      for (const [key, value] of Object.entries(wanted)) assert.deepEqual(app.requests[0][key], value);
+      assert.equal(result.content[0].text, action === "record_stop" ? "/attachments/movie.mp4" : "Done");
+    } finally { app.close(); }
+  });
+}

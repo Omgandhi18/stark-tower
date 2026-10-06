@@ -12,7 +12,7 @@ export { EmptyState, Kbd, SkeletonRows } from "./components/EmptyState";
 export { OverflowMenu, type MenuItem } from "./components/Menu";
 export { Popover, type PopoverTriggerProps } from "./components/Popover";
 export { Portrait, type PortraitSize } from "./components/Portrait";
-export { PortraitOutfits, portraitUrl } from "./portraits";
+export { PortraitOutfits, portraitUrl, portraitKey } from "./portraits";
 export { Markdown } from "./components/Markdown";
 export { KeepAlive } from "./components/KeepAlive";
 export { Dialog } from "./components/Dialog";

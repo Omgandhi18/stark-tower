@@ -1,9 +1,18 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { ArrowLeft, ArrowRight, ExternalLink, Globe, RotateCw, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, Globe, MousePointerClick, RotateCw, X } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { EmptyState, IconButton, covered, cx, onOverlaysChanged } from "../../design";
-import { browserGo, browserHide, browserNavigate, browserShow } from "../../lib/api";
+import { EmptyState, IconButton, SelectField, covered, cx, onOverlaysChanged } from "../../design";
+import { browserGo, browserPicker, browserHide, browserNavigate, browserShow } from "../../lib/api";
+import { selectQuestionFor, useAttention } from "../../stores/attention";
 import { errorMessage } from "../../lib/errors";
+import { useNavigation } from "../../stores/navigation";
+import { useChats } from "../../stores/chats";
+import { useWorkspace } from "../../stores/workspace";
+import { addPoint } from "./pointComposer";
+import { browserPointText } from "./pointModel";
+import DevServerToolbar from "./DevServerToolbar";
+import DevServerOutput from "./DevServerOutput";
+import { BROWSER_SIZES, fitBrowser, type BrowserSize } from "./browserModel";
 import { usePreview } from "../../stores/preview";
 
 /** How often the browser checks it's still over its panel (things move without resizing it). */
@@ -17,10 +26,40 @@ const report = (what: string) => (e: unknown) => console.error(`[browser] couldn
  */
 export default function BrowserView({ active }: { active: boolean }) {
   const page = usePreview((s) => s.page);
+  const size = usePreview((s) => s.size);
+  const setSize = usePreview((s) => s.setSize);
+  const agentId = useNavigation((s) => s.agentId);
+  const conversationId = useChats(s => agentId ? s.threads[agentId]?.conversationId ?? null : null);
+  const chatFolder = useChats((s) => agentId ? s.threads[agentId]?.folder : "");
+  const project = useWorkspace((s) => s.activeProject);
+  const folder = chatFolder || project;
+  const question = useAttention(selectQuestionFor(agentId ?? ""));
+  const [picking, setPicking] = useState(false);
+  const [outputOpen, setOutputOpen] = useState(false);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [panel, setPanel] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  const fitted = fitBrowser(panel, size);
   const viewportRef = useRef<HTMLDivElement>(null);
   const [typed, setTyped] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const hasPage = page.url !== "";
+
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    let frame = 0;
+    const measure = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const r = el.getBoundingClientRect();
+        setPanel((old) => old.width === r.width && old.height === r.height ? old : { x: 0, y: 0, width: r.width, height: r.height });
+      });
+    };
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(el);
+    measure();
+    return () => { observer?.disconnect(); window.cancelAnimationFrame(frame); };
+  }, []);
 
   useEffect(() => {
     const el = viewportRef.current;
@@ -36,7 +75,7 @@ export default function BrowserView({ active }: { active: boolean }) {
       if (key === last) return;
       last = key;
       if (away) browserHide().catch(report("hide"));
-      else browserShow({ x: r.left, y: r.top, width: r.width, height: r.height }).catch(report("show"));
+      else browserShow({ x: r.left, y: r.top, width: r.width, height: r.height }, fitted.zoom).catch(report("show"));
     };
     sync();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(sync);
@@ -51,7 +90,38 @@ export default function BrowserView({ active }: { active: boolean }) {
       window.removeEventListener("resize", sync);
       browserHide().catch(report("hide"));
     };
-  }, [active, hasPage]);
+  }, [active, hasPage, fitted.zoom, size]);
+
+  useEffect(() => useChats.subscribe((next, previous) => {
+    if (agentId && next.threads[agentId]?.conversationId !== previous.threads[agentId]?.conversationId) setPicking(false);
+  }), [agentId]);
+
+  useEffect(() => useAttention.subscribe(state => {
+    if (agentId && selectQuestionFor(agentId)(state)) setPicking(false);
+  }), [agentId]);
+
+  useEffect(() => useNavigation.subscribe((next, previous) => {
+    if (next.agentId !== previous.agentId || next.route !== "conversation") setPicking(false);
+  }), []);
+
+  useEffect(() => {
+    if (!picking || !active || !agentId) return;
+    let live = true;
+    let timer = 0;
+    const poll = async () => {
+      try {
+        const result = await browserPicker("poll");
+        if (result.pick) addPoint(agentId, browserPointText(result.pick), result.attachment, conversationId);
+        if (!live) return;
+        if (!result.active) { setPicking(false); return; }
+        timer = window.setTimeout(poll, 150);
+      } catch (e) { if (live) { setError(errorMessage(e, "The element couldn't be picked. Try again.")); setPicking(false); } }
+    };
+    browserPicker("start").then(() => { if (live) void poll(); }).catch(e => { if (live) { setError(errorMessage(e, "The picker couldn't start.")); setPicking(false); } });
+    const escape = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") setPicking(false); };
+    window.addEventListener("keydown", escape);
+    return () => { live = false; window.clearTimeout(timer); window.removeEventListener("keydown", escape); browserPicker("cancel").catch(report("cancel picking")); };
+  }, [picking, active, agentId, conversationId]);
 
   const open = (address: string) => {
     setError(null);
@@ -90,24 +160,33 @@ export default function BrowserView({ active }: { active: boolean }) {
           onFocus={(e) => e.currentTarget.select()}
           onKeyDown={onKeyDown}
         />
+        <IconButton icon={MousePointerClick} label="Point at something" size="sm" aria-pressed={picking} disabled={!hasPage || !agentId || Boolean(question)} title={question ? "Answer the agent’s question first, then point at the page." : undefined} onClick={() => { setError(null); setPicking(on => !on); }} />
         <IconButton icon={ExternalLink} label="Open in your browser" size="sm" disabled={!hasPage} onClick={() => openUrl(page.url).catch(report("open the page outside"))} />
         <span className={cx("browser-progress", page.loading && "is-loading")} aria-hidden />
+      </div>
+      <DevServerToolbar key={`command:${folder}`} folder={folder} outputOpen={outputOpen} toggleOutput={() => setOutputOpen((open) => !open)} />
+      <div className="browser-toolbar browser-size-toolbar">
+        <SelectField label="Browser size" hideLabel value={size} options={BROWSER_SIZES} onChange={(value) => setSize(value as BrowserSize)} />
+        {fitted.label && <span className="browser-size-label">{fitted.label}</span>}
       </div>
       {error && (
         <p className="field-error browser-error" role="alert">
           {error}
         </p>
       )}
-      <div ref={viewportRef} className="browser-viewport" aria-label={page.title || page.url || "Browser"} role="region">
-        {!hasPage && (
-          <EmptyState
-            compact
-            icon={Globe}
-            title="Open a page"
-            body="Type an address above, or ask an agent to open your app: “open localhost:5173 in the browser and check the settings page.”"
-          />
-        )}
+      <div ref={stageRef} className="browser-stage">
+        <div ref={viewportRef} style={size === "fit" ? undefined : { width: fitted.bounds.width, height: fitted.bounds.height }} className={cx("browser-viewport", size !== "fit" && "is-device")} aria-label={page.title || page.url || "Browser"} role="region">
+          {!hasPage && (
+            <EmptyState
+              compact
+              icon={Globe}
+              title="Open a page"
+              body="Type an address above, or ask an agent to open your app: “open localhost:5173 in the browser and check the settings page.”"
+            />
+          )}
+        </div>
       </div>
+      {outputOpen && <DevServerOutput key={`output:${folder}`} folder={folder} />}
     </div>
   );
 }

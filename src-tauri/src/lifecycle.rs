@@ -17,6 +17,8 @@ const TRAY_ID: &str = "starkline";
 
 /// Set once the developer chose to quit, so closing and exiting go through.
 static QUITTING: AtomicBool = AtomicBool::new(false);
+/// The menu bar's shortcut label follows the setting.
+static CAPTURE_ITEM: OnceLock<MenuItem<tauri::Wry>> = OnceLock::new();
 /// The menu bar item's status line, updated as agents start and stop.
 static STATUS_ITEM: OnceLock<MenuItem<tauri::Wry>> = OnceLock::new();
 
@@ -92,14 +94,18 @@ pub fn quit(app: &tauri::AppHandle) {
 pub fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let status = MenuItem::with_id(app, "status", status_line(0), false, None::<&str>)?;
     let open = MenuItem::with_id(app, "open", "Open Starkline", true, None::<&str>)?;
+    let capture = MenuItem::with_id(app, "capture", capture_menu_text(app), true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit Starkline", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&status, &PredefinedMenuItem::separator(app)?, &open, &quit_item])?;
+    let menu = Menu::with_items(app, &[&status, &PredefinedMenuItem::separator(app)?, &open, &capture, &quit_item])?;
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("Starkline")
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_main(app),
+            "capture" => {
+                let _ = crate::capture::toggle(app);
+            }
             "quit" => request_quit(app),
             _ => {}
         });
@@ -111,11 +117,30 @@ pub fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     }
     tray.build(app)?;
     let _ = STATUS_ITEM.set(status);
+    let _ = CAPTURE_ITEM.set(capture);
     Ok(())
+}
+
+fn capture_menu_text(app: &tauri::AppHandle) -> String {
+    let state = app.state::<crate::AppState>();
+    let config = state.config.lock().unwrap();
+    let capture = &config.quick_capture;
+    if capture.enabled && !capture.shortcut.is_empty() {
+        format!("Quick capture…    {}", crate::capture::display(&capture.shortcut))
+    } else {
+        "Quick capture…".into()
+    }
+}
+
+pub fn update_capture_menu(app: &tauri::AppHandle) {
+    if let Some(item) = CAPTURE_ITEM.get() {
+        let _ = item.set_text(capture_menu_text(app));
+    }
 }
 
 /// Closing the window hides it; agents keep working.
 pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    crate::capture::on_window_event(window, event);
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
         if window.label() == MAIN_WINDOW && !QUITTING.load(Ordering::SeqCst) {
             api.prevent_close();
@@ -134,6 +159,10 @@ pub fn on_run_event(app: &tauri::AppHandle, event: &tauri::RunEvent) {
                 show_main(app);
                 let _ = app.emit("app://quit-requested", busy_agents(app));
             } else {
+                if let Some(servers) = app.try_state::<crate::devserver::DevServers>() {
+                    servers.kill_all();
+                }
+                crate::simulator_extras::cleanup();
                 crate::chat::kill_all(app);
                 crate::pty::kill_all(app);
                 app.state::<crate::AppState>().terminals.kill_all();

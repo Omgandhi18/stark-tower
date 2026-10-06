@@ -112,6 +112,8 @@ pub struct AgentConfig {
     /// Sprite silhouette / pack ref ("masc" | "fem" | "synth" | custom id).
     #[serde(default)]
     pub figure: String,
+    #[serde(default)]
+    pub look: Option<String>,
     /// Engine id this agent runs on (must match an EngineConfig.id).
     #[serde(default = "default_engine_id")]
     pub engine: String,
@@ -153,6 +155,7 @@ impl AgentConfig {
             engine: self.engine.clone(),
             accent: self.accent.clone(),
             figure: self.figure.clone(),
+            look: self.look.clone(),
             home_x: self.home_x,
             home_y: self.home_y,
             status: AgentStatus::Offline,
@@ -209,6 +212,9 @@ pub struct AppConfig {
     pub worktrees_enabled: bool,
     #[serde(default)]
     pub worktree_setup: BTreeMap<String, crate::workspaces::WorktreeSetup>,
+    /// The global capture shortcut and the choices used in its small window.
+    #[serde(default)]
+    pub quick_capture: crate::capture::CaptureConfig,
     /// How Starkline looks: one of [`THEMES`]. Tasks, permissions and providers don't change with it.
     #[serde(default = "default_theme")]
     pub theme: String,
@@ -216,6 +222,9 @@ pub struct AppConfig {
     /// theme ("own"), or one theme's outfits (one of [`THEMES`]).
     #[serde(default = "default_outfits")]
     pub outfits: String,
+    /// The chosen dev command and custom command, per project folder.
+    #[serde(default)]
+    pub dev_servers: std::collections::HashMap<String, crate::devserver::Choice>,
     pub engines: Vec<EngineConfig>,
     pub agents: Vec<AgentConfig>,
 }
@@ -401,6 +410,7 @@ pub fn default_agents() -> Vec<AgentConfig> {
             kind: a.kind,
             accent: a.accent,
             figure: a.figure,
+            look: a.look,
             engine: a.engine,
             home_x: a.home_x,
             home_y: a.home_y,
@@ -426,8 +436,10 @@ pub fn default_config() -> AppConfig {
         worktree_setup: BTreeMap::new(),
         standup_minutes: 0,
         keep_awake: false,
+        quick_capture: crate::capture::CaptureConfig::default(),
         theme: default_theme(),
         outfits: default_outfits(),
+        dev_servers: std::collections::HashMap::new(),
         engines: default_engines(),
         agents: default_agents(),
     }

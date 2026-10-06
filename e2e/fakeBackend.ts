@@ -47,6 +47,7 @@ function install(scenario: Scenario) {
   const kindOf = (name: string): { kind: string; mime: string } => {
     const ext = name.split(".").pop()?.toLowerCase() ?? "";
     if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) return { kind: "image", mime: `image/${ext === "jpg" ? "jpeg" : ext}` };
+    if (ext === "mp4") return { kind: "video", mime: "video/mp4" };
     if (ext === "md") return { kind: "markdown", mime: "text/markdown" };
     if (ext === "html") return { kind: "html", mime: "text/html" };
     if (ext === "pdf") return { kind: "pdf", mime: "application/pdf" };
@@ -66,6 +67,22 @@ function install(scenario: Scenario) {
   };
 
   const emit = (event: string, payload: unknown) => {
+    if (event === "simulator://logs") {
+      const log = payload as {udid:string;text:string};
+      if (state.simulatorExtras[log.udid]) state.simulatorExtras[log.udid].logs = log.text;
+    }
+    if (event === "devserver://changed") {
+      const server = payload as Scenario["devservers"]["servers"][string];
+      state.devservers.servers[server.folder] = server;
+    }
+    if (event === "devserver://output") {
+      const batch = payload as Scenario["devservers"]["output"][string];
+      const previous = state.devservers.output[batch.folder];
+      if (!previous || batch.generation > previous.generation) state.devservers.output[batch.folder] = batch;
+      else if (batch.generation === previous.generation && batch.cursor > previous.cursor) {
+        state.devservers.output[batch.folder] = { ...batch, lines: [...previous.lines, ...batch.lines.slice(-Math.min(batch.lines.length, batch.cursor - previous.cursor))].slice(-2000) };
+      }
+    }
     for (const id of listeners.get(event) ?? []) callbacks.get(id)?.({ event, id, payload });
   };
 
@@ -80,6 +97,7 @@ function install(scenario: Scenario) {
         engine: a.engine ?? "",
         accent: a.accent ?? "",
         figure: a.figure ?? "",
+        look: a.look ?? null,
         home_x: a.home_x,
         home_y: a.home_y,
         status: state.statuses[a.id] ?? "offline",
@@ -173,7 +191,82 @@ function install(scenario: Scenario) {
     if (channel) callbacks.get(channel.callback)?.({ index: channel.index++, message: { data, offset: terminal.offset, exit_code } });
   };
 
+  const devCandidates = (folder: string) => {
+    const choices = state.devservers.candidates[folder] ?? { options: [], selected: "", custom: "" };
+    const remembered = state.config.dev_servers?.[folder];
+    const custom = remembered?.custom ?? choices.custom;
+    const options = choices.options.filter((o) => o.id !== "custom");
+    if (custom.trim()) options.push({ id: "custom", label: "Custom command", command: custom, cwd: folder, env: {}, port: null });
+    const selected = remembered?.selected ?? choices.selected;
+    return { folder, options, custom, selected: options.some((o) => o.id === selected) ? selected : options[0]?.id ?? "" };
+  };
+  const devStart = (args: Json, restart = false) => {
+    const folder = String(args.folder);
+    const previous = state.devservers.servers[folder];
+    if (!restart && previous && ["starting", "running"].includes(previous.status)) throw "A dev server is already running for this project.";
+    if (restart && !previous) throw "This project hasn't run a dev server yet.";
+    const choices = devCandidates(folder);
+    const command = restart ? previous.command : String(args.command || choices.options.find((o) => o.id === (args.option ?? choices.selected))?.command || "");
+    if (!command) throw "No dev command was found. Choose a custom command in the browser's Run menu.";
+    const server: Scenario["devservers"]["servers"][string] = { folder, command, status: "starting", address: null, exit_code: null, generation: (previous?.generation ?? 0) + 1, open_page: true };
+    state.devservers.servers[folder] = server;
+    state.devservers.output[folder] = { folder, generation: server.generation, cursor: 0, lines: [] };
+    emit("devserver://changed", server);
+    if (state.devservers.readyAddress) window.setTimeout(() => {
+      const current = state.devservers.servers[folder];
+      if (current.generation === server.generation && current.status === "starting") emit("devserver://changed", { ...server, status: "running", address: state.devservers.readyAddress });
+    }, REPLY_DELAY_MS);
+    return server;
+  };
+
+  const studio = state.studio ??= { available: true, looks: {} };
+  let nextLook = 1;
+  const cancelledLooks = new Set<string>();
   const commands: Record<string, (args: Json) => unknown> = {
+    studio_available: () => {
+      if (!studio.available) throw "Starkline asks Codex to draw new looks, with your own Codex sign-in. Install Codex, then run `codex login` in Terminal.";
+      return null;
+    },
+    studio_looks: () => Object.values(studio.looks).filter((look) => look.saved),
+    studio_job: (args) => studio.looks[String(args.id)],
+    studio_draw: (args) => {
+      if (!studio.available) throw "Install Codex, then run codex login in Terminal.";
+      const id = args.id ? String(args.id) : `look-fake-${nextLook++}`;
+      const look = studio.looks[id] ??= { id, choices: args.choices as import("../src/lib/bindings").Choices, paths: {}, progress: {}, errors: {}, revision: 0, saved: false };
+      look.revision++;
+      const themes = args.theme ? [String(args.theme)] : ["own", "studio-office", "mori-cafe"];
+      for (const theme of themes) {
+        delete look.errors[theme];
+        look.progress[theme] = "queued";
+        window.setTimeout(() => {
+          if (cancelledLooks.has(id)) return;
+          look.progress[theme] = "drawing"; emit("studio://progress", look);
+        }, 50);
+        window.setTimeout(() => {
+          if (cancelledLooks.has(id)) return;
+          if (studio.failTheme === theme) { look.progress[theme] = "failed"; look.errors[theme] = "Codex couldn't draw this look. Try again.\nImage service is busy."; }
+          else { look.progress[theme] = "ready"; look.paths[theme] = theme === "own" ? "/src/assets/portraits/helperbot.png" : `/src/assets/themes/${theme}/portraits/helperbot.png`; }
+          emit("studio://progress", look);
+        }, 400);
+      }
+      return look;
+    },
+    studio_cancel: (args) => { const id = String(args.id); if (!state.config.agents.some((a) => a.look === id)) { cancelledLooks.add(id); delete studio.looks[id]; } return null; },
+    studio_apply: (args) => {
+      const agent = state.config.agents.find((a) => a.id === args.agentId);
+      if (!agent) throw "That agent is no longer in the roster.";
+      const old = agent.look;
+      const id = args.id ? String(args.id) : null;
+      if (id) {
+        const look = studio.looks[id];
+        if (!look || ["own", "studio-office", "mori-cafe"].some((t) => look.progress[t] !== "ready")) throw "Wait for all three looks to finish before using them.";
+        look.saved = true; agent.figure = look.choices.figure;
+        agent.accent = look.choices.options["personal accent"] ?? agent.accent;
+      }
+      agent.look = id;
+      if (old && old !== id && !state.config.agents.some((a) => a.look === old)) delete studio.looks[old];
+      emit("studio://changed", null); return commitConfig();
+    },
     "plugin:event|listen": (args) => {
       const event = String(args.event);
       const set = listeners.get(event) ?? new Set<number>();
@@ -229,6 +322,36 @@ function install(scenario: Scenario) {
     terminal_resize: () => null,
     terminal_title: (args) => { const terminal = state.terminals.find((t) => t.id === args.id); if (terminal) terminal.title = String(args.title); return null; },
     terminal_close: (args) => { state.terminals = state.terminals.filter((t) => t.id !== args.id); terminalChannels.delete(String(args.id)); return null; },
+    set_capture_shortcut: (args) => {
+      const shortcut = String(args.shortcut);
+      if (args.enabled && state.takenShortcuts?.includes(shortcut)) {
+        const keys = shortcut.split("+");
+        const symbols: Record<string, string> = { Control: "⌃", Alt: "⌥", Shift: "⇧", Super: "⌘" };
+        const label = ["Control", "Alt", "Shift", "Super"].filter((key) => keys.includes(key)).map((key) => symbols[key]).join("") + keys.at(-1)?.replace(/^(Key|Digit)/, "");
+        throw `${label} is taken by another app. Pick another shortcut.`;
+      }
+      state.config.quick_capture.enabled = Boolean(args.enabled);
+      state.config.quick_capture.shortcut = shortcut;
+      state.captureError = undefined;
+      return commitConfig();
+    },
+    capture_error: () => state.captureError ?? null,
+    hide_capture: () => { state.captureVisible = false; },
+    resize_capture: (args) => { state.captureHeight = Math.max(200, Math.min(420, Number(args.height))); },
+    remember_capture: (args) => {
+      if (args.reminder) state.config.quick_capture.last_reminder_agent = String(args.agentId);
+      else {
+        state.config.quick_capture.last_agent = String(args.agentId);
+        state.config.quick_capture.last_project = args.project as string | null;
+      }
+      return commitConfig();
+    },
+    open_capture_task: (args) => {
+      if (!state.tasks.some((task) => task.id === args.id)) throw "That task couldn't be found. Open Work to see your tasks.";
+      state.openedCaptureTask = String(args.id);
+      state.captureVisible = false;
+      emit("capture://open-task", args.id);
+    },
     list_agents: () => roster(),
     active_context: (args) => {
       const agentId = String(args.agentId);
@@ -511,6 +634,63 @@ function install(scenario: Scenario) {
       emit("rules://changed", null);
       return true;
     },
+    devserver_candidates: (args) => devCandidates(String(args.folder)),
+    devserver_select: (args) => {
+      const folder = String(args.folder);
+      state.config.dev_servers ??= {};
+      const previous = state.config.dev_servers[folder];
+      state.config.dev_servers[folder] = { selected: String(args.selected), custom: String(args.custom).trim() };
+      const choices = devCandidates(folder);
+      if (!choices.options.some((o) => o.id === args.selected)) {
+        if (previous) state.config.dev_servers[folder] = previous;
+        else delete state.config.dev_servers[folder];
+        throw "Choose a command, or enter a custom command first.";
+      }
+      emit("config://changed", state.config);
+      return choices;
+    },
+    devserver_start: (args) => devStart(args),
+    devserver_restart: (args) => devStart(args, true),
+    devserver_stop: (args) => {
+      const server = state.devservers.servers[String(args.folder)];
+      if (!server) throw "This project hasn't run a dev server yet.";
+      const stopped = { ...server, status: "stopped" as const, exit_code: 0 };
+      emit("devserver://changed", stopped);
+      return stopped;
+    },
+    devserver_list: () => Object.values(state.devservers.servers),
+    devserver_logs: (args) => state.devservers.output[String(args.folder)] ?? { folder: String(args.folder), generation: 0, cursor: 0, lines: [] },
+    browser_picker: (args) => {
+      if (args.action === "start") { state.picking = true; return {active:true,pick:null,attachment:null}; }
+      if (args.action === "cancel") { state.picking = false; return {active:false,pick:null,attachment:null}; }
+      const pick = state.picking ? state.browserPick : null;
+      if (pick) { state.picking = false; state.browserPick = null; }
+      return {active:state.picking,pick,attachment:pick ? keep("browser-point.jpg") : null};
+    },
+    simulator_point: (args) => ({device:args.name,x:Number(args.x)/2,y:Number(args.y)/2,element:state.simulator.touch ? {role:"Button",label:"Sign in",value:"",frame:{x:20,y:620,width:350,height:50}} : null}),
+    simulator_extra: (args) => {
+      const udid = String(args.udid), action = String(args.action), input = args.args as Json;
+      const extra = state.simulatorExtras[udid] ??= {recording:null,saved:null,appearance:"light",last_bundle:"",status_bar:false,logs:""};
+      if (!["state","record_stop","logs_stop","logs_clear"].includes(action) && !state.simulator.devices.some(d => d.udid === udid && d.booted)) throw "Boot this simulator first.";
+      if (action === "record_start") {
+        if (extra.recording) throw "This simulator is already recording.";
+        extra.recording = {path:"/fake/attachments/simulator-recording.mp4",started:Date.now()};
+      }
+      if (action === "record_stop") {
+        if (!extra.recording) throw "This simulator isn't recording.";
+        extra.recording = null;
+        extra.saved = keep("simulator-recording.mp4");
+      }
+      if (action === "appearance") extra.appearance = String(input.mode);
+      if (action === "status_bar") extra.status_bar = Boolean(input.enabled);
+      if (action === "push") JSON.parse(String(input.payload));
+      if (action === "logs_start") {
+        extra.logs = "MyApp settings: screen opened\nnetwork subsystem: request completed\n";
+        setTimeout(() => emit("simulator://logs",{udid,text:extra.logs}),30);
+      }
+      if (action === "logs_clear") extra.logs = "";
+      return extra;
+    },
     browser_page: () => state.browser,
     browser_show: () => null,
     browser_hide: () => null,
@@ -790,12 +970,16 @@ function install(scenario: Scenario) {
       const next = args.agent as Scenario["config"]["agents"][number];
       next.tone ??= usualTone(next.id);
       const index = state.config.agents.findIndex((a) => a.id === next.id);
+      const old = state.config.agents[index]?.look;
       if (index >= 0) state.config.agents[index] = next;
       else state.config.agents.push(next);
+      if (old && !state.config.agents.some((a) => a.look === old)) { delete studio.looks[old]; emit("studio://changed", null); }
       return commitConfig();
     },
     remove_agent: (args) => {
+      const old = state.config.agents.find((a) => a.id === args.id)?.look;
       state.config.agents = state.config.agents.filter((a) => a.id !== args.id);
+      if (old && !state.config.agents.some((a) => a.look === old)) { delete studio.looks[old]; emit("studio://changed", null); }
       return commitConfig();
     },
     update_engine: (args) => {
@@ -870,6 +1054,7 @@ function install(scenario: Scenario) {
         if (!cmd.startsWith("plugin:") && performance.now() < readyAt) {
           throw `state not managed for field \`state\` on command \`${cmd}\`. You must call \`.manage()\` before using this command`;
         }
+        if (state.commandErrors?.[cmd]) throw state.commandErrors[cmd];
         const handler = commands[cmd];
         if (!handler) {
           console.warn(`[fake backend] unhandled command ${cmd}`);

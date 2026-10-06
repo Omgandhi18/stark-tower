@@ -324,6 +324,39 @@ async providerModels(engineId: string) : Promise<Result<ModelChoice[], string>> 
 }
 },
 /**
+ * start | poll | cancel pointing at something on the page.
+ */
+async browserPicker(action: string) : Promise<Result<PickerResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("browser_picker", { action }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * What's at a point on the simulator panel's picture, in the picture's pixels.
+ */
+async simulatorPoint(udid: string, name: string, x: number, y: number, width: number) : Promise<Result<SimulatorPoint, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("simulator_point", { udid, name, x, y, width }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The simulator panel's extra controls: recording, logs, appearance, location, push and the status bar.
+ */
+async simulatorExtra(udid: string, action: string, args: ExtraArgs) : Promise<Result<ExtraState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("simulator_extra", { udid, action, args }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * The iOS simulators Xcode has, and whether taps can go through from here.
  */
 async simulatorStatus() : Promise<SimulatorStatus> {
@@ -409,9 +442,9 @@ async simulatorOpenApp(udid: string) : Promise<Result<null, string>> {
  * Place the built-in browser over its panel and show it. Async: the browser view is
  * made on the main thread, which this waits for.
  */
-async browserShow(bounds: Bounds) : Promise<Result<null, string>> {
+async browserShow(bounds: Bounds, zoom: number | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("browser_show", { bounds }) };
+    return { status: "ok", data: await TAURI_INVOKE("browser_show", { bounds, zoom }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -450,6 +483,57 @@ async browserGo(action: string) : Promise<Result<null, string>> {
  */
 async browserPage() : Promise<BrowserPage> {
     return await TAURI_INVOKE("browser_page");
+},
+async devserverCandidates(folder: string) : Promise<Result<Candidates, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("devserver_candidates", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async devserverSelect(folder: string, selected: string, custom: string) : Promise<Result<Candidates, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("devserver_select", { folder, selected, custom }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async devserverStart(folder: string, option: string | null, command: string | null) : Promise<Result<Server, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("devserver_start", { folder, option, command }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async devserverStop(folder: string) : Promise<Result<Server, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("devserver_stop", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async devserverRestart(folder: string) : Promise<Result<Server, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("devserver_restart", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async devserverList() : Promise<Server[]> {
+    return await TAURI_INVOKE("devserver_list");
+},
+async devserverLogs(folder: string) : Promise<Result<Output, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("devserver_logs", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 },
 /**
  * Every reminder, soonest first.
@@ -837,6 +921,49 @@ async pendingReviews() : Promise<ReviewRequest[]> {
 async runtimeHealth() : Promise<RuntimeHealth> {
     return await TAURI_INVOKE("runtime_health");
 },
+async studioAvailable() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_available") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async studioDraw(choices: Choices, id: string | null, theme: string | null) : Promise<Result<Look, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_draw", { choices, id, theme }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async studioLooks() : Promise<Look[]> {
+    return await TAURI_INVOKE("studio_looks");
+},
+async studioJob(id: string) : Promise<Result<Look, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_job", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async studioCancel(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_cancel", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async studioApply(agentId: string, id: string | null) : Promise<Result<AppConfig, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("studio_apply", { agentId, id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Whether Starkline is keeping this Mac awake, and why.
  */
@@ -848,6 +975,44 @@ async powerState() : Promise<PowerState> {
  */
 async setKeepAwake(enabled: boolean) : Promise<PowerState> {
     return await TAURI_INVOKE("set_keep_awake", { enabled });
+},
+async setCaptureShortcut(enabled: boolean, shortcut: string) : Promise<Result<AppConfig, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_capture_shortcut", { enabled, shortcut }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async captureError() : Promise<string | null> {
+    return await TAURI_INVOKE("capture_error");
+},
+async hideCapture() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("hide_capture") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async resizeCapture(height: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resize_capture", { height }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async rememberCapture(agentId: string, project: string | null, reminder: boolean) : Promise<AppConfig> {
+    return await TAURI_INVOKE("remember_capture", { agentId, project, reminder });
+},
+async openCaptureTask(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_capture_task", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 },
 async getConfig() : Promise<AppConfig> {
     return await TAURI_INVOKE("get_config");
@@ -924,7 +1089,7 @@ export type Agent = { id: string; name: string; role: string; kind: AgentKind; e
 /**
  * Hex accent color for the pixel sprite.
  */
-accent: string; figure: string; home_x: number; home_y: number; status: AgentStatus }
+accent: string; figure: string; look?: string | null; home_x: number; home_y: number; status: AgentStatus }
 /**
  * One roster member. `personality` is the editable system-prompt character;
  * app mechanics (delegation rules, the ask_human note) are appended in code.
@@ -933,7 +1098,7 @@ export type AgentConfig = { id: string; name: string; role: string; kind: AgentK
 /**
  * Sprite silhouette / pack ref ("masc" | "fem" | "synth" | custom id).
  */
-figure?: string; 
+figure?: string; look?: string | null; 
 /**
  * Engine id this agent runs on (must match an EngineConfig.id).
  */
@@ -992,6 +1157,10 @@ standup_minutes?: number;
  */
 keep_awake?: boolean; budget?: Budget; worktrees_enabled?: boolean; worktree_setup?: Partial<{ [key in string]: WorktreeSetup }>; 
 /**
+ * The global capture shortcut and the choices used in its small window.
+ */
+quick_capture?: CaptureConfig; 
+/**
  * How Starkline looks: one of [`THEMES`]. Tasks, permissions and providers don't change with it.
  */
 theme?: string; 
@@ -999,7 +1168,11 @@ theme?: string;
  * What the agents wear: the active theme's outfits ("theme"), their own look in every
  * theme ("own"), or one theme's outfits (one of [`THEMES`]).
  */
-outfits?: string; engines: EngineConfig[]; agents: AgentConfig[] }
+outfits?: string; 
+/**
+ * The chosen dev command and custom command, per project folder.
+ */
+dev_servers?: Partial<{ [key in string]: Choice }>; engines: EngineConfig[]; agents: AgentConfig[] }
 export type Attachment = { 
 /**
  * Where the file is kept: Starkline's copy.
@@ -1099,6 +1272,7 @@ export type BrowserPage = {
  * "" before anything has been opened.
  */
 url: string; title: string; loading: boolean }
+export type BrowserPick = { selector: string; tag: string; id: string; classes: string[]; role: string; accessible_name: string; text: string; attributes: Partial<{ [key in string]: string }>; styles: Partial<{ [key in string]: string }>; bounds: Bounds; url: string; title: string; viewport: Partial<{ [key in string]: number }>; device_pixel_ratio: number; outer_html: string }
 export type Budget = { period: BudgetPeriod; limit_usd: number; warn_percent: number }
 export type BudgetPeriod = "day" | "week" | "month"
 /**
@@ -1109,15 +1283,20 @@ export type Bug = { id: number; reporter: string; title: string; detail: string;
  * open | doing | fixed | wontfix
  */
 status: string; created: number; updated: number }
+export type Candidate = { id: string; label: string; command: string; cwd: string; env: Partial<{ [key in string]: string }>; port: number | null }
+export type Candidates = { folder: string; options: Candidate[]; selected: string; custom: string }
 export type Capability = { support: Support; 
 /**
  * One plain sentence on what that means here.
  */
 note: string }
+export type CaptureConfig = { enabled: boolean; shortcut: string; last_agent: string | null; last_project: string | null; last_reminder_agent: string | null }
 /**
  * The latest result of each distinct check.
  */
 export type CheckRun = { kind: string; command: string; passed: boolean; at: number; duration_ms: number | null; agent_id: string }
+export type Choice = { selected: string; custom: string }
+export type Choices = { figure: string; options: Partial<{ [key in string]: string }>; note: string }
 export type CodeReviewItem = { id: string; cwd: string; host_kind: HostKind; number: number; title: string; url: string; branch: string; head: string; 
 /**
  * failed | changes | comments | review
@@ -1166,6 +1345,8 @@ installed: boolean; path: string | null; version: string | null;
  * Whether the CLI has credentials, as it reports itself; None until it has answered.
  */
 signIn: SignIn | null }
+export type ExtraArgs = { mode?: string | null; latitude?: number | null; longitude?: number | null; clear?: boolean | null; enabled?: boolean | null; bundle_id?: string | null; payload?: string | null; minutes?: number | null; predicate?: string | null; process?: string | null }
+export type ExtraState = { recording: Recording | null; saved: Attachment | null; appearance: string; last_bundle: string; status_bar: boolean; logs: string }
 /**
  * A file with uncommitted changes in the task's folder.
  */
@@ -1178,6 +1359,7 @@ export type FileClaim = { workspace: string; path: string; agent_id: string; tas
 export type Host = { kind: HostKind; hostname: string; repository: string; remote: string; connection: string | null }
 export type HostKind = "github" | "gitlab" | "unknown"
 export type LedgerEntry = { id: number; ts: number; agent_id: string; kind: string; detail: string; load: number }
+export type Look = { id: string; choices: Choices; paths: Partial<{ [key in string]: string }>; progress: Partial<{ [key in string]: string }>; errors: Partial<{ [key in string]: string }>; revision: number; saved: boolean }
 /**
  * A model an agent can run on.
  */
@@ -1234,6 +1416,7 @@ automation_id: number | null;
  * The reminder that went off.
  */
 reminder_id: number | null }
+export type Output = { folder: string; generation: number; cursor: number; lines: string[] }
 export type PathEntry = { path: string; dir: boolean }
 /**
  * A stored rule, as Settings lists it.
@@ -1255,6 +1438,7 @@ rule: string;
  * "approval" or "never": how strongly the default held this back.
  */
 tier: string; uses: number; last_used: number | null; revoked: number | null }
+export type PickerResult = { active: boolean; pick: BrowserPick | null; attachment?: Attachment | null }
 /**
  * One step of the owner's own plan (its to-do list).
  */
@@ -1267,6 +1451,7 @@ status: string;
  * How the step reads while it's being done ("Running the tests").
  */
 active: string | null }
+export type PointElement = { role: string; label: string; value: string; frame: Bounds }
 /**
  * One rule of the policy, as the interface lists it.
  */
@@ -1327,6 +1512,7 @@ helpers: Capability;
  * Starkline's team tools: delegate, ask you, message teammates, report bugs.
  */
 team_tools: Capability }
+export type Recording = { path: string; started: number }
 /**
  * Something the developer wants reminding of, and the agent who reminds them.
  */
@@ -1472,6 +1658,7 @@ export type Schedule =
  * Every so many hours after the previous run.
  */
 { kind: "everyHours"; hours: number }
+export type Server = { folder: string; command: string; status: Status; address: string | null; exit_code: number | null; generation: number; open_page: boolean }
 /**
  * A provider CLI's own account of whether it can reach its models.
  */
@@ -1488,6 +1675,7 @@ export type SimDevice = { udid: string; name: string;
  * "iOS 26.0"
  */
 runtime: string; booted: boolean }
+export type SimulatorPoint = { device: string; x: number; y: number; element: PointElement | null }
 export type SimulatorStatus = { 
 /**
  * Xcode's simulator tools answered.
@@ -1505,6 +1693,7 @@ export type SpendDay = { date: string; total: SpendTotal }
 export type SpendGroup = { key: string; total: SpendTotal }
 export type SpendSummary = { today: SpendTotal; week: SpendTotal; month: SpendTotal; budget: Budget; budget_spend: number; days: SpendDay[]; agents: SpendGroup[]; projects: SpendGroup[]; models: SpendGroup[]; first_date: string | null; has_spend: boolean }
 export type SpendTotal = { cost_usd: number; input_tokens: number; output_tokens: number; context_tokens: number; turns: number; unpriced_turns: number }
+export type Status = "starting" | "running" | "stopped" | "crashed"
 /**
  * One persisted chat turn — enough to rebuild the transcript UI on reopen.
  */

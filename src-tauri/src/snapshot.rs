@@ -10,7 +10,7 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSImage, NSImageCompressionFactor};
-use objc2_foundation::{NSDictionary, NSError, NSNumber};
+use objc2_foundation::{NSDictionary, NSError, NSNumber, NSPoint, NSRect, NSSize};
 use objc2_web_kit::{WKSnapshotConfiguration, WKWebView};
 
 /// Widest a screenshot gets, in points.
@@ -23,14 +23,17 @@ type Reply = Sender<Result<Vec<u8>, String>>;
 ///
 /// # Safety
 /// `webview` must point at a live WKWebView, and this must run on the main thread.
-pub unsafe fn capture(webview: *mut c_void, tx: Reply) {
+pub unsafe fn capture(webview: *mut c_void, rect: Option<crate::browser::Bounds>, tx: Reply) {
     let Some(mtm) = MainThreadMarker::new() else {
         let _ = tx.send(Err("Screenshots have to be taken on the main thread.".into()));
         return;
     };
     let webview: &WKWebView = &*(webview as *const WKWebView);
     let config = WKSnapshotConfiguration::new(mtm);
-    let width = webview.frame().size.width.min(MAX_WIDTH);
+    if let Some(rect) = rect {
+        config.setRect(NSRect::new(NSPoint::new(rect.x, rect.y), NSSize::new(rect.width, rect.height)));
+    }
+    let width = rect.map(|r| r.width).unwrap_or_else(|| webview.frame().size.width).min(MAX_WIDTH);
     if width > 0.0 {
         config.setSnapshotWidth(Some(&NSNumber::new_f64(width)));
     }

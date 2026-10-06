@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Check, MessageSquareText, Trash2, TriangleAlert } from "lucide-react";
-import { Button, Dialog, Portrait, StatusPill, Tabs, Tag, TextArea, TextField, Toggle, cx, ICON_SIZE, ICON_STROKE, type TabItem } from "../../design";
+import { portraitKey, Button, Dialog, Portrait, StatusPill, Tabs, Tag, TextArea, TextField, Toggle, cx, ICON_SIZE, ICON_STROKE, type TabItem } from "../../design";
 import { removeAgent, updateAgent } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { AGENT_STATUS } from "../../lib/status";
@@ -9,6 +9,7 @@ import { useConfig } from "../../stores/config";
 import { useNavigation } from "../../stores/navigation";
 import { hasProblems, isDirty, validateAgent } from "./agentDraft";
 import ContextPanel from "../context/ContextPanel";
+import CharacterStudio from "../studio/CharacterStudio";
 import AgentMemory from "./AgentMemory";
 import AgentPermissions from "./AgentPermissions";
 import AgentProviderFields from "./AgentProviderFields";
@@ -38,11 +39,13 @@ interface AgentEditorProps {
 
 /** Edit one agent: who they are, how they look, what runs them, how they think. */
 export default function AgentEditor({ saved, config, live, onRemoved }: AgentEditorProps) {
-  const [draft, setDraft] = useState<AgentConfig>(saved);
+  const [edits, setEdits] = useState<Partial<AgentConfig>>({});
+  const draft: AgentConfig = { ...saved, ...edits, look: saved.look };
   const [tab, setTab] = useState<EditorTab>("profile");
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [studioOpen, setStudioOpen] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const openConversation = useNavigation((s) => s.openConversation);
   const apply = useConfig((s) => s.apply);
@@ -51,7 +54,7 @@ export default function AgentEditor({ saved, config, live, onRemoved }: AgentEdi
   const dirty = isDirty(draft, saved);
   const orchestrator = draft.kind === "orchestrator";
   const status = live ? AGENT_STATUS[live.status] : null;
-  const set = <K extends keyof AgentConfig>(key: K, value: AgentConfig[K]) => setDraft((d) => ({ ...d, [key]: value }));
+  const set = <K extends keyof AgentConfig>(key: K, value: AgentConfig[K]) => setEdits((d) => ({ ...d, [key]: value }));
 
   const save = async () => {
     if (hasProblems(problems)) return;
@@ -65,6 +68,9 @@ export default function AgentEditor({ saved, config, live, onRemoved }: AgentEdi
           role: draft.role.trim(),
         }),
       );
+      setEdits((current) => Object.fromEntries(
+        Object.entries(current).filter(([key, value]) => value !== draft[key as keyof AgentConfig]),
+      ));
       setJustSaved(true);
       window.setTimeout(() => setJustSaved(false), SAVED_NOTICE_MS);
     } catch (e) {
@@ -87,7 +93,7 @@ export default function AgentEditor({ saved, config, live, onRemoved }: AgentEdi
   return (
     <section className="agent-editor" aria-label={`${saved.name} settings`}>
       <header className="agent-editor-head">
-        <Portrait name={draft.name || saved.name} figure={draft.figure} accent={draft.accent} size={64} status={live?.status} />
+        <Portrait name={draft.name || saved.name} figure={portraitKey(draft)} accent={draft.accent} size={64} status={live?.status} />
         <div className="agent-editor-who">
           <h1 className="agent-editor-name">{draft.name.trim() || "Unnamed agent"}</h1>
           <p className="agent-editor-role">{draft.role.trim() || "No role yet"}</p>
@@ -141,6 +147,7 @@ export default function AgentEditor({ saved, config, live, onRemoved }: AgentEdi
               <fieldset className="form-section">
                 <legend className="form-section-title">Appearance</legend>
                 <p className="form-section-note">The look also decides where {draft.name.trim() || "they"} sits in the room.</p>
+                <Button onClick={() => setStudioOpen(true)}>Open Character Studio</Button>
                 <div className="figure-grid" role="radiogroup" aria-label="Look">
                   {FIGURES.map((f) => (
                     <button
@@ -224,7 +231,7 @@ export default function AgentEditor({ saved, config, live, onRemoved }: AgentEdi
             <Button type="submit" variant="primary" icon={justSaved ? Check : undefined} disabled={!dirty || saving || hasProblems(problems)}>
               {justSaved ? "Saved" : "Save changes"}
             </Button>
-            <Button variant="ghost" disabled={!dirty || saving} onClick={() => setDraft(saved)}>
+            <Button variant="ghost" disabled={!dirty || saving} onClick={() => setEdits({})}>
               Discard
             </Button>
             {error && (
@@ -241,6 +248,7 @@ export default function AgentEditor({ saved, config, live, onRemoved }: AgentEdi
         </form>
       )}
 
+      {studioOpen && <CharacterStudio agent={saved} onClose={() => setStudioOpen(false)} onApplied={() => setEdits((d) => { const next = { ...d }; delete next.figure; delete next.accent; return next; })} />}
       <Dialog
         open={confirmRemove}
         onClose={() => setConfirmRemove(false)}

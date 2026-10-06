@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./app/App";
+import CaptureView from "./features/capture/CaptureView";
 import { applyTheme, storedTheme } from "./app/theme";
 import "./design/tokens.css";
 import "./design/base.css";
@@ -12,6 +13,6 @@ applyTheme(storedTheme());
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    {window.location.hash === "#capture" ? <CaptureView /> : <App />}
   </React.StrictMode>,
 );

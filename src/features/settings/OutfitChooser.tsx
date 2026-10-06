@@ -1,6 +1,8 @@
+import { useState } from "react";
+import CharacterStudio from "../studio/CharacterStudio";
 import { UserRound } from "lucide-react";
 import { THEMES, outfitTheme, themeInfo, type Outfits, type ThemeId } from "../../app/theme";
-import { Portrait, cx, ICON_SIZE, ICON_STROKE } from "../../design";
+import { portraitKey, Button, Portrait, cx, ICON_SIZE, ICON_STROKE } from "../../design";
 import type { AgentConfig } from "../../lib/types";
 
 type Mode = "own" | "theme" | "other";
@@ -26,6 +28,7 @@ interface OutfitChooserProps {
 
 /** What the agents wear, shown on the first few of the team in each theme's outfits. */
 export default function OutfitChooser({ theme, outfits, agents, onChange }: OutfitChooserProps) {
+  const [studioAgent, setStudioAgent] = useState<AgentConfig | null>(null);
   const mode = modeOf(outfits);
   // The theme whose outfits are worn; the agents' own look is After Hours R&D's.
   const worn = outfitTheme(outfits, theme) ?? THEMES[0].id;
@@ -74,7 +77,7 @@ export default function OutfitChooser({ theme, outfits, agents, onChange }: Outf
           const folder = outfitTheme(set.id, set.id) ? set.folder : null;
           const people = shown.map((a) => (
             <span key={a.id} className="outfit-person">
-              <Portrait name={a.name} figure={a.figure} accent={a.accent} size={64} outfits={folder} />
+              <Portrait name={a.name} figure={portraitKey(a)} accent={a.accent} size={64} outfits={folder} />
               <span className="outfit-person-name">{a.name}</span>
             </span>
           ));
@@ -104,6 +107,8 @@ export default function OutfitChooser({ theme, outfits, agents, onChange }: Outf
           );
         })}
       </div>
+      <div className="studio-chips">{agents.map((a) => <Button key={a.id} onClick={() => setStudioAgent(a)}>Open Character Studio · {a.name}</Button>)}</div>
+      {studioAgent && <CharacterStudio agent={studioAgent} onClose={() => setStudioAgent(null)} />}
     </section>
   );
 }

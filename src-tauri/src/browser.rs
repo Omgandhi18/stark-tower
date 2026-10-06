@@ -30,7 +30,7 @@ pub struct BrowserPage {
 }
 
 /// Where the panel is, in the window's own coordinates.
-#[derive(Debug, Clone, Copy, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
 pub struct Bounds {
     pub x: f64,
     pub y: f64,
@@ -38,9 +38,97 @@ pub struct Bounds {
     pub height: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct BrowserPick {
+    pub selector: String,
+    pub tag: String,
+    pub id: String,
+    pub classes: Vec<String>,
+    pub role: String,
+    pub accessible_name: String,
+    pub text: String,
+    pub attributes: std::collections::BTreeMap<String, String>,
+    pub styles: std::collections::BTreeMap<String, String>,
+    pub bounds: Bounds,
+    pub url: String,
+    pub title: String,
+    pub viewport: std::collections::BTreeMap<String, f64>,
+    pub device_pixel_ratio: f64,
+    pub outer_html: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
+pub struct PickerResult {
+    pub active: bool,
+    pub pick: Option<BrowserPick>,
+    #[serde(default)]
+    pub attachment: Option<crate::attachments::Attachment>,
+}
+
+/// What the page's picker handed back, checked: a pick needs a real size and viewport.
+fn parse_pick(value: Value) -> Result<PickerResult, String> {
+    let result: PickerResult = serde_json::from_value(value).map_err(|_| "The page's pick couldn't be read.".to_string())?;
+    if let Some(pick) = &result.pick {
+        let b = pick.bounds;
+        let positive = |n: f64| n.is_finite() && n > 0.0;
+        let viewport = ["width", "height"].iter().all(|key| pick.viewport.get(*key).is_some_and(|n| positive(*n)));
+        if !(b.x.is_finite() && b.y.is_finite() && positive(b.width) && positive(b.height) && positive(pick.device_pixel_ratio) && viewport) {
+            return Err("The element's size couldn't be read.".into());
+        }
+    }
+    Ok(result)
+}
+
+/// The picked element with 16 CSS pixels around it, clipped to the viewport, in the view's points at `zoom`.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn pick_rect(pick: &BrowserPick, zoom: f64) -> Result<Bounds, String> {
+    let b = pick.bounds;
+    let (width, height) = (pick.viewport["width"], pick.viewport["height"]);
+    let x = (b.x - 16.0).clamp(0.0, width);
+    let y = (b.y - 16.0).clamp(0.0, height);
+    let right = (b.x + b.width + 16.0).clamp(0.0, width);
+    let bottom = (b.y + b.height + 16.0).clamp(0.0, height);
+    if right <= x || bottom <= y {
+        return Err("The element is outside the visible page.".into());
+    }
+    Ok(Bounds { x: x * zoom, y: y * zoom, width: (right - x) * zoom, height: (bottom - y) * zoom })
+}
+
+/// Start pointing at the page, check for a pick, or stop. A pick is handed back once, with a
+/// picture of it on macOS.
+pub fn picker(app: &tauri::AppHandle, action: &str) -> Result<PickerResult, String> {
+    let script = match action {
+        "start" => include_str!("picker.js"),
+        "cancel" => "(() => { window.__starkPicker?.cleanup(); if (window.__starkPicker) window.__starkPicker.pick = null; return {active:false,pick:null}; })()",
+        "poll" => "(() => { const s = window.__starkPicker; if (!s) return {active:false,pick:null}; const pick = s.pick; s.pick = null; return {active:s.active,pick}; })()",
+        _ => return Err("That picker action isn't available.".into()),
+    };
+    #[allow(unused_mut)]
+    let mut result = parse_pick(run(app, script)?)?;
+    #[cfg(target_os = "macos")]
+    if let Some(pick) = &result.pick {
+        // The words matter most: a pick still reaches the chat when its picture can't be taken.
+        match picture(app, pick) {
+            Ok(attachment) => result.attachment = Some(attachment),
+            Err(e) => eprintln!("[browser] couldn't take a picture of the picked element: {e}"),
+        }
+    }
+    Ok(result)
+}
+
+#[cfg(target_os = "macos")]
+fn picture(app: &tauri::AppHandle, pick: &BrowserPick) -> Result<crate::attachments::Attachment, String> {
+    use base64::Engine;
+    let zoom = state(app)?.zoom.lock().unwrap().unwrap_or(1.0);
+    let jpeg = snapshot_rect(app, Some(pick_rect(pick, zoom)?))?;
+    let data = base64::engine::general_purpose::STANDARD.encode(jpeg);
+    crate::attachments::store_data(&crate::attachments::root(app), "browser-point.jpg", &data)
+}
+
 #[derive(Default)]
 pub struct Browser {
     view: Mutex<Option<tauri::Webview>>,
+    zoom: Mutex<Option<f64>>,
     page: Mutex<BrowserPage>,
 }
 
@@ -169,8 +257,13 @@ fn view(app: &tauri::AppHandle) -> Result<tauri::Webview, String> {
 }
 
 /// Place the browser over the panel and show it.
-pub fn show(app: &tauri::AppHandle, bounds: Bounds) -> Result<(), String> {
+pub fn show(app: &tauri::AppHandle, bounds: Bounds, zoom: f64) -> Result<(), String> {
+    if !zoom.is_finite() || !(0.01..=1.0).contains(&zoom) || [bounds.x, bounds.y, bounds.width, bounds.height].iter().any(|n| !n.is_finite()) {
+        return Err("The browser size or zoom is invalid.".into());
+    }
     let v = view(app)?;
+    v.set_zoom(zoom).map_err(|e| e.to_string())?;
+    *state(app)?.zoom.lock().unwrap() = Some(zoom);
     v.set_position(LogicalPosition::new(bounds.x, bounds.y)).map_err(|e| e.to_string())?;
     v.set_size(LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0))).map_err(|e| e.to_string())?;
     v.show().map_err(|e| e.to_string())
@@ -433,15 +526,20 @@ pub fn act(app: &tauri::AppHandle, agent_id: &str, action: &str, args: &Value) -
 }
 
 #[cfg(target_os = "macos")]
-fn snapshot(app: &tauri::AppHandle) -> Result<Vec<u8>, String> {
+fn snapshot_rect(app: &tauri::AppHandle, rect: Option<Bounds>) -> Result<Vec<u8>, String> {
     let (tx, rx) = mpsc::channel();
     view(app)?
         .with_webview(move |platform| {
             // SAFETY: on macOS the platform view is the page's WKWebView, alive for this call.
-            unsafe { crate::snapshot::capture(platform.inner(), tx) }
+            unsafe { crate::snapshot::capture(platform.inner(), rect, tx) }
         })
         .map_err(|e| e.to_string())?;
     rx.recv_timeout(SCRIPT_TIMEOUT).map_err(|_| "The page didn't give a screenshot in time.".to_string())?
+}
+
+#[cfg(target_os = "macos")]
+fn snapshot(app: &tauri::AppHandle) -> Result<Vec<u8>, String> {
+    snapshot_rect(app, None)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -452,6 +550,32 @@ fn snapshot(_app: &tauri::AppHandle) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_picker_results_and_clips_the_snapshot_to_the_zoomed_viewport() {
+        let pick = json!({
+            "selector":"#save", "tag":"button", "id":"save", "classes":["primary"],
+            "role":"button", "accessible_name":"Save", "text":"Save", "attributes":{"type":"submit"},
+            "styles":{"padding":"8px"}, "bounds":{"x":-4,"y":10,"width":120,"height":32},
+            "url":"http://localhost/settings", "title":"Settings", "viewport":{"width":100,"height":80},
+            "device_pixel_ratio":2, "outer_html":"<button id=\"save\">Save</button>"
+        });
+        let result = parse_pick(json!({"active":false,"pick":pick})).unwrap();
+        assert!(result.attachment.is_none());
+        let rect = pick_rect(result.pick.as_ref().unwrap(), 0.5).unwrap();
+        assert_eq!((rect.x, rect.y, rect.width, rect.height), (0.0, 0.0, 50.0, 29.0));
+        assert!(parse_pick(json!({"active":false,"pick":null})).unwrap().pick.is_none());
+        assert!(parse_pick(json!({"active":true,"pick":{"selector":"#save"}})).is_err());
+        for (path, value) in [("/bounds/width", json!(-1)), ("/viewport/width", Value::Null), ("/device_pixel_ratio", json!(0))] {
+            let mut bad = pick.clone();
+            *bad.pointer_mut(path).unwrap() = value;
+            assert!(parse_pick(json!({"active":false,"pick":bad})).is_err());
+        }
+        let mut outside = result.pick.unwrap();
+        outside.bounds.x = 300.0;
+        assert!(pick_rect(&outside, 1.0).is_err());
+        assert!(wrapped(include_str!("picker.js")).contains("JSON.stringify"));
+    }
 
     #[test]
     fn the_address_bar_takes_addresses_and_searches() {

@@ -17,6 +17,11 @@ const NO_TOUCH: &str = "To tap, swipe and type from Starkline, install AXe: run 
 
 static SHOT: AtomicU64 = AtomicU64::new(0);
 
+/// A number for a new file's name, unique in this run.
+pub fn next_file() -> u64 {
+    SHOT.fetch_add(1, Ordering::Relaxed)
+}
+
 /// Each device's pixels per point, once asked.
 fn scales() -> &'static std::sync::Mutex<std::collections::HashMap<String, f64>> {
     static SCALES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, f64>>> = std::sync::OnceLock::new();
@@ -230,7 +235,9 @@ pub fn install(udid: &str, app: &str) -> Result<(), String> {
 }
 
 pub fn launch(udid: &str, bundle_id: &str) -> Result<(), String> {
-    checked(&["launch", udid, bundle_id]).map(|_| ())
+    checked(&["launch", udid, bundle_id])?;
+    crate::simulator_extras::launched(udid, bundle_id);
+    Ok(())
 }
 
 /// The width of the device's screen in points, as AXe's accessibility tree gives it.
@@ -295,13 +302,100 @@ fn device(wanted: &str, booted_only: bool) -> Result<SimDevice, String> {
     } else {
         s.devices.iter().find(|d| d.udid.to_lowercase() == wanted || d.name.to_lowercase() == wanted).cloned()
     };
-    found.ok_or_else(|| {
+    found.filter(|d| !booted_only || d.booted).ok_or_else(|| {
         if wanted.is_empty() {
             "No simulator is running. Boot one first (action \"boot\").".to_string()
         } else {
             format!("There's no simulator called \"{wanted}\". Ask for \"devices\" to see them.")
         }
     })
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct SimulatorPoint {
+    pub device: String,
+    pub x: f64,
+    pub y: f64,
+    pub element: Option<PointElement>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct PointElement {
+    pub role: String,
+    pub label: String,
+    pub value: String,
+    pub frame: crate::browser::Bounds,
+}
+
+fn frame_of(value: &Value) -> Option<crate::browser::Bounds> {
+    let frame = value.get("frame")?;
+    let at = |key: &str| frame.get(key)?.as_f64();
+    let bounds = crate::browser::Bounds { x: at("x")?, y: at("y")?, width: at("width")?, height: at("height")? };
+    let finite = [bounds.x, bounds.y, bounds.width, bounds.height].iter().all(|n| n.is_finite());
+    (finite && bounds.width > 0.0 && bounds.height > 0.0).then_some(bounds)
+}
+
+/// The deepest element in an accessibility tree (AXe's or idb's) whose frame holds the point.
+pub fn element_at(tree: &Value, x: f64, y: f64) -> Option<PointElement> {
+    fn search(tree: &Value, x: f64, y: f64, depth: usize, best: &mut Option<(usize, PointElement)>) {
+        if let Some(frame) = frame_of(tree) {
+            let inside = x >= frame.x && y >= frame.y && x <= frame.x + frame.width && y <= frame.y + frame.height;
+            if inside && best.as_ref().is_none_or(|(d, _)| depth >= *d) {
+                let text = |keys: &[&str]| {
+                    let value = keys.iter().find_map(|k| tree.get(k).filter(|v| !v.is_null()));
+                    value.map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())).unwrap_or_default()
+                };
+                let element = PointElement {
+                    role: text(&["role", "type", "AXRole"]),
+                    label: text(&["AXLabel", "label"]),
+                    value: text(&["AXValue", "value"]),
+                    frame,
+                };
+                *best = Some((depth, element));
+            }
+        }
+        match tree {
+            Value::Array(items) => {
+                for child in items {
+                    search(child, x, y, depth + 1, best);
+                }
+            }
+            Value::Object(items) => {
+                for (key, child) in items {
+                    if key != "frame" {
+                        search(child, x, y, depth + 1, best);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut best = None;
+    search(tree, x, y, 0, &mut best);
+    best.map(|(_, v)| v)
+}
+
+/// What's at a point the developer clicked on the panel's picture of the screen (in its pixels, `width` wide).
+pub fn point(udid: &str, name: &str, x: f64, y: f64, width: f64) -> Result<SimulatorPoint, String> {
+    if [x, y, width].iter().any(|n| !n.is_finite() || *n < 0.0) || width == 0.0 {
+        return Err("The screen point couldn't be read.".into());
+    }
+    let scale = scale(udid, name, width);
+    let (x, y) = (x / scale, y / scale);
+    // Without AXe or idb there's no accessibility tree; the point and picture still go to the chat.
+    let element = toucher().and_then(|(tool, program)| {
+        let args: Vec<String> = match tool {
+            Toucher::Axe => vec!["describe-ui".into(), "--udid".into(), udid.into()],
+            Toucher::Idb => vec!["ui".into(), "describe-point".into(), x.to_string(), y.to_string(), "--udid".into(), udid.into()],
+        };
+        let out = Command::new(program).args(args).output().ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let tree: Value = serde_json::from_slice(&out.stdout).ok()?;
+        element_at(&tree, x, y)
+    });
+    Ok(SimulatorPoint { device: name.into(), x, y, element })
 }
 
 /// An agent's `simulator` call.
@@ -372,13 +466,57 @@ pub fn act(app: &tauri::AppHandle, action: &str, args: &Value) -> Result<crate::
             gesture(&d.udid, &Gesture::Home)?;
             Ok(Outcome::Text(format!("Went to {}'s home screen.", d.name)))
         }
-        other => Err(format!("The simulator has no \"{other}\" action. Use devices, boot, screenshot, open_url, install, launch, tap, swipe, type or home.")),
+        "record_start" | "record_stop" | "logs" | "appearance" | "location" | "push" | "status_bar" => {
+            let verdict = crate::bridge::decide(app, &text("agentId"), "mcp__stark__simulator", args);
+            if !verdict.approved {
+                return Err(verdict.reason);
+            }
+            // A recording can be stopped after its simulator shut down.
+            let d = device(&text("device"), action != "record_stop")?;
+            let state = crate::simulator_extras::control(app, &d.udid, action, args)?;
+            let on = |b: Option<bool>| b == Some(true);
+            Ok(Outcome::Text(match action {
+                "record_start" => format!("Recording {}. Stop with record_stop.", d.name),
+                "record_stop" => format!("Saved the recording: {}", state.saved.map(|a| a.path).unwrap_or_default()),
+                "logs" if state.logs.trim().is_empty() => format!("{} logged nothing that matches in that time.", d.name),
+                "logs" => state.logs,
+                "appearance" => format!("{} is in {} mode.", d.name, text("mode")),
+                "location" if on(args.get("clear").and_then(Value::as_bool)) => format!("Cleared {}'s location.", d.name),
+                "location" => format!("Set {}'s location.", d.name),
+                "push" => format!("Sent the push to {} on {}.", text("bundle_id"), d.name),
+                _ if on(args.get("enabled").and_then(Value::as_bool)) => format!("Cleaned up {}'s status bar.", d.name),
+                _ => format!("Restored {}'s status bar.", d.name),
+            }))
+        }
+        other => Err(format!("The simulator has no \"{other}\" action. Use devices, boot, screenshot, open_url, install, launch, tap, swipe, type, home, record_start, record_stop, logs, appearance, location, push or status_bar.")),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_the_deepest_accessibility_element_at_the_point() {
+        let tree = serde_json::json!([{
+            "role":"Application", "frame":{"x":0,"y":0,"width":390,"height":844},
+            "children":[{
+                "role":"Group", "frame":{"x":0,"y":600,"width":390,"height":120},
+                "children":[
+                    {"role":"Button","AXLabel":"Sign in","AXValue":1,"frame":{"x":20,"y":620,"width":350,"height":50}},
+                    {"role":"Button","AXLabel":"Elsewhere","frame":{"x":20,"y":700,"width":350,"height":10}}
+                ]
+            }]
+        }]);
+        let element = element_at(&tree, 120.0, 640.0).unwrap();
+        assert_eq!(element.role, "Button");
+        assert_eq!(element.label, "Sign in");
+        assert_eq!(element.value, "1");
+        assert_eq!(element.frame.height, 50.0);
+        assert_eq!(element_at(&tree, 5.0, 5.0).unwrap().role, "Application");
+        assert!(element_at(&tree, 500.0, 640.0).is_none());
+        assert!(element_at(&serde_json::json!({"frame":{"x":0,"y":0,"width":-1,"height":20}}), 0.0, 0.0).is_none());
+    }
 
     #[test]
     fn gestures_are_spelled_as_each_tool_takes_them() {

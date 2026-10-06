@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ArrowLeft, ArrowRight, Bell, Building2, Check, FolderPlus, LayoutGrid, RefreshCw, type LucideIcon } from "lucide-react";
-import { Button, Dialog, Portrait, TextField, cx, ICON_SIZE, ICON_STROKE } from "../../design";
+import { portraitKey, Button, Dialog, Portrait, TextField, cx, ICON_SIZE, ICON_STROKE } from "../../design";
 import { addProject, pickFolder, setOnboarded, updateAgent, updateEngine } from "../../lib/api";
 import { apiKeyNameFor } from "../../lib/engines";
 import { errorMessage } from "../../lib/errors";
@@ -211,7 +211,7 @@ export default function Onboarding({ config }: { config: AppConfig }) {
         <ul className="onboarding-team">
           {team.map((a) => (
             <li key={a.id}>
-              <Portrait name={a.name} figure={a.figure} accent={a.accent} size={48} />
+              <Portrait name={a.name} figure={portraitKey(a)} accent={a.accent} size={48} />
               <span className="onboarding-team-name">{a.name}</span>
               <span className="onboarding-team-role">{a.role}</span>
             </li>

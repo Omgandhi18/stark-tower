@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { MessageSquarePlus, Trash2 } from "lucide-react";
-import { OverflowMenu, Portrait, Tag, cx, ICON_SIZE, ICON_STROKE } from "../../design";
+import { portraitKey, OverflowMenu, Portrait, Tag, cx, ICON_SIZE, ICON_STROKE } from "../../design";
 import { errorMessage } from "../../lib/errors";
 import { AGENT_STATUS } from "../../lib/status";
 import { formatRelative } from "../../lib/time";
@@ -82,7 +82,7 @@ export default function ProjectChats({ path, name }: { path: string; name: strin
               title={`${chat.title || UNTITLED}\n${who} · ${formatRelative(chat.updated, now)}`}
               onClick={() => open(chat)}
             >
-              <Portrait name={who} figure={agent?.figure} accent={agent?.accent} size={20} />
+              <Portrait name={who} figure={portraitKey(agent)} accent={agent?.accent} size={20} />
               <span className="nav-sub-label">{title}</span>
               {chat.branch && <Tag>{chat.branch}</Tag>}
             </button>

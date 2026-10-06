@@ -7,6 +7,7 @@
   ],
   "permissions": [
     "core:default",
+    "global-shortcut:default",
     "core:window:allow-destroy",
     "core:window:allow-close",
     "opener:default",

@@ -243,29 +243,53 @@ const BROWSER_TOOL = {
   },
 };
 
+const DEV_SERVER_TOOL = {
+  name: "dev_server",
+  description: "Run your project's dev server in Starkline and open it in the shared browser. Use list for all servers, status for this project's server, start (optional command, otherwise its remembered choice), stop, restart, or logs (optional text filter). Starts and restarts go through the developer's shell permission rules.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["list", "start", "stop", "restart", "logs", "status"] },
+      command: { type: "string", description: "For start: a custom shell command; omit to use the project's choice." },
+      filter: { type: "string", description: "For logs: return only lines containing this text." },
+    },
+    required: ["action"],
+  },
+};
+
 const SIMULATOR_TOOL = {
   name: "simulator",
   description:
     "Use the iOS Simulator, which the developer sees beside your chat (needs Xcode on this Mac). List " +
     "the `devices`, `boot` one, `install` a built .app and `launch` it by bundle id, `open_url`, take a " +
     "`screenshot` to see the screen, and `tap` (x and y in points from the top left), `swipe` (from x, y " +
-    "to to_x, to_y), `type` or go `home` (those four need AXe or idb). Build for a simulator with xcodebuild first.",
+    "to to_x, to_y), `type` or go `home` (those four need AXe or idb). Build for a simulator with xcodebuild first. " +
+    "Record with record_start/record_stop (stop returns a path to share), read logs, set appearance, location, push a notification or clean the status_bar.",
   inputSchema: {
     type: "object",
     properties: {
       action: {
         type: "string",
-        enum: ["devices", "boot", "screenshot", "install", "launch", "open_url", "tap", "swipe", "type", "home"],
+        enum: ["devices", "boot", "screenshot", "install", "launch", "open_url", "tap", "swipe", "type", "home", "record_start", "record_stop", "logs", "appearance", "location", "push", "status_bar"],
       },
       device: { type: "string", description: "A simulator's name or id; leave out for the running one." },
       path: { type: "string", description: "For install: the built .app bundle." },
-      bundle_id: { type: "string", description: "For launch: the app's bundle id." },
+      bundle_id: { type: "string", description: "For launch or push: the app's bundle id." },
       url: { type: "string", description: "For open_url: a link or deep link." },
       x: { type: "number", description: "For tap and swipe: points from the left." },
       y: { type: "number", description: "For tap and swipe: points from the top." },
       to_x: { type: "number", description: "For swipe: where it ends, from the left." },
       to_y: { type: "number", description: "For swipe: where it ends, from the top." },
       text: { type: "string", description: "For type: what to type." },
+      mode: { type: "string", enum: ["light", "dark"], description: "For appearance." },
+      latitude: { type: "number", description: "For location: −90 to 90." },
+      longitude: { type: "number", description: "For location: −180 to 180." },
+      clear: { type: "boolean", description: "For location: clear the simulated location." },
+      enabled: { type: "boolean", description: "For status_bar: true cleans it, false restores it." },
+      payload: { type: "string", description: "For push: a JSON object containing aps. Set bundle_id to the app." },
+      minutes: { type: "integer", description: "For logs: how many recent minutes, default 5 (up to 60)." },
+      predicate: { type: "string", description: "For logs: an optional log predicate." },
+      process: { type: "string", description: "For logs: an optional process name." },
     },
     required: ["action"],
   },
@@ -283,7 +307,7 @@ const RELEASE_FILES_TOOL = {
 };
 
 async function toolsList() {
-  const tools = [CLAIM_FILES_TOOL, RELEASE_FILES_TOOL, ASK_HUMAN_TOOL, MESSAGE_TOOL, SHARE_TOOL, REMIND_TOOL, BROWSER_TOOL, SIMULATOR_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
+  const tools = [CLAIM_FILES_TOOL, RELEASE_FILES_TOOL, ASK_HUMAN_TOOL, MESSAGE_TOOL, SHARE_TOOL, REMIND_TOOL, BROWSER_TOOL, DEV_SERVER_TOOL, SIMULATOR_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
   if (IS_ORCH) {
     const workers = await getRoster();
     tools.unshift(buildDelegateTool(workers));
@@ -383,12 +407,14 @@ rl.on("line", async (raw) => {
       });
       if (res.error) result(id, "remind failed: " + res.error, true);
       else result(id, res.result || "(set)");
-    } else if (name === "browser" || name === "simulator") {
+    } else if (name === "browser" || name === "simulator" || name === "dev_server") {
       log(name, "->", args.action);
       const res = await bridge({
         type: name,
         agentId: AGENT_ID,
         action: args.action || "",
+        command: args.command || "",
+        filter: args.filter || "",
         url: args.url || "",
         target: args.target ?? "",
         text: args.text ?? "",
@@ -401,6 +427,17 @@ rl.on("line", async (raw) => {
         y: args.y ?? null,
         to_x: args.to_x ?? null,
         to_y: args.to_y ?? null,
+        ...(name === "simulator" ? {
+          mode: args.mode,
+          latitude: args.latitude,
+          longitude: args.longitude,
+          clear: args.clear,
+          enabled: args.enabled,
+          payload: args.payload,
+          minutes: args.minutes,
+          predicate: args.predicate,
+          process: args.process,
+        } : {}),
       });
       if (res.error) result(id, name + ": " + res.error, true);
       else if (res.image) {

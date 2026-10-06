@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { CalendarClock, CheckCheck, CornerDownRight, Hourglass, MessageSquareText, Play, RotateCcw, Square, SquareArrowOutUpRight, X } from "lucide-react";
-import { Button, OverflowMenu, Portrait, StatusPill, Tag, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
+import { portraitKey, Button, OverflowMenu, Portrait, StatusPill, Tag, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
 import { chatStop, closeTask, resumeTask, reviewTask, startTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { automationOf } from "../../lib/requester";
@@ -28,7 +28,7 @@ export function Contributors({ agents }: { agents: readonly Agent[] }) {
   return (
     <span className="contributors" role="img" aria-label={`With ${names}`} title={`With ${names}`}>
       {shown.map((a) => (
-        <Portrait key={a.id} name={a.name} figure={a.figure} accent={a.accent} size={24} className="contributor" />
+        <Portrait key={a.id} name={a.name} figure={portraitKey(a)} accent={a.accent} size={24} className="contributor" />
       ))}
       {more > 0 && <span className="contributors-more">+{more}</span>}
     </span>
@@ -107,7 +107,7 @@ export function TaskRowView({ row, now }: TaskRowViewProps) {
 
   return (
     <li className="work-row">
-      <Portrait name={name} figure={owner?.figure} accent={owner?.accent} status={status === "doing" ? owner?.status : undefined} size={48} />
+      <Portrait name={name} figure={portraitKey(owner)} accent={owner?.accent} status={status === "doing" ? owner?.status : undefined} size={48} />
       <div className="work-row-main">
         <span className="work-row-agent">
           {name}
@@ -178,7 +178,7 @@ export function ChatRowView({ row, now }: { row: ChatRow; now: number }) {
   const open = () => openConversation(agent.id);
   return (
     <li className="work-row">
-      <Portrait name={agent.name} figure={agent.figure} accent={agent.accent} status={agent.status} size={48} />
+      <Portrait name={agent.name} figure={portraitKey(agent)} accent={agent.accent} status={agent.status} size={48} />
       <div className="work-row-main">
         <span className="work-row-agent">{agent.name}</span>
         <button type="button" className="work-row-title" onClick={open}>

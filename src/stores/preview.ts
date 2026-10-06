@@ -2,6 +2,8 @@
 import { create } from "zustand";
 import type { BrowserPage } from "../lib/types";
 
+import type { BrowserSize } from "../features/preview/browserModel";
+
 export type PreviewTab = "browser" | "simulator";
 
 const WIDTH_KEY = "starkline.preview.width";
@@ -29,6 +31,8 @@ interface PreviewState {
   page: BrowserPage;
   /** The simulator on show; null for the first one running. */
   simulator: string | null;
+  size: BrowserSize;
+  setSize: (size: BrowserSize) => void;
   show: (tab: PreviewTab) => void;
   toggle: () => void;
   close: () => void;
@@ -44,6 +48,8 @@ export const usePreview = create<PreviewState>((set) => ({
   width: savedWidth(),
   page: { url: "", title: "", loading: false },
   simulator: null,
+  size: "fit",
+  setSize: (size) => set({ size }),
   show: (tab) => set({ open: true, tab }),
   toggle: () => set((s) => ({ open: !s.open })),
   close: () => set({ open: false }),

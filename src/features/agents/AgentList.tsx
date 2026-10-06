@@ -1,5 +1,5 @@
 import { Plus } from "lucide-react";
-import { Button, Portrait, SectionHeader, Tag, cx } from "../../design";
+import { portraitKey, Button, Portrait, SectionHeader, Tag, cx } from "../../design";
 import { AGENT_STATUS } from "../../lib/status";
 import type { Agent, AgentConfig } from "../../lib/types";
 
@@ -40,7 +40,7 @@ export default function AgentList({ agents, live, selectedId, onSelect, onAdd, a
                 aria-current={a.id === selectedId ? "page" : undefined}
                 onClick={() => onSelect(a.id)}
               >
-                <Portrait name={a.name} figure={a.figure} accent={a.accent} size={40} status={running?.status} />
+                <Portrait name={a.name} figure={portraitKey(a)} accent={a.accent} size={40} status={running?.status} />
                 <span className="agent-list-text">
                   <span className="agent-list-name">{a.name}</span>
                   <span className="agent-list-role">{a.role}</span>

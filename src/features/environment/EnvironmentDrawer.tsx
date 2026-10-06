@@ -1,5 +1,5 @@
 import { Maximize2, X } from "lucide-react";
-import { IconButton, KeepAlive, Portrait, StatusPill } from "../../design";
+import { portraitKey, IconButton, KeepAlive, Portrait, StatusPill } from "../../design";
 import { AGENT_STATUS } from "../../lib/status";
 import { useAgents, selectAgent } from "../../stores/agents";
 import { useNavigation } from "../../stores/navigation";
@@ -25,7 +25,7 @@ export default function EnvironmentDrawer({ open, agentId, onClose }: Environmen
     <aside className="env-drawer" data-open={open} aria-label={agent ? `Conversation with ${agent.name}` : "Conversation"} inert={!open}>
       {agent && status && (
         <header className="env-drawer-head">
-          <Portrait name={agent.name} figure={agent.figure} accent={agent.accent} size={32} status={agent.status} />
+          <Portrait name={agent.name} figure={portraitKey(agent)} accent={agent.accent} size={32} status={agent.status} />
           <span className="env-drawer-who">
             <span className="env-drawer-name">{agent.name}</span>
             <span className="env-drawer-role">{agent.role}</span>

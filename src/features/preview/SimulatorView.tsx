@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type PointerEvent } from "react";
-import { AppWindow, Circle, Copy, Power, Smartphone } from "lucide-react";
+import { AppWindow, Circle, Copy, Power, Smartphone, MousePointerClick } from "lucide-react";
 import { Button, EmptyState, IconButton, InlineCode, SelectField, SkeletonRows } from "../../design";
 import {
+  attachData,
+  simulatorPoint,
   simulatorBoot,
   simulatorFrame,
   simulatorHome,
@@ -12,8 +14,14 @@ import {
   simulatorTap,
   simulatorType,
 } from "../../lib/api";
+import { selectQuestionFor, useAttention } from "../../stores/attention";
 import { errorMessage } from "../../lib/errors";
 import type { SimulatorStatus } from "../../lib/types";
+import { useChats } from "../../stores/chats";
+import { useNavigation } from "../../stores/navigation";
+import SimulatorTools from "./SimulatorTools";
+import { addPoint, markedFrame } from "./pointComposer";
+import { simulatorPointText } from "./pointModel";
 import { usePreview } from "../../stores/preview";
 
 /** A pause between screenshots: a few frames a second, without keeping the Mac busy. */
@@ -33,6 +41,9 @@ function onImage(img: HTMLImageElement, clientX: number, clientY: number): [numb
  * panel shows it. Click to tap, drag to swipe, and type in the box below (with AXe or idb).
  */
 export default function SimulatorView({ active }: { active: boolean }) {
+  const agentId = useNavigation(s => s.agentId);
+  const question = useAttention(selectQuestionFor(agentId ?? ""));
+  const [picking, setPicking] = useState(false);
   const chosen = usePreview((s) => s.simulator);
   const choose = usePreview((s) => s.showSimulator);
   const [status, setStatus] = useState<SimulatorStatus | null>(null);
@@ -42,7 +53,7 @@ export default function SimulatorView({ active }: { active: boolean }) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const imageRef = useRef<HTMLImageElement>(null);
-  const press = useRef<{ x: number; y: number; at: [number, number] } | null>(null);
+  const press = useRef<{ x: number; y: number; at: [number, number]; picking: boolean; chat: string | null } | null>(null);
 
   const refresh = useCallback(() => {
     simulatorStatus()
@@ -90,9 +101,9 @@ export default function SimulatorView({ active }: { active: boolean }) {
 
   const startPress = (e: PointerEvent<HTMLImageElement>) => {
     const img = imageRef.current;
-    if (!img || !status?.touch) return;
+    if (!img || (!status?.touch && !picking) || busy) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    press.current = { x: e.clientX, y: e.clientY, at: onImage(img, e.clientX, e.clientY) };
+    press.current = { x: e.clientX, y: e.clientY, at: onImage(img, e.clientX, e.clientY), picking, chat: agentId };
   };
 
   // A press is a tap where it started, or a swipe to where it ended.
@@ -101,6 +112,21 @@ export default function SimulatorView({ active }: { active: boolean }) {
     const start = press.current;
     press.current = null;
     if (!img || !start || !device) return;
+    if (start.picking) {
+      if (!picking || !start.chat) return;
+      const chat = start.chat;
+      const conversationId = useChats.getState().threads[chat]?.conversationId ?? null;
+      setPicking(false);
+      act(async () => {
+        const png = markedFrame(img, start.at[0], start.at[1]);
+        const [point, attachment] = await Promise.all([
+          simulatorPoint(device.udid, device.name, start.at[0], start.at[1], img.naturalWidth),
+          attachData("simulator-point.png", png),
+        ]);
+        addPoint(chat, simulatorPointText(point), attachment, conversationId);
+      }, "The simulator point couldn't be added. Try again.");
+      return;
+    }
     const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y);
     const width = img.naturalWidth;
     if (moved > SWIPE_AFTER_PX) {
@@ -110,6 +136,21 @@ export default function SimulatorView({ active }: { active: boolean }) {
       act(() => simulatorTap(device.udid, device.name, start.at[0], start.at[1], width), "The tap didn't go through.");
     }
   };
+
+  useEffect(() => useAttention.subscribe(state => {
+    if (agentId && selectQuestionFor(agentId)(state)) setPicking(false);
+  }), [agentId]);
+
+  useEffect(() => useNavigation.subscribe((next, previous) => {
+    if (next.agentId !== previous.agentId || next.route !== "conversation") { setPicking(false); press.current = null; }
+  }), []);
+
+  useEffect(() => {
+    if (!picking) return;
+    const escape = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") setPicking(false); };
+    window.addEventListener("keydown", escape);
+    return () => window.removeEventListener("keydown", escape);
+  }, [picking]);
 
   const type = (e: FormEvent) => {
     e.preventDefault();
@@ -139,11 +180,13 @@ export default function SimulatorView({ active }: { active: boolean }) {
           value={device.udid}
           options={devices.map((d) => ({ value: d.udid, label: `${d.name} · ${d.runtime}${d.booted ? " · running" : ""}` }))}
           onChange={(udid) => {
+            setPicking(false);
             setFrame(null);
             choose(udid);
           }}
           className="simulator-device"
         />
+        <IconButton icon={MousePointerClick} label="Point at something" size="sm" aria-pressed={picking} disabled={!running || !frame || busy || !agentId || Boolean(question)} title={!running ? "Boot this simulator first" : question ? "Answer the agent’s question first, then point at the screen." : undefined} onClick={() => setPicking(on => !on)} />
         {running ? (
           <>
             <IconButton icon={Circle} label="Home" size="sm" disabled={busy || !status.touch} onClick={() => act(() => simulatorHome(device.udid), "Home didn't go through.")} />
@@ -162,6 +205,7 @@ export default function SimulatorView({ active }: { active: boolean }) {
           </Button>
         )}
       </div>
+      <SimulatorTools key={device.udid} udid={device.udid} running={running} active={active} agentId={agentId} />
       {error && (
         <p className="field-error simulator-error" role="alert">
           <InlineCode text={error} />
@@ -173,7 +217,7 @@ export default function SimulatorView({ active }: { active: boolean }) {
             ref={imageRef}
             src={frame}
             alt={`${device.name}'s screen`}
-            className={status.touch ? "simulator-frame is-touchable" : "simulator-frame"}
+            className={status.touch || picking ? "simulator-frame is-touchable" : "simulator-frame"}
             draggable={false}
             onPointerDown={startPress}
             onPointerUp={endPress}

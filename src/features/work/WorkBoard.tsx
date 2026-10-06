@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { ArrowUpDown, CircleCheckBig, CirclePause, Hourglass, MessagesSquare, OctagonAlert, Play } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { CountBadge, EmptyState, Portrait, SelectField, SkeletonRows, Tabs, ICON_SIZE, ICON_STROKE } from "../../design";
+import { portraitKey, CountBadge, EmptyState, Portrait, SelectField, SkeletonRows, Tabs, ICON_SIZE, ICON_STROKE } from "../../design";
 import { AGENT_STATUS } from "../../lib/status";
 import { useNow } from "../../lib/useNow";
 import { useActivity } from "../../stores/activity";
@@ -175,7 +175,7 @@ function TeamSection() {
           return (
             <li key={a.id}>
               <button type="button" className="team-card" onClick={() => openConversation(a.id)}>
-                <Portrait name={a.name} figure={a.figure} accent={a.accent} status={a.status} size={40} />
+                <Portrait name={a.name} figure={portraitKey(a)} accent={a.accent} status={a.status} size={40} />
                 <span className="team-text">
                   <span className="team-name">{a.name}</span>
                   <span className="team-role">{a.role}</span>
