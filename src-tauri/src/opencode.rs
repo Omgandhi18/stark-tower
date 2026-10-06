@@ -449,6 +449,16 @@ fn open_session(opencode: &OpenCode, launch: &Launch) -> Result<String, String> 
             chat::note_in(&opencode.app, &opencode.sink, &opencode.agent_id, &note);
         }
     }
+    // OpenCode offers an "effort" option (its reasoning variants) for models that have levels.
+    // A resumed session keeps the level it had, so "default" is set back explicitly too.
+    let effort = launch.effort.trim();
+    let params = json!({ "sessionId": session, "configId": "effort", "value": if effort.is_empty() { "default" } else { effort } });
+    if let Err(e) = rpc.request("session/set_config_option", params, HANDSHAKE_TIMEOUT) {
+        if !effort.is_empty() {
+            let note = format!("OpenCode couldn't set {effort} effort ({e}), so the model runs at its own.");
+            chat::note_in(&opencode.app, &opencode.sink, &opencode.agent_id, &note);
+        }
+    }
     Ok(session)
 }
 

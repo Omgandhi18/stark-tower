@@ -38,7 +38,7 @@ test.describe("agents", () => {
       .click();
     await page.getByRole("tab", { name: "Provider" }).click();
     await expect(page.getByText("Installed, 2.1.3 · Signed in · Claude account")).toBeVisible();
-    await expect(page.getByText("3 models from Claude Code.", { exact: false })).toBeVisible();
+    await expect(page.getByText("6 models from Claude Code.", { exact: false })).toBeVisible();
     const table = page.getByRole("table", { name: "What Starkline can do on each provider" });
     await expect(table.getByRole("columnheader", { name: /Claude Code.*In use/ })).toBeVisible();
     // The provider in use says why; the others just say yes or no.
@@ -46,13 +46,69 @@ test.describe("agents", () => {
     await expect(sandbox).toContainText("Starkline doesn't turn on Claude Code's sandbox");
     await expect(sandbox.getByRole("cell").nth(1)).toHaveText("Yes");
 
-    // With the provider's models to pick from, the field is a combobox.
-    await page.getByRole("combobox", { name: "Model", exact: true }).fill("haiku");
+    // Models are picked by name and version, the current ones first.
+    const model = page.getByRole("combobox", { name: "Model", exact: true });
+    await expect(model).toHaveText("Default");
+    await model.click();
+    const choices = page.getByRole("listbox", { name: "Model choices" }).getByRole("option");
+    await expect(choices).toHaveText([/^Default/, /^Opus 5\.5/, /^Fable 5\.1/, /^Sonnet 5\.5/, /^Haiku 4\.5/, /^More models/]);
+    await choices.filter({ hasText: "Haiku 4.5" }).click();
+    await expect(model).toHaveText("Haiku 4.5");
+    await expect(page.getByText("Haiku 4.5 has no effort setting.")).toBeVisible();
     await page.getByRole("switch", { name: "Can start temporary helpers" }).click();
-    await expect(page.getByRole("textbox", { name: "Helper model" })).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: "Helper model" })).toHaveCount(0);
     await page.getByRole("button", { name: "Save changes" }).click();
     const update = (await fakeCalls(page)).filter((c) => c.cmd === "update_agent").pop();
-    expect(update?.args.agent).toMatchObject({ id: "friday", model: "haiku", helpers: false });
+    expect(update?.args.agent).toMatchObject({ id: "friday", model: "claude-haiku-4-5", effort: "", helpers: false });
+  });
+
+  test("picks an older model, a model ID of your own, and how hard it thinks", async ({ page }) => {
+    await openApp(page);
+    await goTo(page, "Agents");
+    await page
+      .getByRole("navigation", { name: "Agents" })
+      .getByRole("button", { name: /FRIDAY/ })
+      .click();
+    await page.getByRole("tab", { name: "Provider" }).click();
+    const model = page.getByRole("combobox", { name: "Model", exact: true });
+    const effort = page.getByRole("slider", { name: "Effort" });
+    await expect(effort).toHaveAttribute("aria-valuetext", "The model's default");
+
+    // Older models wait under More models; a model starts at its own default effort.
+    await model.click();
+    await expect(page.getByRole("option", { name: /^Opus 4\.6/ })).toHaveCount(0);
+    await page.getByRole("option", { name: /^More models/ }).click();
+    await page.getByRole("option", { name: /^Opus 4\.6/ }).click();
+    await expect(model).toHaveText("Opus 4.6");
+    await expect(effort).toHaveAttribute("aria-valuetext", "High, the default");
+    await expect(page.getByText("· default")).toBeVisible();
+
+    // Opus 4.6 has no Extra high, so one step up from High is Max.
+    await effort.press("ArrowRight");
+    await expect(effort).toHaveAttribute("aria-valuetext", "Max");
+
+    // Found by searching; a model with every level keeps Max.
+    await model.click();
+    await page.getByRole("combobox", { name: "Find a model" }).fill("sonnet 5.5");
+    await page.keyboard.press("Enter");
+    await expect(model).toHaveText("Sonnet 5.5");
+    await expect(effort).toHaveAttribute("aria-valuetext", "Max");
+    await effort.press("ArrowLeft");
+    await expect(effort).toHaveAttribute("aria-valuetext", "Extra high");
+
+    // A model the provider doesn't list can still be typed in.
+    await model.click();
+    await page.getByRole("combobox", { name: "Find a model" }).fill("claude-sonnet-4-5");
+    await page.getByRole("option", { name: /^Use “claude-sonnet-4-5”/ }).click();
+    await expect(model).toHaveText("claude-sonnet-4-5");
+
+    await page.getByRole("button", { name: "Save changes" }).click();
+    const update = (await fakeCalls(page)).filter((c) => c.cmd === "update_agent").pop();
+    expect(update?.args.agent).toMatchObject({ id: "friday", model: "claude-sonnet-4-5", effort: "xhigh" });
+
+    // Back to the model's own default effort.
+    await page.getByRole("button", { name: "Use default" }).click();
+    await expect(effort).toHaveAttribute("aria-valuetext", "The model's default");
   });
 
   test("shows what an agent may do here, with the rules you granted", async ({ page }) => {

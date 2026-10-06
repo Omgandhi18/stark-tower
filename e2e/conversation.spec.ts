@@ -32,6 +32,32 @@ test.describe("conversation", () => {
     await expect(log.getByText("Only what the user can see", { exact: true })).toBeVisible();
   });
 
+  test("changes the agent's model and effort from the message box", async ({ page }) => {
+    await openFriday(page);
+    const lastSaved = async () => (await fakeCalls(page)).filter((c) => c.cmd === "update_agent").pop()?.args.agent;
+
+    await page.getByRole("button", { name: "Default model" }).click();
+    await page.getByRole("option", { name: /^Sonnet 5\.5/ }).click();
+    await expect(page.getByRole("button", { name: "Sonnet 5.5" })).toBeFocused();
+    expect(await lastSaved()).toMatchObject({ id: "friday", model: "claude-sonnet-5-5", effort: "" });
+
+    await page.getByRole("button", { name: "High effort" }).click();
+    const effort = page.getByRole("slider", { name: "Effort" });
+    await expect(effort).toBeFocused();
+    await expect(effort).toHaveAttribute("aria-valuetext", "High, the default");
+    await effort.press("End");
+    await expect(page.getByRole("button", { name: "Max effort" })).toBeVisible();
+    await expect.poll(lastSaved).toMatchObject({ model: "claude-sonnet-5-5", effort: "max" });
+    await page.keyboard.press("Escape");
+    await expect(effort).toHaveCount(0);
+
+    // Haiku has no effort levels, so the effort goes with the move to it.
+    await page.getByRole("button", { name: "Sonnet 5.5" }).click();
+    await page.getByRole("option", { name: /^Haiku 4\.5/ }).click();
+    await expect(page.getByRole("button", { name: /effort$/ })).toHaveCount(0);
+    await expect.poll(lastSaved).toMatchObject({ model: "claude-haiku-4-5", effort: "" });
+  });
+
   test("sends a message and shows the reply once", async ({ page }) => {
     const log = await openFriday(page);
     await page.getByRole("region", { name: "Question from FRIDAY" }).getByRole("button", { name: "Everything" }).click();

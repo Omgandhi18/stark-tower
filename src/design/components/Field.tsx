@@ -13,7 +13,7 @@ interface FieldShellProps {
 }
 
 /** Label above, control, then helper or error text below. */
-function FieldShell({ label, hideLabel, helper, error, className, children }: FieldShellProps) {
+export function FieldShell({ label, hideLabel, helper, error, className, children }: FieldShellProps) {
   const id = useId();
   const noteId = helper || error ? `${id}-note` : undefined;
   return (

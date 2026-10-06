@@ -6,6 +6,7 @@ import { selectThread, useChats } from "../../stores/chats";
 import { AttachButton, AttachmentTray } from "../attachments/AttachmentTray";
 import type { AttachmentDraft } from "../attachments/useAttachmentDraft";
 import FilePicker from "./FilePicker";
+import ModelChips from "./ModelChips";
 import { detectMention, insertMention, optionId, rankPaths, type MentionQuery } from "./fileMentions";
 import { useFolderFiles } from "./useFolderFiles";
 
@@ -167,6 +168,7 @@ export default function ChatComposer({ agentId, agentName, folder, pending, answ
       <div className="chat-composer-bar">
         <AttachButton draft={attachments} disabled={answering} title={answering ? "Answer the question first, then attach files" : undefined} />
         <IconButton icon={AtSign} label="Mention a project file or folder" size="sm" disabled={!folder} onClick={startMention} />
+        <ModelChips agentId={agentId} agentName={agentName} />
         <span className="chat-composer-hint">Enter to send, Shift+Enter for a new line</span>
         {pending && (
           <Button size="sm" variant="secondary" icon={Square} onClick={onStop}>
