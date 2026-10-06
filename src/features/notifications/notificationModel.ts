@@ -1,6 +1,7 @@
 // How the Notification Centre slices its record: by view, filter and search,
 // grouped by day. Pure functions over the stored notifications.
 import {
+  AlarmClock,
   CalendarX2,
   CircleCheckBig,
   FileSearch,
@@ -44,6 +45,7 @@ const KINDS: Record<string, KindPresentation> = {
   rule_used: { label: "Allowed by a rule", verb: "went ahead under your rule", tone: "success", icon: ShieldCheck },
   automation_missed: { label: "Missed run", verb: "missed a scheduled run", tone: "attention", icon: CalendarX2 },
   automation_failed: { label: "Run didn't start", verb: "couldn't start a scheduled run", tone: "danger", icon: CalendarX2 },
+  reminder: { label: "Reminder", verb: "reminds you", tone: "attention", icon: AlarmClock },
 };
 
 export const KIND_OPTIONS = Object.entries(KINDS).map(([value, k]) => ({ value, label: k.label }));

@@ -41,6 +41,8 @@ export type {
   AutomationInput,
   AutomationRun,
   Schedule,
+  Reminder,
+  ReminderInput,
 } from "./bindings";
 
 import type { AgentStatus, Attachment } from "./bindings";

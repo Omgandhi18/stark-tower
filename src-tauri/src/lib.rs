@@ -22,6 +22,7 @@ mod power;
 mod providers;
 mod policy;
 mod pty;
+mod reminders;
 mod rpc;
 mod schedule;
 mod secrets;
@@ -613,6 +614,40 @@ fn skip_missed_run(app: tauri::AppHandle, id: i64) {
 #[specta::specta]
 fn list_automation_runs(app: tauri::AppHandle, id: i64) -> Vec<ledger::AutomationRun> {
     automations::runs(&app, id)
+}
+
+/// Every reminder, soonest first.
+#[tauri::command]
+#[specta::specta]
+fn list_reminders(app: tauri::AppHandle) -> Vec<ledger::Reminder> {
+    reminders::list(&app)
+}
+
+/// Set a reminder (no id) or change one; it's checked before it's saved.
+#[tauri::command]
+#[specta::specta]
+fn save_reminder(app: tauri::AppHandle, input: reminders::ReminderInput) -> Result<ledger::Reminder, String> {
+    reminders::save(&app, input)
+}
+
+/// Done with a reminder: a one-off is finished, a repeating one waits for its next time.
+#[tauri::command]
+#[specta::specta]
+fn complete_reminder(app: tauri::AppHandle, id: i64) -> Result<(), String> {
+    reminders::complete(&app, id)
+}
+
+/// Remind me again later.
+#[tauri::command]
+#[specta::specta]
+fn snooze_reminder(app: tauri::AppHandle, id: i64, until: i64) -> Result<ledger::Reminder, String> {
+    reminders::snooze(&app, id, until)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn delete_reminder(app: tauri::AppHandle, id: i64) -> Result<(), String> {
+    reminders::delete(&app, id)
 }
 
 /// Everything the task screen shows: the task, what it delegated, its history,
@@ -1433,6 +1468,11 @@ fn specta_builder() -> tauri_specta::Builder {
             permission_policy,
             provider_capabilities,
             provider_models,
+            list_reminders,
+            save_reminder,
+            complete_reminder,
+            snooze_reminder,
+            delete_reminder,
             list_automations,
             save_automation,
             set_automation_enabled,
@@ -1603,6 +1643,7 @@ pub fn run() {
             }
             // Recovery first, then the automation scheduler.
             automations::start(app.handle().clone());
+            reminders::start(app.handle().clone());
             // Copies of files attached to messages that were never sent go after a day.
             {
                 let h = app.handle().clone();

@@ -3,7 +3,7 @@
 // a camera position or a scroll offset.
 import { create } from "zustand";
 
-export type RouteId = "work" | "task" | "conversation" | "environment" | "agents" | "automations" | "notifications" | "settings";
+export type RouteId = "work" | "task" | "conversation" | "environment" | "agents" | "automations" | "reminders" | "notifications" | "settings";
 
 export type SettingsSection = "general" | "providers" | "permissions" | "power" | "themes" | "diagnostics";
 

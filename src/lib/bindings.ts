@@ -205,6 +205,53 @@ async providerModels(engineId: string) : Promise<Result<ModelChoice[], string>> 
 }
 },
 /**
+ * Every reminder, soonest first.
+ */
+async listReminders() : Promise<Reminder[]> {
+    return await TAURI_INVOKE("list_reminders");
+},
+/**
+ * Set a reminder (no id) or change one; it's checked before it's saved.
+ */
+async saveReminder(input: ReminderInput) : Promise<Result<Reminder, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_reminder", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Done with a reminder: a one-off is finished, a repeating one waits for its next time.
+ */
+async completeReminder(id: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("complete_reminder", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Remind me again later.
+ */
+async snoozeReminder(id: number, until: number) : Promise<Result<Reminder, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("snooze_reminder", { id, until }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteReminder(id: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_reminder", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Every automation, by name.
  */
 async listAutomations() : Promise<Automation[]> {
@@ -833,7 +880,11 @@ handled: number | null; outcome: string | null;
 /**
  * The automation it's about (a missed or failed run).
  */
-automation_id: number | null }
+automation_id: number | null; 
+/**
+ * The reminder that went off.
+ */
+reminder_id: number | null }
 export type PathEntry = { path: string; dir: boolean }
 /**
  * A stored rule, as Settings lists it.
@@ -927,6 +978,58 @@ helpers: Capability;
  * Starkline's team tools: delegate, ask you, message teammates, report bugs.
  */
 team_tools: Capability }
+/**
+ * Something the developer wants reminding of, and the agent who reminds them.
+ */
+export type Reminder = { id: number; 
+/**
+ * What to remember ("Check the deploy").
+ */
+text: string; 
+/**
+ * The agent who reminds the developer.
+ */
+agent_id: string; 
+/**
+ * The task it's about, if any.
+ */
+task_id: string | null; 
+/**
+ * When it next goes off.
+ */
+due: number; 
+/**
+ * How it repeats; None goes off once.
+ */
+repeat: Schedule | null; 
+/**
+ * waiting (for its time) | due (went off, waiting on the developer) | done
+ */
+status: string; 
+/**
+ * When it last went off.
+ */
+fired: number | null; 
+/**
+ * Who set it: "you", or the agent the developer asked in chat.
+ */
+set_by: string; created: number; updated: number }
+/**
+ * What the developer enters.
+ */
+export type ReminderInput = { 
+/**
+ * None to create one.
+ */
+id: number | null; text: string; 
+/**
+ * Who reminds the developer.
+ */
+agent_id: string; task_id: string | null; 
+/**
+ * When it goes off. A repeating reminder goes off on its schedule instead.
+ */
+due: number; repeat: Schedule | null }
 /**
  * Something an agent is blocked on until the developer decides: a plan, diff,
  * question or choice (`ask_human`), or a command the permission gate routed.

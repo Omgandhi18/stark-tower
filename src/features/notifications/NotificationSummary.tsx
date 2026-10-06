@@ -1,13 +1,14 @@
 import { useState } from "react";
-import { CalendarClock, CheckCheck, Play, RotateCcw, SkipForward, SquareArrowOutUpRight, X } from "lucide-react";
+import { AlarmClock, CalendarClock, Check, CheckCheck, Play, RotateCcw, SkipForward, SquareArrowOutUpRight, X } from "lucide-react";
 import { Button, InlineCode, Portrait, StatusPill } from "../../design";
-import { closeTask, resumeTask, reviewTask, runAutomationNow, skipMissedRun, startTask } from "../../lib/api";
+import { closeTask, completeReminder, resumeTask, reviewTask, runAutomationNow, skipMissedRun, snoozeReminder, startTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { formatRelative } from "../../lib/time";
 import type { Agent, Notification } from "../../lib/types";
 import { useAutomations } from "../../stores/automations";
 import { useNavigation } from "../../stores/navigation";
 import { folderName, useWorkspace } from "../../stores/workspace";
+import SnoozeButton from "../reminders/SnoozeButton";
 import { presentKind } from "./notificationModel";
 
 interface NotificationSummaryProps {
@@ -20,6 +21,7 @@ interface NotificationSummaryProps {
 export default function NotificationSummary({ notification: n, agent, now }: NotificationSummaryProps) {
   const openTask = useNavigation((s) => s.openTask);
   const openAutomation = useNavigation((s) => s.openAutomation);
+  const navigate = useNavigation((s) => s.navigate);
   const task = useWorkspace((s) => s.tasks.find((t) => t.id === n.task_id));
   const automation = useAutomations((s) => s.items.find((a) => a.id === n.automation_id));
   const [error, setError] = useState<string | null>(null);
@@ -94,6 +96,25 @@ export default function NotificationSummary({ notification: n, agent, now }: Not
         <p className="review-detail-error" role="alert">
           {error}
         </p>
+      )}
+      {n.reminder_id !== null && (
+        <div className="notification-actions">
+          {open && (
+            <>
+              <Button variant="primary" icon={Check} onClick={() => run(() => completeReminder(n.reminder_id as number), "The reminder couldn't be marked done.")}>
+                Done
+              </Button>
+              <SnoozeButton
+                size="md"
+                label={`Snooze “${n.title}”`}
+                onSnooze={(until) => run(() => snoozeReminder(n.reminder_id as number, until), "The reminder couldn't be snoozed.")}
+              />
+            </>
+          )}
+          <Button variant="ghost" icon={AlarmClock} onClick={() => navigate("reminders")}>
+            Open Reminders
+          </Button>
+        </div>
       )}
       {automation && (
         <div className="notification-actions">

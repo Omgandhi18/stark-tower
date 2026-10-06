@@ -786,3 +786,20 @@ The developer asked for "proper model name with version selection" like Claude C
 - **Effort is set per agent** (`effort`, "" = the model's own default) and reaches each provider its own way: `--effort` for Claude Code, the turn's `effort` for Codex, and OpenCode's `effort` session option, which exists only for models with variants. Each model offers only the levels it takes: Haiku 4.5 has none, and Opus 4.6 and Sonnet 4.6 have no Extra high. The level a model runs at by default is marked on the slider. Moving to another model keeps the effort if that model takes it, else the nearest level it does (the lower one on a tie). Moving to a provider of another kind starts the model and effort over.
 - **A change takes effect on the next message.** A chat's session records the model and effort it was started with. The next message to an agent that isn't mid-turn restarts the session on the new settings and resumes the conversation, and the chat notes the switch ("Now on Opus 4.6 at max effort.").
 - **Where it's chosen:** the agent's Provider tab, which has a searchable model list, the effort slider under it, and the helper model picked from the same list. The composer also has a model chip and an effort chip that save straight away. Typing in the search finds models by name or ID, and anything typed can be used as a model ID of its own (a model the provider hasn't listed yet).
+
+### 2026-10-06: reminders, from the agent you pick
+
+The developer asked for "a task view with reminders so i can set reminders ... and the agent then reminds me by notifying me about it."
+
+- **Where reminders are set.** There are three places:
+  - the new **Reminders** screen (⌘5; Notifications moves to ⌘6 and Settings to ⌘7), which says what to remember, when (quick times or a date and time of your own), whether it repeats (every day, every weekday, every week) and which agent reminds you;
+  - **Remind me** on a task, where the task's owner reminds you and the reminder links back to the task;
+  - asking any agent in chat ("remind me at 5 to check the deploy"), through the agents' new `remind` tool. It takes a local time or minutes from now, and the agent that set the reminder is the one that reminds you.
+- **When one comes due,** that agent reminds you in four ways:
+  - a needs-you notification under its name, with Done and Snooze (10 minutes, an hour, tomorrow morning);
+  - a macOS banner, shown even while Starkline is in front, because a reminder is about the time;
+  - a line in that agent's chat;
+  - in the room, the agent walking over to hand it in.
+- **While you're in Starkline,** the reminder also pops up in the corner from that agent until you deal with it.
+- **A reminder about a task** says how the task stands when it goes off ("“Write the release notes” is ready for your review").
+- **Repeats and missed times.** A repeating reminder waits for its next time straight away. One that came due while the Mac slept or Starkline was closed goes off at the next launch and says when it was due. Reminders are checked every 10 seconds, apart from automations, so neither waits on the other.

@@ -164,6 +164,8 @@ pub struct Notification {
     pub outcome: Option<String>,
     /// The automation it's about (a missed or failed run).
     pub automation_id: Option<i64>,
+    /// The reminder that went off.
+    pub reminder_id: Option<i64>,
 }
 
 /// What a new notification says.
@@ -178,9 +180,10 @@ pub struct NewNotification<'a> {
     pub body: &'a str,
     pub review_id: Option<&'a str>,
     pub automation_id: Option<i64>,
+    pub reminder_id: Option<i64>,
 }
 
-const NOTIFICATION_COLUMNS: &str = "id, ts, kind, urgency, agent_id, task_id, cwd, title, body, review_id, read, handled, outcome, automation_id";
+const NOTIFICATION_COLUMNS: &str = "id, ts, kind, urgency, agent_id, task_id, cwd, title, body, review_id, read, handled, outcome, automation_id, reminder_id";
 
 fn notification_from_row(r: &rusqlite::Row) -> rusqlite::Result<Notification> {
     Ok(Notification {
@@ -198,6 +201,7 @@ fn notification_from_row(r: &rusqlite::Row) -> rusqlite::Result<Notification> {
         handled: r.get(11)?,
         outcome: r.get(12)?,
         automation_id: r.get(13)?,
+        reminder_id: r.get(14)?,
     })
 }
 
@@ -218,6 +222,49 @@ fn rule_from_row(r: &rusqlite::Row) -> rusqlite::Result<crate::policy::Permissio
         uses: r.get(10)?,
         last_used: r.get(11)?,
         revoked: r.get(12)?,
+    })
+}
+
+/// Something the developer wants reminding of, and the agent who reminds them.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct Reminder {
+    pub id: i64,
+    /// What to remember ("Check the deploy").
+    pub text: String,
+    /// The agent who reminds the developer.
+    pub agent_id: String,
+    /// The task it's about, if any.
+    pub task_id: Option<String>,
+    /// When it next goes off.
+    pub due: i64,
+    /// How it repeats; None goes off once.
+    pub repeat: Option<crate::schedule::Schedule>,
+    /// waiting (for its time) | due (went off, waiting on the developer) | done
+    pub status: String,
+    /// When it last went off.
+    pub fired: Option<i64>,
+    /// Who set it: "you", or the agent the developer asked in chat.
+    pub set_by: String,
+    pub created: i64,
+    pub updated: i64,
+}
+
+const REMINDER_COLUMNS: &str = "id, text, agent_id, task_id, due, repeat, status, fired, set_by, created, updated";
+
+fn reminder_from_row(r: &rusqlite::Row) -> rusqlite::Result<Reminder> {
+    let repeat: Option<String> = r.get(5)?;
+    Ok(Reminder {
+        id: r.get(0)?,
+        text: r.get(1)?,
+        agent_id: r.get(2)?,
+        task_id: r.get(3)?,
+        due: r.get(4)?,
+        repeat: repeat.and_then(|json| serde_json::from_str(&json).ok()),
+        status: r.get(6)?,
+        fired: r.get(7)?,
+        set_by: r.get(8)?,
+        created: r.get(9)?,
+        updated: r.get(10)?,
     })
 }
 
@@ -508,6 +555,24 @@ impl Ledger {
         )?;
         conn.execute("CREATE INDEX IF NOT EXISTS idx_notifications_ts ON notifications(ts)", [])?;
         ensure_column(&conn, "notifications", "automation_id", "INTEGER")?;
+        ensure_column(&conn, "notifications", "reminder_id", "INTEGER")?;
+        // Reminders the developer set, each with the agent who reminds them.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS reminders (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                text     TEXT    NOT NULL,
+                agent_id TEXT    NOT NULL,
+                task_id  TEXT,
+                due      INTEGER NOT NULL,
+                repeat   TEXT,
+                status   TEXT    NOT NULL DEFAULT 'waiting',
+                fired    INTEGER,
+                set_by   TEXT    NOT NULL DEFAULT 'you',
+                created  INTEGER NOT NULL,
+                updated  INTEGER NOT NULL
+            )",
+            [],
+        )?;
         // Work that runs on a schedule, and every run it made.
         conn.execute(
             "CREATE TABLE IF NOT EXISTS automations (
@@ -975,9 +1040,9 @@ impl Ledger {
         let id = {
             let conn = self.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO notifications (ts, kind, urgency, agent_id, task_id, cwd, title, body, review_id, automation_id) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                rusqlite::params![ts, n.kind, n.urgency, n.agent_id, n.task_id, n.cwd, n.title, n.body, n.review_id, n.automation_id],
+                "INSERT INTO notifications (ts, kind, urgency, agent_id, task_id, cwd, title, body, review_id, automation_id, reminder_id) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                rusqlite::params![ts, n.kind, n.urgency, n.agent_id, n.task_id, n.cwd, n.title, n.body, n.review_id, n.automation_id, n.reminder_id],
             )
             .ok()?;
             conn.last_insert_rowid()
@@ -1052,6 +1117,71 @@ impl Ledger {
             rusqlite::params![automation_id, now_ms(), outcome],
         )
         .unwrap_or(0)
+    }
+
+    /// Settle a reminder's open notification (done, snoozed, deleted).
+    pub fn handle_reminder_notifications(&self, reminder_id: i64, outcome: &str) -> usize {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE notifications SET handled = ?2, outcome = ?3, read = 1 WHERE reminder_id = ?1 AND handled IS NULL",
+            rusqlite::params![reminder_id, now_ms(), outcome],
+        )
+        .unwrap_or(0)
+    }
+
+    // ---- Reminders -------------------------------------------------------------
+
+    /// Create (id 0) or update a reminder; returns it as stored.
+    pub fn save_reminder(&self, r: &Reminder) -> Option<Reminder> {
+        let ts = now_ms();
+        let repeat = match &r.repeat {
+            Some(schedule) => Some(serde_json::to_string(schedule).ok()?),
+            None => None,
+        };
+        let id = {
+            let conn = self.conn.lock().unwrap();
+            if r.id > 0 {
+                conn.execute(
+                    "UPDATE reminders SET text = ?2, agent_id = ?3, task_id = ?4, due = ?5, repeat = ?6, status = ?7, fired = ?8, updated = ?9 WHERE id = ?1",
+                    rusqlite::params![r.id, r.text, r.agent_id, r.task_id, r.due, repeat, r.status, r.fired, ts],
+                )
+                .ok()?;
+                r.id
+            } else {
+                conn.execute(
+                    "INSERT INTO reminders (text, agent_id, task_id, due, repeat, status, fired, set_by, created, updated) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+                    rusqlite::params![r.text, r.agent_id, r.task_id, r.due, repeat, r.status, r.fired, r.set_by, ts],
+                )
+                .ok()?;
+                conn.last_insert_rowid()
+            }
+        };
+        self.reminder(id)
+    }
+
+    pub fn reminder(&self, id: i64) -> Option<Reminder> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(&format!("SELECT {REMINDER_COLUMNS} FROM reminders WHERE id = ?1"), [id], reminder_from_row).ok()
+    }
+
+    /// Every reminder, soonest first.
+    pub fn reminders(&self) -> Vec<Reminder> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = match conn.prepare(&format!("SELECT {REMINDER_COLUMNS} FROM reminders ORDER BY due, id")) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        let found: Vec<Reminder> = match stmt.query_map([], reminder_from_row) {
+            Ok(it) => it.filter_map(|x| x.ok()).collect(),
+            Err(_) => vec![],
+        };
+        found
+    }
+
+    pub fn delete_reminder(&self, id: i64) {
+        let conn = self.conn.lock().unwrap();
+        let _ = conn.execute("DELETE FROM reminders WHERE id = ?1", [id]);
     }
 
     // ---- Permission rules ------------------------------------------------------
@@ -1757,6 +1887,43 @@ mod tests {
     }
 
     #[test]
+    fn reminders_round_trip_and_settle_their_notification() {
+        let (l, p) = temp_db();
+        let base = Reminder {
+            id: 0,
+            text: "Check the deploy".into(),
+            agent_id: "veronica".into(),
+            task_id: Some("t-1".into()),
+            due: 2_000,
+            repeat: Some(crate::schedule::Schedule::Weekdays { time: "09:30".into() }),
+            status: "waiting".into(),
+            fired: None,
+            set_by: "you".into(),
+            created: 0,
+            updated: 0,
+        };
+        let saved = l.save_reminder(&base).expect("saved");
+        let later = l.save_reminder(&Reminder { due: 1_000, repeat: None, task_id: None, ..base.clone() }).expect("saved");
+        assert_eq!(l.reminders().iter().map(|r| r.id).collect::<Vec<_>>(), vec![later.id, saved.id], "soonest first");
+        assert_eq!(saved.repeat, base.repeat);
+        assert_eq!(saved.task_id.as_deref(), Some("t-1"));
+
+        let fired = l.save_reminder(&Reminder { status: "due".into(), fired: Some(3_000), ..saved.clone() }).unwrap();
+        assert_eq!((fired.status.as_str(), fired.fired, fired.text.as_str()), ("due", Some(3_000), "Check the deploy"));
+
+        let n = l
+            .add_notification(&NewNotification { kind: "reminder", urgency: "needs_you", agent_id: "veronica", title: "Check the deploy", reminder_id: Some(saved.id), ..Default::default() })
+            .unwrap();
+        assert_eq!(n.reminder_id, Some(saved.id));
+        assert_eq!(l.handle_reminder_notifications(saved.id, "Done"), 1);
+        assert_eq!(l.notification(n.id).unwrap().outcome.as_deref(), Some("Done"));
+
+        l.delete_reminder(saved.id);
+        assert!(l.reminder(saved.id).is_none());
+        let _ = std::fs::remove_file(p);
+    }
+
+    #[test]
     fn notifications_are_settled_by_review_or_task() {
         let (l, p) = temp_db();
         let base = |kind: &'static str, review: Option<&'static str>, task: Option<&'static str>| NewNotification {
@@ -1769,6 +1936,7 @@ mod tests {
             body: "",
             review_id: review,
             automation_id: None,
+            reminder_id: None,
         };
         let approval = l.add_notification(&base("approval", Some("rv-1"), Some("t1"))).unwrap();
         let ready = l.add_notification(&base("task_ready", None, Some("t1"))).unwrap();

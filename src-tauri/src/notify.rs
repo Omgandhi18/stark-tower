@@ -6,7 +6,7 @@
 //! macOS notification.
 
 use crate::bridge::ReviewRequest;
-use crate::ledger::{Automation, NewNotification, Task};
+use crate::ledger::{Automation, NewNotification, Reminder, Task};
 use tauri::{Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
@@ -74,6 +74,7 @@ pub fn review_opened(app: &tauri::AppHandle, review: &ReviewRequest) {
             body: &body,
             review_id: Some(&review.id),
             automation_id: None,
+            reminder_id: None,
         },
         &format!("{name} {verb}"),
     );
@@ -112,6 +113,7 @@ pub fn task_ready(app: &tauri::AppHandle, task: &Task) {
             body: &format!("{name} finished and it's ready for your review."),
             review_id: None,
             automation_id: None,
+            reminder_id: None,
         },
         &format!("{name} is ready for your review"),
     );
@@ -135,6 +137,7 @@ pub fn task_blocked(app: &tauri::AppHandle, task: &Task, reason: &str) {
             body: reason,
             review_id: None,
             automation_id: None,
+            reminder_id: None,
         },
         &format!("{name} is blocked"),
     );
@@ -162,6 +165,7 @@ pub fn check_failed(app: &tauri::AppHandle, agent_id: &str, task: &Task, kind: &
             body: &format!("{} in \"{}\"", crate::chat::truncate(command, 120), task.title),
             review_id: None,
             automation_id: None,
+            reminder_id: None,
         },
         "",
     );
@@ -180,6 +184,7 @@ pub fn rule_used(app: &tauri::AppHandle, agent_id: &str, task_id: Option<&str>, 
         body: &crate::chat::truncate(subject, BODY_LIMIT),
         review_id: None,
         automation_id: None,
+        reminder_id: None,
     }) else {
         return;
     };
@@ -240,6 +245,56 @@ pub fn automation_failed(app: &tauri::AppHandle, a: &Automation, reason: &str) {
 pub fn automation_settled(app: &tauri::AppHandle, automation_id: i64, outcome: &str) {
     let Some(state) = app.try_state::<crate::AppState>() else { return };
     if state.ledger.handle_automation_notifications(automation_id, outcome) > 0 {
+        changed(app);
+    }
+}
+
+/// How a task stands, for a reminder about it.
+fn task_standing(status: &str) -> &'static str {
+    match status {
+        "todo" => "is waiting its turn",
+        "doing" => "is under way",
+        "blocked" => "is blocked",
+        "done" => "is ready for your review",
+        "reviewed" => "you've reviewed",
+        _ => "was closed",
+    }
+}
+
+/// A reminder came due: its agent reminds the developer. Unlike other
+/// notifications, the banner shows even while Starkline is in front: it's about the time.
+pub fn reminder_due(app: &tauri::AppHandle, r: &Reminder, late_since: Option<&str>) {
+    let Some(state) = app.try_state::<crate::AppState>() else { return };
+    let name = crate::prompts::agent_name(app, &r.agent_id);
+    let task = r.task_id.as_deref().and_then(|id| state.ledger.task(id));
+    let mut body = task.as_ref().map(|t| format!("\u{201c}{}\u{201d} {}.", t.title, task_standing(&t.status))).unwrap_or_default();
+    if let Some(due) = late_since {
+        let late = format!("It was due {due}, while the Mac was asleep or Starkline was closed.");
+        body = if body.is_empty() { late } else { format!("{body} {late}") };
+    }
+    let n = NewNotification {
+        kind: "reminder",
+        urgency: NEEDS_YOU,
+        agent_id: &r.agent_id,
+        task_id: r.task_id.as_deref(),
+        cwd: task.as_ref().map_or("", |t| t.cwd.as_str()),
+        title: &r.text,
+        body: &body,
+        reminder_id: Some(r.id),
+        ..Default::default()
+    };
+    if state.ledger.add_notification(&n).is_some() {
+        if let Err(e) = app.notification().builder().title(format!("{name} reminds you")).body(&r.text).show() {
+            eprintln!("[notify] couldn't show a reminder: {e}");
+        }
+        changed(app);
+    }
+}
+
+/// The developer dealt with a reminder (done, snoozed, moved or deleted it).
+pub fn reminder_settled(app: &tauri::AppHandle, reminder_id: i64, outcome: &str) {
+    let Some(state) = app.try_state::<crate::AppState>() else { return };
+    if state.ledger.handle_reminder_notifications(reminder_id, outcome) > 0 {
         changed(app);
     }
 }

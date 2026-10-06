@@ -1,6 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { commands, type AutomationInput, type PowerState, type Result } from "./bindings";
+import { commands, type AutomationInput, type PowerState, type ReminderInput, type Result } from "./bindings";
 import type { Attachment, ChatEvent, ChatSwitch, TaskEvent, LedgerEntry, PtyData, ReviewRequest, StatusEvent, UsageUpdate, UpdateStatus } from "./types";
 
 // Commands are the tauri-specta-generated, typed wrappers (bindings.ts). Fallible
@@ -76,6 +76,27 @@ export const providerCapabilities = () => commands.providerCapabilities();
 
 /** The models a provider offers, as its CLI lists them. */
 export const providerModels = (engineId: string) => ok(commands.providerModels(engineId));
+
+// ---- Reminders ----
+
+export const listReminders = () => commands.listReminders();
+
+/** Set (no id) or change a reminder; rejects with the reason it can't be saved. */
+export const saveReminder = (input: ReminderInput) => ok(commands.saveReminder(input));
+
+/** Done: a one-off is finished, a repeating one waits for its next time. */
+export const completeReminder = (id: number) => ok(commands.completeReminder(id));
+
+/** Remind me again at `until`. */
+export const snoozeReminder = (id: number, until: number) => ok(commands.snoozeReminder(id, until));
+
+export const deleteReminder = (id: number) => ok(commands.deleteReminder(id));
+
+export const onRemindersChanged = (cb: () => void): Promise<UnlistenFn> => listen("reminders://changed", () => cb());
+
+/** A reminder went off; its agent is reminding the developer. */
+export const onReminderDue = (cb: (due: { id: number; agentId: string }) => void): Promise<UnlistenFn> =>
+  listen<{ id: number; agentId: string }>("reminders://due", (e) => cb(e.payload));
 
 // ---- Automations ----
 

@@ -9,6 +9,7 @@ import type { Agent, Task } from "../../lib/types";
 import type { CastMember } from "../../environment/life/director";
 import type { Activity } from "../../environment/life/types";
 import { lifeEvents, type TaskMark } from "../../environment/life/events";
+import { onReminderDue } from "../../lib/api";
 import {
   FOCUS_ZOOM,
   MAX_ZOOM,
@@ -224,6 +225,15 @@ export default function EnvironmentView({ room, agents, helpers, waitingOnYou, t
     marksRef.current = marks;
     if (events.length && mode === "live") rendererRef.current?.push(events);
   }, [tasks, agents, mode, rendererRef]);
+
+  // A reminder going off: the agent reminding you walks over to hand it in.
+  useEffect(() => {
+    if (mode !== "live") return;
+    const listening = onReminderDue(({ agentId }) => rendererRef.current?.push([{ kind: "deliver", from: agentId }]));
+    return () => {
+      listening.then((stop) => stop()).catch(() => undefined);
+    };
+  }, [mode, rendererRef]);
 
   const liven = useCallback(() => {
     rendererRef.current?.liven();

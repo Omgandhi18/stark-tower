@@ -20,6 +20,7 @@ import type {
   ProviderCapabilities,
   PowerState,
   ProjectsState,
+  Reminder,
   ReviewRequest,
   RuntimeHealth,
   StoredMessage,
@@ -66,6 +67,8 @@ export interface Scenario {
   capabilities: ProviderCapabilities[];
   /** The models each provider lists, by engine id. */
   models: Record<string, ModelChoice[]>;
+  /** Reminders the developer set, soonest first. */
+  reminders: Reminder[];
 }
 
 const POLICY: PolicyRule[] = [
@@ -643,6 +646,7 @@ export function defaultScenario(): Scenario {
       },
     ],
     ...automations(),
+    reminders: reminders(),
     policy: POLICY,
     capabilities: CAPABILITIES,
     models: {
@@ -683,6 +687,7 @@ function notification(
     handled: null,
     outcome: null,
     automation_id: null,
+    reminder_id: null,
     ...over,
   };
 }
@@ -726,6 +731,38 @@ const run = (
   summary,
   trigger,
 });
+
+const reminder = (over: Partial<Reminder> & Pick<Reminder, "id" | "text" | "agent_id" | "due">): Reminder => ({
+  task_id: null,
+  repeat: null,
+  status: "waiting",
+  fired: null,
+  set_by: "you",
+  created: ago(60 * 24),
+  updated: ago(60 * 24),
+  ...over,
+});
+
+function reminders(): Reminder[] {
+  return [
+    reminder({ id: 1, text: "Review EDITH's release notes", agent_id: "edith", due: on(0, 18), task_id: "t-notes" }),
+    reminder({ id: 2, text: "Prepare for stand-up", agent_id: "jarvis", due: on(1, 9, 30), repeat: { kind: "weekdays", time: "09:30" }, set_by: "jarvis" }),
+    reminder({ id: 3, text: "Renew the staging certificate", agent_id: "veronica", due: ago(60 * 26), status: "done", fired: ago(60 * 26), updated: ago(60 * 25) }),
+  ];
+}
+
+/** A reminder that has just gone off, as the scheduler leaves it: due, with its notification open. */
+export function withDueReminder(scenario: Scenario): Scenario {
+  const due = reminder({ id: 9, text: "Check the staging deploy", agent_id: "veronica", due: ago(2), status: "due", fired: ago(2) });
+  return {
+    ...scenario,
+    reminders: [due, ...scenario.reminders],
+    notifications: [
+      notification(90, "reminder", "needs_you", "veronica", due.text, "", 2, { reminder_id: due.id }),
+      ...scenario.notifications,
+    ],
+  };
+}
 
 function automations(): Pick<Scenario, "automations" | "automationRuns"> {
   runSeq = 0;
