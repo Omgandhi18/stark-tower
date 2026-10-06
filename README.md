@@ -40,6 +40,26 @@ npm install
 npm run tauri dev
 ```
 
+### As an app
+
+```bash
+npm run build:app
+```
+
+This builds `Starkline.app` into `src-tauri/target/release/bundle/macos/`. Drag it into
+Applications and open it from there, like any other app. The first build compiles
+everything in release mode, so it takes a few minutes.
+
+- The app is signed ad-hoc (`bundle.macOS.signingIdentity` is `"-"`). macOS only lets a
+  signed app bundle ask for notifications. `tauri dev` isn't one, so there Starkline
+  falls back to older notifications, which show as Terminal's and can't open what you
+  click. It isn't notarized, so it's meant for the Mac that built it. On another Mac,
+  right-click it and choose Open the first time.
+- Dev mode and the app share the same settings, chats and history
+  (`~/Library/Application Support/com.omgandhi.starktower`). Quit one before opening
+  the other.
+- To update, pull, run `npm run build:app` again and replace the app in Applications.
+
 Click an agent (on the floor or in the roster) to open its terminal and bring it
 online. Or type a task into the JARVIS command line — it routes to a free worker,
 spawning one if needed.

@@ -49,6 +49,10 @@
     "resources": {
       "mcp/delegate-mcp.mjs": "mcp/delegate-mcp.mjs",
       "mcp/gate-hook.mjs": "mcp/gate-hook.mjs"
+    },
+    "macOS": {
+      "signingIdentity": "-",
+      "hardenedRuntime": false
     }
   }
 }
