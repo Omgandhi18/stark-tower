@@ -27,8 +27,8 @@ fn add(app: &tauri::AppHandle, n: NewNotification, headline: &str) {
             "question" => ("needs_you", format!("{name} has a question: {}.", n.title)),
             "review" => ("needs_you", format!("{name} needs your review: {}.", n.title)),
             "task_blocked" => ("failure", format!("{name} here: {} is blocked. {}", n.title, crate::chat::truncate(n.body, 180))),
-            "check_failed" => ("failure", format!("{name} here: {} in {}.", n.title, n.body)),
             "automation_failed" => ("failure", format!("{name} here: {}.", n.title)),
+            // An agent's own failed checks are routine while it works, so they stay quiet, as on the Mac.
             _ => ("", String::new()),
         };
         if !kind.is_empty() {
