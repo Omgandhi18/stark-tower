@@ -209,6 +209,9 @@ pub struct AppConfig {
     pub worktrees_enabled: bool,
     #[serde(default)]
     pub worktree_setup: BTreeMap<String, crate::workspaces::WorktreeSetup>,
+    /// The global capture shortcut and the choices used in its small window.
+    #[serde(default)]
+    pub quick_capture: crate::capture::CaptureConfig,
     /// How Starkline looks: one of [`THEMES`]. Tasks, permissions and providers don't change with it.
     #[serde(default = "default_theme")]
     pub theme: String,
@@ -429,6 +432,7 @@ pub fn default_config() -> AppConfig {
         worktree_setup: BTreeMap::new(),
         standup_minutes: 0,
         keep_awake: false,
+        quick_capture: crate::capture::CaptureConfig::default(),
         theme: default_theme(),
         outfits: default_outfits(),
         dev_servers: std::collections::HashMap::new(),

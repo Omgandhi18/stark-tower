@@ -274,6 +274,36 @@ function install(scenario: Scenario) {
     terminal_resize: () => null,
     terminal_title: (args) => { const terminal = state.terminals.find((t) => t.id === args.id); if (terminal) terminal.title = String(args.title); return null; },
     terminal_close: (args) => { state.terminals = state.terminals.filter((t) => t.id !== args.id); terminalChannels.delete(String(args.id)); return null; },
+    set_capture_shortcut: (args) => {
+      const shortcut = String(args.shortcut);
+      if (args.enabled && state.takenShortcuts?.includes(shortcut)) {
+        const keys = shortcut.split("+");
+        const symbols: Record<string, string> = { Control: "⌃", Alt: "⌥", Shift: "⇧", Super: "⌘" };
+        const label = ["Control", "Alt", "Shift", "Super"].filter((key) => keys.includes(key)).map((key) => symbols[key]).join("") + keys.at(-1)?.replace(/^(Key|Digit)/, "");
+        throw `${label} is taken by another app. Pick another shortcut.`;
+      }
+      state.config.quick_capture.enabled = Boolean(args.enabled);
+      state.config.quick_capture.shortcut = shortcut;
+      state.captureError = undefined;
+      return commitConfig();
+    },
+    capture_error: () => state.captureError ?? null,
+    hide_capture: () => { state.captureVisible = false; },
+    resize_capture: (args) => { state.captureHeight = Math.max(200, Math.min(420, Number(args.height))); },
+    remember_capture: (args) => {
+      if (args.reminder) state.config.quick_capture.last_reminder_agent = String(args.agentId);
+      else {
+        state.config.quick_capture.last_agent = String(args.agentId);
+        state.config.quick_capture.last_project = args.project as string | null;
+      }
+      return commitConfig();
+    },
+    open_capture_task: (args) => {
+      if (!state.tasks.some((task) => task.id === args.id)) throw "That task couldn't be found. Open Work to see your tasks.";
+      state.openedCaptureTask = String(args.id);
+      state.captureVisible = false;
+      emit("capture://open-task", args.id);
+    },
     list_agents: () => roster(),
     active_context: (args) => {
       const agentId = String(args.agentId);
@@ -972,6 +1002,7 @@ function install(scenario: Scenario) {
         if (!cmd.startsWith("plugin:") && performance.now() < readyAt) {
           throw `state not managed for field \`state\` on command \`${cmd}\`. You must call \`.manage()\` before using this command`;
         }
+        if (state.commandErrors?.[cmd]) throw state.commandErrors[cmd];
         const handler = commands[cmd];
         if (!handler) {
           console.warn(`[fake backend] unhandled command ${cmd}`);

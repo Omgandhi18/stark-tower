@@ -7,6 +7,7 @@ import {
   onSpendChanged,
   onCodeReviewsChanged,
   refreshCodeReviews,
+  onCaptureOpenTask,
   getConfig,
   listAgents,
   onAgentStatus,
@@ -45,6 +46,7 @@ import { useDevServers } from "../stores/devservers";
 import { usePreview } from "../stores/preview";
 import { useReminders } from "../stores/reminders";
 import { useChats } from "../stores/chats";
+import { useNavigation } from "../stores/navigation";
 import { useConfig } from "../stores/config";
 import { useNotifications } from "../stores/notifications";
 import { useSystem } from "../stores/system";
@@ -123,6 +125,7 @@ export function useBackendSync() {
 
     const subscriptions: Array<Promise<UnlistenFn>> = [
       onCodeReviewsChanged(useCodeReviews.getState().apply),
+      onCaptureOpenTask((id) => useNavigation.getState().openTask(id)),
       onAgentStatus((e) => useAgents.getState().setStatus(e.agentId, e.status)),
       onConfigChanged((c) => {
         useConfig.getState().apply(c);

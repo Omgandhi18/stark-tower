@@ -9,6 +9,8 @@ import type { UpdateStatus } from "../../lib/types";
 import { useConfig } from "../../stores/config";
 import { useSystem } from "../../stores/system";
 
+import CaptureSettings from "../capture/CaptureSettings";
+
 function updateLine(update: UpdateStatus | null): string {
   if (!update) return "Not checked yet.";
   if (update.error) return `The update check failed: ${update.error}`;
@@ -61,6 +63,8 @@ export default function GeneralSettings() {
       <header className="screen-header">
         <h1 className="screen-title">General</h1>
       </header>
+
+      <CaptureSettings />
 
       <section className="settings-card">
         <h2 className="settings-card-title">Task workspaces</h2>

@@ -8,6 +8,7 @@ mod chat;
 mod codex;
 mod config;
 mod context;
+mod capture;
 mod delegation;
 mod devserver;
 mod engine;
@@ -37,6 +38,8 @@ mod simulator_extras;
 #[cfg(target_os = "macos")]
 mod snapshot;
 mod spend;
+#[cfg(target_os = "macos")]
+mod capture_mac;
 mod tasks;
 mod terminal;
 mod workspaces;
@@ -1225,6 +1228,88 @@ fn conversation_spend(state: tauri::State<AppState>, conversation_id: i64) -> Re
     state.ledger.conversation_spend(conversation_id)
 }
 
+#[tauri::command]
+#[specta::specta]
+async fn set_capture_shortcut(
+    app: tauri::AppHandle,
+    enabled: bool,
+    shortcut: String,
+) -> Result<AppConfig, String> {
+    capture::configure(&app, enabled, &shortcut)?;
+    let state = app.state::<AppState>();
+    {
+        let mut config = state.config.lock().unwrap();
+        config.quick_capture.enabled = enabled;
+        config.quick_capture.shortcut = shortcut;
+    }
+    lifecycle::update_capture_menu(&app);
+    Ok(commit_config(&app, &state))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn capture_error(app: tauri::AppHandle) -> Option<String> {
+    app.state::<capture::Runtime>()
+        .error
+        .lock()
+        .unwrap()
+        .clone()
+}
+
+#[tauri::command]
+#[specta::specta]
+fn hide_capture(app: tauri::AppHandle) -> Result<(), String> {
+    capture::hide(&app)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn resize_capture(app: tauri::AppHandle, height: f64) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("capture") {
+        window
+            .set_size(tauri::LogicalSize::new(640.0, height.clamp(200.0, 420.0)))
+            .map_err(|_| "Quick capture couldn't be resized.".to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+fn remember_capture(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    agent_id: String,
+    project: Option<String>,
+    reminder: bool,
+) -> AppConfig {
+    {
+        let mut config = state.config.lock().unwrap();
+        if reminder {
+            config.quick_capture.last_reminder_agent = Some(agent_id);
+        } else {
+            config.quick_capture.last_agent = Some(agent_id);
+            config.quick_capture.last_project = project;
+        }
+    }
+    commit_config(&app, &state)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn open_capture_task(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    id: String,
+) -> Result<(), String> {
+    if state.ledger.task(&id).is_none() {
+        return Err("That task couldn't be found. Open Work to see your tasks.".into());
+    }
+    lifecycle::show_main(&app);
+    app.emit_to("main", "capture://open-task", id)
+        .map_err(|_| "The task couldn't be opened. Open it from Work.".to_string())?;
+    capture::hide(&app)
+}
+
 // ---- configuration (engines + roster) --------------------------------------
 
 /// Persist config, refresh the derived roster, and notify the UI.
@@ -1369,7 +1454,12 @@ fn set_standup_minutes(
 #[tauri::command]
 #[specta::specta]
 fn reset_config(app: tauri::AppHandle, state: tauri::State<AppState>) -> AppConfig {
-    *state.config.lock().unwrap() = config::default_config();
+    {
+        let mut cfg = state.config.lock().unwrap();
+        let capture = cfg.quick_capture.clone();
+        *cfg = config::default_config();
+        cfg.quick_capture = capture;
+    }
     commit_config(&app, &state)
 }
 
@@ -1951,6 +2041,12 @@ fn specta_builder() -> tauri_specta::Builder {
             runtime_health,
             power_state,
             set_keep_awake,
+            set_capture_shortcut,
+            capture_error,
+            hide_capture,
+            resize_capture,
+            remember_capture,
+            open_capture_task,
             get_config,
             update_agent,
             remove_agent,
@@ -1971,6 +2067,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -2073,6 +2170,7 @@ pub fn run() {
             // Agents are given read access to the attachments folder, so it always exists.
             std::fs::create_dir_all(attachments::root(app.handle())).ok();
             // Only now is there anything for the page to talk to.
+            capture::start(app.handle());
             lifecycle::create_main(app)?;
             start_power_monitor(app.handle().clone());
 

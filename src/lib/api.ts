@@ -389,3 +389,14 @@ export const refreshCodeReviews = () => commands.refreshCodeReviews();
 export const seeCodeReview = (id: string) => ok(commands.seeCodeReview(id));
 export const askCodeReview = (id: string, agentId: string) => ok(commands.askCodeReview(id, agentId));
 export const onCodeReviewsChanged = (cb: (value: CodeReviews) => void): Promise<UnlistenFn> => listen<CodeReviews>("hosting://changed", (event) => cb(event.payload));
+
+// Quick capture stays independent of the main window.
+export const setCaptureShortcut = (enabled: boolean, shortcut: string) => ok(commands.setCaptureShortcut(enabled, shortcut));
+export const captureError = () => commands.captureError();
+export const hideCapture = () => ok(commands.hideCapture());
+export const resizeCapture = (height: number) => ok(commands.resizeCapture(height));
+export const rememberCapture = (agentId: string, project: string | null, reminder: boolean) => commands.rememberCapture(agentId, project, reminder);
+export const openCaptureTask = (id: string) => ok(commands.openCaptureTask(id));
+export const onCaptureShown = (cb: () => void): Promise<UnlistenFn> => listen("capture://shown", () => cb());
+export const onCaptureError = (cb: (error: string) => void): Promise<UnlistenFn> => listen<string>("capture://error", (event) => cb(event.payload));
+export const onCaptureOpenTask = (cb: (id: string) => void): Promise<UnlistenFn> => listen<string>("capture://open-task", (event) => cb(event.payload));

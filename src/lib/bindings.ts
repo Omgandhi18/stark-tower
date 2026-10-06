@@ -933,6 +933,44 @@ async powerState() : Promise<PowerState> {
 async setKeepAwake(enabled: boolean) : Promise<PowerState> {
     return await TAURI_INVOKE("set_keep_awake", { enabled });
 },
+async setCaptureShortcut(enabled: boolean, shortcut: string) : Promise<Result<AppConfig, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_capture_shortcut", { enabled, shortcut }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async captureError() : Promise<string | null> {
+    return await TAURI_INVOKE("capture_error");
+},
+async hideCapture() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("hide_capture") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async resizeCapture(height: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resize_capture", { height }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async rememberCapture(agentId: string, project: string | null, reminder: boolean) : Promise<AppConfig> {
+    return await TAURI_INVOKE("remember_capture", { agentId, project, reminder });
+},
+async openCaptureTask(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_capture_task", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getConfig() : Promise<AppConfig> {
     return await TAURI_INVOKE("get_config");
 },
@@ -1076,6 +1114,10 @@ standup_minutes?: number;
  */
 keep_awake?: boolean; budget?: Budget; worktrees_enabled?: boolean; worktree_setup?: Partial<{ [key in string]: WorktreeSetup }>; 
 /**
+ * The global capture shortcut and the choices used in its small window.
+ */
+quick_capture?: CaptureConfig; 
+/**
  * How Starkline looks: one of [`THEMES`]. Tasks, permissions and providers don't change with it.
  */
 theme?: string; 
@@ -1205,6 +1247,7 @@ export type Capability = { support: Support;
  * One plain sentence on what that means here.
  */
 note: string }
+export type CaptureConfig = { enabled: boolean; shortcut: string; last_agent: string | null; last_project: string | null; last_reminder_agent: string | null }
 /**
  * The latest result of each distinct check.
  */

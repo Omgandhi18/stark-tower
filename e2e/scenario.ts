@@ -53,6 +53,12 @@ export interface Scenario {
   conversationSpend: Record<number, ConversationSpend>;
   /** How long after the page loads the backend starts answering (the launch race); by default at once. */
   backendReadyAfterMs?: number;
+  captureVisible?: boolean;
+  captureHeight?: number;
+  captureError?: string;
+  takenShortcuts?: string[];
+  commandErrors?: Record<string, string>;
+  openedCaptureTask?: string;
   config: AppConfig;
   worktrees: Worktree[];
   claims: FileClaim[];
@@ -177,6 +183,7 @@ const agent = (a: Omit<AgentConfig, "engine" | "model" | "enabled">): AgentConfi
 });
 
 const config: AppConfig = {
+  quick_capture: { enabled: true, shortcut: "Super+Shift+Space", last_agent: null, last_project: null, last_reminder_agent: null },
   version: 4,
   onboarded: true,
   standup_minutes: 0,
