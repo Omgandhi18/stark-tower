@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, FolderOpen, MessageSquarePlus } from "lucide-react";
+import { ArrowLeft, FolderOpen, MessageSquarePlus, PanelRight } from "lucide-react";
 import { Button, IconButton, Portrait, SelectField, StatusPill } from "../../design";
 import { errorMessage } from "../../lib/errors";
 import { formatCost, formatTokens } from "../../lib/format";
@@ -8,6 +8,7 @@ import type { Agent } from "../../lib/types";
 import { selectThread, useChats } from "../../stores/chats";
 import { useConfig } from "../../stores/config";
 import { useNavigation } from "../../stores/navigation";
+import { usePreview } from "../../stores/preview";
 import { useUsage } from "../../stores/usage";
 import { useWorkspace } from "../../stores/workspace";
 import { engineLabel } from "../agents/display";
@@ -24,6 +25,8 @@ export default function ConversationHeader({ agent }: { agent: Agent }) {
   const usage = useUsage((s) => s.byAgent[agent.id]);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const previewing = usePreview((s) => s.open);
+  const togglePreview = usePreview((s) => s.toggle);
   const status = AGENT_STATUS[agent.status];
   const folder = chatFolder || activeProject;
 
@@ -75,6 +78,7 @@ export default function ConversationHeader({ agent }: { agent: Agent }) {
         <Button icon={MessageSquarePlus} disabled={starting} onClick={newChat}>
           New chat
         </Button>
+        <IconButton icon={PanelRight} label={previewing ? "Hide the browser and simulator" : "Show the browser and simulator"} aria-pressed={previewing} onClick={togglePreview} />
       </div>
     </header>
   );

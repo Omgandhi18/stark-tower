@@ -1,4 +1,5 @@
 export { cx } from "./cx";
+export { covered, onOverlaysChanged, registerOverlay } from "./overlays";
 export { ICON_SIZE, ICON_STROKE } from "./icons";
 export { Button, IconButton, type ButtonVariant } from "./components/Button";
 export { CountBadge, Tag } from "./components/Badge";

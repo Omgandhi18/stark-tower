@@ -1,6 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { commands, type AutomationInput, type PowerState, type ReminderInput, type Result } from "./bindings";
+import { commands, type AutomationInput, type Bounds, type BrowserPage, type PowerState, type ReminderInput, type Result } from "./bindings";
 import type { Attachment, ChatEvent, ChatSwitch, TaskEvent, LedgerEntry, PtyData, ReviewRequest, StatusEvent, UsageUpdate, UpdateStatus } from "./types";
 
 // Commands are the tauri-specta-generated, typed wrappers (bindings.ts). Fallible
@@ -76,6 +76,35 @@ export const providerCapabilities = () => commands.providerCapabilities();
 
 /** The models a provider offers, as its CLI lists them. */
 export const providerModels = (engineId: string) => ok(commands.providerModels(engineId));
+
+// ---- Built-in browser ----
+
+export const browserShow = (bounds: Bounds) => ok(commands.browserShow(bounds));
+export const browserHide = () => commands.browserHide();
+/** Open what was typed in the address bar. */
+export const browserNavigate = (url: string) => ok(commands.browserNavigate(url));
+export const browserGo = (action: "back" | "forward" | "reload" | "stop") => ok(commands.browserGo(action));
+export const browserPage = () => commands.browserPage();
+export const onBrowserChanged = (cb: (page: BrowserPage) => void): Promise<UnlistenFn> => listen<BrowserPage>("browser://changed", (e) => cb(e.payload));
+/** An agent opened a page: the browser comes into view. */
+export const onBrowserReveal = (cb: (agentId: string) => void): Promise<UnlistenFn> =>
+  listen<{ agentId: string }>("browser://reveal", (e) => cb(e.payload.agentId));
+
+// ---- iOS Simulator ----
+
+export const simulatorStatus = () => commands.simulatorStatus();
+export const simulatorBoot = (udid: string) => ok(commands.simulatorBoot(udid));
+export const simulatorShutdown = (udid: string) => ok(commands.simulatorShutdown(udid));
+/** The device's screen now, as a base64 JPEG. */
+export const simulatorFrame = (udid: string) => ok(commands.simulatorFrame(udid));
+/** A tap where the screen was clicked, in the screenshot's pixels. */
+export const simulatorTap = (udid: string, name: string, x: number, y: number) => ok(commands.simulatorTap(udid, name, x, y));
+export const simulatorType = (udid: string, text: string) => ok(commands.simulatorType(udid, text));
+export const simulatorHome = (udid: string) => ok(commands.simulatorHome(udid));
+export const simulatorOpenApp = (udid: string) => ok(commands.simulatorOpenApp(udid));
+/** An agent booted a simulator or launched its app: the simulator comes into view. */
+export const onSimulatorReveal = (cb: (udid: string) => void): Promise<UnlistenFn> =>
+  listen<{ udid: string }>("simulator://reveal", (e) => cb(e.payload.udid));
 
 // ---- Reminders ----
 

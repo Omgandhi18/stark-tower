@@ -58,6 +58,22 @@ test.describe("conversation", () => {
     await expect.poll(lastSaved).toMatchObject({ model: "claude-haiku-4-5", effort: "" });
   });
 
+  test("a picker stays open while the chat scrolls on its own", async ({ page }) => {
+    const log = await openFriday(page);
+    await page.getByRole("button", { name: "Default model" }).click();
+    const options = page.getByRole("listbox", { name: "Models for FRIDAY" });
+    await expect(options).toBeVisible();
+    // A streaming reply scrolls the log; the picker, anchored below it, doesn't move.
+    await log.evaluate((el) => {
+      el.scrollTop = 0;
+      el.dispatchEvent(new Event("scroll"));
+    });
+    await expect(options).toBeVisible();
+    await page.mouse.wheel(0, 0);
+    await page.getByRole("option", { name: /^Sonnet 5\.5/ }).click();
+    await expect(page.getByRole("button", { name: "Sonnet 5.5" })).toBeVisible();
+  });
+
   test("sends a message and shows the reply once", async ({ page }) => {
     const log = await openFriday(page);
     await page.getByRole("region", { name: "Question from FRIDAY" }).getByRole("button", { name: "Everything" }).click();

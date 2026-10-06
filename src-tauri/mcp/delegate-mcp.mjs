@@ -215,8 +215,62 @@ const REMIND_TOOL = {
   },
 };
 
+const BROWSER_TOOL = {
+  name: "browser",
+  description:
+    "Use Starkline's built-in browser, which the developer sees beside your chat. Open your app's dev " +
+    "server (\"http://localhost:5173\") or any page, `read` it (its text and numbered controls), " +
+    "`click` and `type` into it, `run_js`, read the `console`, and take a `screenshot` to check your " +
+    "work. Pages on this Mac are yours to use; a page on the internet needs the developer's " +
+    "permission, like any network access.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["open", "read", "click", "type", "run_js", "console", "screenshot", "back", "forward", "reload"],
+      },
+      url: { type: "string", description: "For open: the address." },
+      target: {
+        type: "string",
+        description: "For click and type: a control's number from read (\"3\"), a CSS selector, or its visible words.",
+      },
+      text: { type: "string", description: "For type: what to type." },
+      submit: { type: "boolean", description: "For type: submit afterwards, as Enter would." },
+      script: { type: "string", description: "For run_js: an expression, or statements inside (() => { ... })()." },
+    },
+    required: ["action"],
+  },
+};
+
+const SIMULATOR_TOOL = {
+  name: "simulator",
+  description:
+    "Use the iOS Simulator, which the developer sees beside your chat (needs Xcode on this Mac). List " +
+    "the `devices`, `boot` one, `install` a built .app and `launch` it by bundle id, `open_url`, take a " +
+    "`screenshot` to see the screen, and `tap` (x and y in points from the top left), `type` or go " +
+    "`home` (those three need idb). Build for a simulator with xcodebuild first.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["devices", "boot", "screenshot", "install", "launch", "open_url", "tap", "type", "home"],
+      },
+      device: { type: "string", description: "A simulator's name or id; leave out for the running one." },
+      path: { type: "string", description: "For install: the built .app bundle." },
+      bundle_id: { type: "string", description: "For launch: the app's bundle id." },
+      url: { type: "string", description: "For open_url: a link or deep link." },
+      x: { type: "number", description: "For tap: points from the left." },
+      y: { type: "number", description: "For tap: points from the top." },
+      text: { type: "string", description: "For type: what to type." },
+    },
+    required: ["action"],
+  },
+};
+
 async function toolsList() {
-  const tools = [ASK_HUMAN_TOOL, MESSAGE_TOOL, SHARE_TOOL, REMIND_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
+  const tools = [ASK_HUMAN_TOOL, MESSAGE_TOOL, SHARE_TOOL, REMIND_TOOL, BROWSER_TOOL, SIMULATOR_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
   if (IS_ORCH) {
     const workers = await getRoster();
     tools.unshift(buildDelegateTool(workers));
@@ -311,6 +365,36 @@ rl.on("line", async (raw) => {
       });
       if (res.error) result(id, "remind failed: " + res.error, true);
       else result(id, res.result || "(set)");
+    } else if (name === "browser" || name === "simulator") {
+      log(name, "->", args.action);
+      const res = await bridge({
+        type: name,
+        agentId: AGENT_ID,
+        action: args.action || "",
+        url: args.url || "",
+        target: args.target ?? "",
+        text: args.text ?? "",
+        submit: args.submit === true,
+        script: args.script || "",
+        device: args.device || "",
+        path: args.path || "",
+        bundle_id: args.bundle_id || "",
+        x: args.x ?? null,
+        y: args.y ?? null,
+      });
+      if (res.error) result(id, name + ": " + res.error, true);
+      else if (res.image) {
+        send({
+          jsonrpc: "2.0",
+          id,
+          result: {
+            content: [
+              { type: "image", data: res.image, mimeType: res.mimeType || "image/jpeg" },
+              { type: "text", text: res.result || "" },
+            ],
+          },
+        });
+      } else result(id, res.result || "(done)");
     } else if (name === "report_bug") {
       log("report_bug ->", args.title);
       const res = await bridge({

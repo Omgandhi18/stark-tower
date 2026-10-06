@@ -8,6 +8,10 @@ import {
   listAgents,
   onAgentStatus,
   onAutomationsChanged,
+  browserPage,
+  onBrowserChanged,
+  onBrowserReveal,
+  onSimulatorReveal,
   onRemindersChanged,
   onBugsChanged,
   onChatEvent,
@@ -29,6 +33,7 @@ import { useActivity } from "../stores/activity";
 import { useAgents } from "../stores/agents";
 import { useAttention } from "../stores/attention";
 import { useAutomations } from "../stores/automations";
+import { usePreview } from "../stores/preview";
 import { useReminders } from "../stores/reminders";
 import { useChats } from "../stores/chats";
 import { useConfig } from "../stores/config";
@@ -96,6 +101,7 @@ export function useBackendSync() {
     first("notifications", useNotifications.getState().refresh);
     first("automations", useAutomations.getState().refresh);
     first("reminders", useReminders.getState().refresh);
+    first("browser", () => browserPage().then(usePreview.getState().applyPage));
     first("runtime health", system.refreshHealth);
     first("keep-awake state", system.refreshPower);
     first("update status", checkUpdate);
@@ -123,6 +129,12 @@ export function useBackendSync() {
       onNotificationsChanged(() => useNotifications.getState().refresh().catch(report("notifications"))),
       onAutomationsChanged(() => useAutomations.getState().refreshAll().catch(report("automations"))),
       onRemindersChanged(() => useReminders.getState().refresh().catch(report("reminders"))),
+      onBrowserChanged((page) => usePreview.getState().applyPage(page)),
+      onBrowserReveal(() => usePreview.getState().show("browser")),
+      onSimulatorReveal((udid) => {
+        usePreview.getState().showSimulator(udid);
+        usePreview.getState().show("simulator");
+      }),
       onHealthChanged(() => useSystem.getState().refreshHealth().catch(report("runtime health"))),
     ];
     // Background checks started by the first health read may answer before their listener

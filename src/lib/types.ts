@@ -43,6 +43,10 @@ export type {
   Schedule,
   Reminder,
   ReminderInput,
+  BrowserPage,
+  Bounds,
+  SimDevice,
+  SimulatorStatus,
 } from "./bindings";
 
 import type { AgentStatus, Attachment } from "./bindings";

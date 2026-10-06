@@ -1,7 +1,9 @@
 import { MessagesSquare } from "lucide-react";
-import { EmptyState, KeepAlive } from "../../design";
+import { EmptyState, KeepAlive, cx } from "../../design";
 import { useAgents } from "../../stores/agents";
 import { useNavigation } from "../../stores/navigation";
+import { usePreview } from "../../stores/preview";
+import PreviewPane from "../preview/PreviewPane";
 import ChatPanel from "./ChatPanel";
 import ConversationHeader from "./ConversationHeader";
 import ConversationRail from "./ConversationRail";
@@ -13,9 +15,10 @@ export default function ConversationScreen() {
   const openChats = useNavigation((s) => s.openChats);
   const agents = useAgents((s) => s.agents);
   const focused = agents.some((a) => a.id === agentId);
+  const previewing = usePreview((s) => s.open);
 
   return (
-    <div className="conversation-screen">
+    <div className={cx("conversation-screen", previewing && "has-preview")}>
       <ConversationRail agentId={agentId} />
       <section className="conversation-main" aria-label="Conversation">
         {openChats.map((id) => {
@@ -38,6 +41,7 @@ export default function ConversationScreen() {
           />
         )}
       </section>
+      {previewing && <PreviewPane />}
     </div>
   );
 }

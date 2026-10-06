@@ -803,3 +803,37 @@ The developer asked for "a task view with reminders so i can set reminders ... a
 - **While you're in Starkline,** the reminder also pops up in the corner from that agent until you deal with it.
 - **A reminder about a task** says how the task stands when it goes off ("“Write the release notes” is ready for your review").
 - **Repeats and missed times.** A repeating reminder waits for its next time straight away. One that came due while the Mac slept or Starkline was closed goes off at the next launch and says when it was due. Reminders are checked every 10 seconds, apart from automations, so neither waits on the other.
+
+### 2026-10-06: a built-in browser and the iOS Simulator, beside the chat
+
+The developer asked for "an inbuilt browser and an ios simulator like Claude Desktop app does."
+
+- **The preview panel.**
+  - It sits beside a conversation and opens from the panel button in the conversation's header. It has two tabs, Browser and Simulator, and you and the agents share both.
+  - It opens by itself when an agent opens a page, boots a simulator or launches an app.
+  - It can be resized by dragging its edge.
+  - On windows narrower than 1440 px, the conversation list gives way to it.
+- **The browser** is a real WebKit view inside the window (Tauri's multi-webview, which needs the `unstable` feature), so any site works.
+  - The panel has an address bar (an address, `localhost:5173` over http, a bare domain over https, anything else a search), back, forward, reload or stop, and open in your browser.
+  - Links that would open a new window open in the panel.
+  - It follows the panel as the layout moves, and steps aside while a menu, popover, dialog or reminder pop-up is drawn over it, since a native view always draws on top of the page.
+  - Remote pages get no IPC: the app's capability covers its own pages only.
+- **What agents can do in the browser** (the `browser` tool):
+  - open pages;
+  - read them (their text, and their controls numbered for `click` and `type`);
+  - click, and type with or without submitting;
+  - run JavaScript;
+  - read the console (captured from page load, uncaught errors included);
+  - take a screenshot, which WebKit draws and hands back as a JPEG;
+  - go back, forward or reload.
+
+  Pages on this Mac (`localhost`) are theirs to use. Any other page goes through the permission gate as network access, so the developer's rules for sites apply.
+- **The Simulator** uses Xcode's `simctl`.
+  - The panel lists the iOS simulators (running ones first, then the newest iOS) and can boot or shut one down, open it in the Simulator app, and show its screen, refreshed a few times a second while the panel shows it.
+  - Clicking the screen taps the device, and a text box types on it. Both need idb (Meta's iOS Development Bridge); without it, the panel says how to install it, and the Simulator app takes input instead.
+  - Agents get the `simulator` tool: list the devices, boot one, install a built `.app`, launch it by bundle id, open a link, take a screenshot, and tap (in points), type or go home with idb.
+  - Without Xcode, the panel says so.
+- **Verified here, and not.**
+  - The browser view and the simulator need macOS, so the end-to-end tests drive the panels against a stand-in backend.
+  - The macOS screenshot code was type-checked and linted against the macOS target. The rest builds and runs its tests on the macOS CI.
+  - Address handling, page reading, script safety (every script hands back a JSON string, so a page can't return something WebKit can't serialize), and the simulator's device list have unit tests.

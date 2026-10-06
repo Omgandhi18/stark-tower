@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } f
 import { createPortal } from "react-dom";
 import { MoreHorizontal, type LucideIcon } from "lucide-react";
 import { cx } from "../cx";
+import { registerOverlay } from "../overlays";
 import { ICON_SIZE, ICON_STROKE } from "../icons";
 import { IconButton } from "./Button";
 
@@ -63,6 +64,7 @@ export function OverflowMenu({ items, label, align = "end" }: OverflowMenuProps)
       menu.style.top = `${top}px`;
       menu.style.left = `${left}px`;
       menu.style.visibility = "visible";
+      return registerOverlay(menu);
     },
     [align],
   );
