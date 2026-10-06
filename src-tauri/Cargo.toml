@@ -14,7 +14,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png", "protocol-asset"] }
+# "unstable" is Tauri's multi-webview support: the built-in browser is a second webview in the window.
+tauri = { version = "2", features = ["tray-icon", "image-png", "protocol-asset", "unstable"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
@@ -38,3 +39,9 @@ libc = "0.2"
 [target.'cfg(target_os = "macos")'.dependencies]
 # Keep-awake: IOKit power assertions take CFString names.
 core-foundation = "0.10"
+# Screenshots of the built-in browser (WebKit draws the page; AppKit makes it a JPEG).
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSData", "NSDictionary", "NSError", "NSValue", "NSGeometry"] }
+objc2-app-kit = { version = "0.3", features = ["NSImage", "NSImageRep", "NSBitmapImageRep", "NSView", "NSResponder", "NSGraphics"] }
+objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKSnapshotConfiguration", "block2", "objc2-app-kit"] }
+block2 = "0.6"

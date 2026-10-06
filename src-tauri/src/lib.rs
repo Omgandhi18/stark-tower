@@ -3,6 +3,7 @@ mod attachments;
 mod automations;
 mod breaker;
 mod bridge;
+mod browser;
 mod chat;
 mod codex;
 mod config;
@@ -26,6 +27,9 @@ mod reminders;
 mod rpc;
 mod schedule;
 mod secrets;
+mod simulator;
+#[cfg(target_os = "macos")]
+mod snapshot;
 mod tasks;
 mod tone;
 mod update;
@@ -614,6 +618,95 @@ fn skip_missed_run(app: tauri::AppHandle, id: i64) {
 #[specta::specta]
 fn list_automation_runs(app: tauri::AppHandle, id: i64) -> Vec<ledger::AutomationRun> {
     automations::runs(&app, id)
+}
+
+/// Place the built-in browser over its panel and show it. Async: the browser view is
+/// made on the main thread, which this waits for.
+#[tauri::command]
+#[specta::specta]
+async fn browser_show(app: tauri::AppHandle, bounds: browser::Bounds) -> Result<(), String> {
+    browser::show(&app, bounds)
+}
+
+/// Hide the built-in browser (its panel closed, or something is drawn over it).
+#[tauri::command]
+#[specta::specta]
+async fn browser_hide(app: tauri::AppHandle) {
+    browser::hide(&app)
+}
+
+/// Open what was typed in the address bar.
+#[tauri::command]
+#[specta::specta]
+async fn browser_navigate(app: tauri::AppHandle, url: String) -> Result<browser::BrowserPage, String> {
+    browser::navigate(&app, &url)
+}
+
+/// back | forward | reload | stop
+#[tauri::command]
+#[specta::specta]
+async fn browser_go(app: tauri::AppHandle, action: String) -> Result<(), String> {
+    browser::go(&app, &action)
+}
+
+/// The page the built-in browser is on.
+#[tauri::command]
+#[specta::specta]
+fn browser_page(app: tauri::AppHandle) -> browser::BrowserPage {
+    browser::page(&app)
+}
+
+/// The iOS simulators Xcode has, and whether taps can go through from here.
+#[tauri::command]
+#[specta::specta]
+async fn simulator_status() -> simulator::SimulatorStatus {
+    simulator::status()
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn simulator_boot(udid: String) -> Result<(), String> {
+    simulator::boot(&udid)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn simulator_shutdown(udid: String) -> Result<(), String> {
+    simulator::shutdown(&udid)
+}
+
+/// The device's screen now, as a base64 JPEG.
+#[tauri::command]
+#[specta::specta]
+async fn simulator_frame(udid: String) -> Result<String, String> {
+    use base64::Engine;
+    simulator::screenshot(&udid).map(|jpeg| base64::engine::general_purpose::STANDARD.encode(jpeg))
+}
+
+/// A tap where the developer clicked the screen, in the screenshot's pixels.
+#[tauri::command]
+#[specta::specta]
+async fn simulator_tap(udid: String, name: String, x: f64, y: f64) -> Result<(), String> {
+    simulator::tap_pixel(&udid, &name, x, y)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn simulator_type(udid: String, text: String) -> Result<(), String> {
+    simulator::type_text(&udid, &text)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn simulator_home(udid: String) -> Result<(), String> {
+    simulator::home(&udid)
+}
+
+/// Open the Simulator app on this device.
+#[tauri::command]
+#[specta::specta]
+async fn simulator_open_app(udid: String) -> Result<(), String> {
+    simulator::open_app(&udid)
 }
 
 /// Every reminder, soonest first.
@@ -1468,6 +1561,19 @@ fn specta_builder() -> tauri_specta::Builder {
             permission_policy,
             provider_capabilities,
             provider_models,
+            simulator_status,
+            simulator_boot,
+            simulator_shutdown,
+            simulator_frame,
+            simulator_tap,
+            simulator_type,
+            simulator_home,
+            simulator_open_app,
+            browser_show,
+            browser_hide,
+            browser_navigate,
+            browser_go,
+            browser_page,
             list_reminders,
             save_reminder,
             complete_reminder,
@@ -1592,6 +1698,7 @@ pub fn run() {
             let floor_dir = floor::init(&data_str, &agent_ids);
             floor::start_committer(floor_dir.clone());
 
+            app.manage(browser::Browser::default());
             app.manage(AppState {
                 pty: PtyManager::default(),
                 chat: chat::ChatManager::default(),

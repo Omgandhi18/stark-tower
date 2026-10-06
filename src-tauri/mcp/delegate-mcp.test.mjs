@@ -128,3 +128,29 @@ test("passes minutes from now, and relays a time the app couldn't use as an erro
     app.close();
   }
 });
+
+test("hands a browser screenshot over as an image, with its caption", async () => {
+  const app = await fakeApp(() => ({ result: "Now on \"Settings\" (http://localhost:5173/).", image: "AAAA", mimeType: "image/jpeg" }));
+  try {
+    const result = await callTool(app.sock, "browser", { action: "screenshot" });
+    assert.equal(app.requests[0].type, "browser");
+    assert.equal(app.requests[0].action, "screenshot");
+    assert.deepEqual(result.content, [
+      { type: "image", data: "AAAA", mimeType: "image/jpeg" },
+      { type: "text", text: "Now on \"Settings\" (http://localhost:5173/)." },
+    ]);
+  } finally {
+    app.close();
+  }
+});
+
+test("passes what to click and relays the page's answer", async () => {
+  const app = await fakeApp(() => ({ result: "Clicked \"Save\"." }));
+  try {
+    const result = await callTool(app.sock, "browser", { action: "click", target: "3" });
+    assert.equal(app.requests[0].target, "3");
+    assert.equal(result.content[0].text, "Clicked \"Save\".");
+  } finally {
+    app.close();
+  }
+});

@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cx } from "../cx";
 import { ICON_SIZE, ICON_STROKE } from "../icons";
+import { registerOverlay } from "../overlays";
 
 interface DialogProps {
   open: boolean;
@@ -42,6 +43,8 @@ export function Dialog({
     if (!dialog) return;
     if (open && !dialog.open) dialog.showModal();
     else if (!open && dialog.open) dialog.close();
+    // A modal dims the whole window: a native view laid over it steps aside.
+    return open ? registerOverlay(dialog, true) : undefined;
   }, [open]);
 
   return (

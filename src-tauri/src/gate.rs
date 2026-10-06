@@ -1267,7 +1267,7 @@ fn assess_installer(program: &str, args: &[String]) -> Assessment {
     }
 }
 
-fn is_local_url(url: &str) -> bool {
+pub(crate) fn is_local_url(url: &str) -> bool {
     let host = host_of(url);
     matches!(host.as_str(), "localhost" | "127.0.0.1" | "0.0.0.0" | "[::1]" | "::1") || host.ends_with(".localhost") || host.ends_with(".test")
 }

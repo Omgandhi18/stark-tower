@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
-import { Button, IconButton, Portrait } from "../../design";
+import { Button, IconButton, Portrait, registerOverlay } from "../../design";
 import { completeReminder, onReminderDue, snoozeReminder } from "../../lib/api";
 import type { Reminder } from "../../lib/types";
 import { useAgents } from "../../stores/agents";
@@ -43,7 +43,7 @@ export default function ReminderToasts() {
   const dismiss = (id: number) => setShown((ids) => ids.filter((x) => x !== id));
 
   return (
-    <div className="reminder-toasts" role="region" aria-label="Reminders going off">
+    <div ref={(el) => (el ? registerOverlay(el) : undefined)} className="reminder-toasts" role="region" aria-label="Reminders going off">
       {visible.map((r) => {
         const agent = agents.find((a) => a.id === r.agent_id);
         const name = agent?.name ?? r.agent_id;

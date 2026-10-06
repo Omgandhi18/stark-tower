@@ -205,6 +205,123 @@ async providerModels(engineId: string) : Promise<Result<ModelChoice[], string>> 
 }
 },
 /**
+ * The iOS simulators Xcode has, and whether taps can go through from here.
+ */
+async simulatorStatus() : Promise<SimulatorStatus> {
+    return await TAURI_INVOKE("simulator_status");
+},
+async simulatorBoot(udid: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("simulator_boot", { udid }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async simulatorShutdown(udid: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("simulator_shutdown", { udid }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The device's screen now, as a base64 JPEG.
+ */
+async simulatorFrame(udid: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("simulator_frame", { udid }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * A tap where the developer clicked the screen, in the screenshot's pixels.
+ */
+async simulatorTap(udid: string, name: string, x: number, y: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("simulator_tap", { udid, name, x, y }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async simulatorType(udid: string, text: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("simulator_type", { udid, text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async simulatorHome(udid: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("simulator_home", { udid }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Open the Simulator app on this device.
+ */
+async simulatorOpenApp(udid: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("simulator_open_app", { udid }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Place the built-in browser over its panel and show it. Async: the browser view is
+ * made on the main thread, which this waits for.
+ */
+async browserShow(bounds: Bounds) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("browser_show", { bounds }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Hide the built-in browser (its panel closed, or something is drawn over it).
+ */
+async browserHide() : Promise<void> {
+    await TAURI_INVOKE("browser_hide");
+},
+/**
+ * Open what was typed in the address bar.
+ */
+async browserNavigate(url: string) : Promise<Result<BrowserPage, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("browser_navigate", { url }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * back | forward | reload | stop
+ */
+async browserGo(action: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("browser_go", { action }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The page the built-in browser is on.
+ */
+async browserPage() : Promise<BrowserPage> {
+    return await TAURI_INVOKE("browser_page");
+},
+/**
  * Every reminder, soonest first.
  */
 async listReminders() : Promise<Reminder[]> {
@@ -767,6 +884,18 @@ status: string; task_id: string | null; summary: string;
  */
 trigger: string }
 /**
+ * Where the panel is, in the window's own coordinates.
+ */
+export type Bounds = { x: number; y: number; width: number; height: number }
+/**
+ * The page as the panel shows it.
+ */
+export type BrowserPage = { 
+/**
+ * "" before anything has been opened.
+ */
+url: string; title: string; loading: boolean }
+/**
  * A bug in the app, reported by an agent for the maintenance agent to fix.
  */
 export type Bug = { id: number; reporter: string; title: string; detail: string; 
@@ -1130,6 +1259,27 @@ export type SignIn = { signedIn: boolean;
  * How ("ChatGPT", "API key", "7 credentials"), when the CLI says.
  */
 detail: string | null }
+/**
+ * A simulator Xcode has.
+ */
+export type SimDevice = { udid: string; name: string; 
+/**
+ * "iOS 26.0"
+ */
+runtime: string; booted: boolean }
+export type SimulatorStatus = { 
+/**
+ * Xcode's simulator tools answered.
+ */
+available: boolean; 
+/**
+ * What's missing, when something is.
+ */
+problem: string | null; devices: SimDevice[]; 
+/**
+ * idb is installed, so taps and typing go through from Starkline.
+ */
+touch: boolean }
 /**
  * One persisted chat turn — enough to rebuild the transcript UI on reopen.
  */

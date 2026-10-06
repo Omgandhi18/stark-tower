@@ -6,6 +6,11 @@
 }
 
 /* ---- Rail ---------------------------------------------------------------------- */
+/* Beside the preview on a smaller window, the conversation list gives way to the chat. */
+@media (max-width: 1440px) {
+  .conversation-screen.has-preview .conversation-rail { display: none; }
+}
+
 .conversation-rail {
   display: flex;
   flex-direction: column;
@@ -487,6 +492,8 @@
 /* ---- Dock: pinned question and composer ---------------------------------------- */
 .chat-dock {
   display: grid;
+  /* The column shrinks with the chat (beside the preview, say); cards wrap rather than spill. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
   width: 100%;
   max-width: calc(var(--chat-measure) + 2 * var(--chat-gutter));

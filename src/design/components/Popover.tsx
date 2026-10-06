@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { cx } from "../cx";
+import { registerOverlay } from "../overlays";
 
 /** Space kept between a popover and the window's edge, and between it and its trigger (as menus keep). */
 const EDGE_GAP = 8;
@@ -33,7 +34,7 @@ interface PopoverProps {
  * A panel drawn over the page from the button that opens it: under it, or above it when there's
  * more room there, and kept on that side as what it shows grows or shrinks. Inside an open dialog
  * it's drawn in the dialog. Focus moves in (to `data-autofocus`, else the first control); Escape,
- * a click elsewhere, or a scroll or resize of what's under it closes it.
+ * a click elsewhere, a scroll that moves its trigger, or a window resize closes it.
  */
 export function Popover({ trigger, children, label, align = "start", matchWidth = false, className }: PopoverProps) {
   /** Where the open panel is drawn (null while it's closed), and whether closing puts focus back on the trigger. */
@@ -73,10 +74,13 @@ export function Popover({ trigger, children, label, align = "start", matchWidth 
         panel.style.visibility = "visible";
       };
       place();
-      if (typeof ResizeObserver === "undefined") return;
-      const observer = new ResizeObserver(place);
-      observer.observe(panel);
-      return () => observer.disconnect();
+      const unregister = registerOverlay(panel);
+      const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(place);
+      observer?.observe(panel);
+      return () => {
+        observer?.disconnect();
+        unregister();
+      };
     },
     [align, matchWidth],
   );
@@ -87,9 +91,11 @@ export function Popover({ trigger, children, label, align = "start", matchWidth 
     const onPointer = (e: PointerEvent) => {
       if (!inside(e.target)) dismiss();
     };
-    // It stays where it opened, so it closes when what's under it moves.
+    // It stays where it opened, so it closes when its trigger moves: when something that holds
+    // the trigger scrolls. Other scrolling (a chat log following a streaming reply) leaves it be.
     const onScroll = (e: Event) => {
-      if (!inside(e.target)) dismiss();
+      const scrolled = e.target === document ? document.documentElement : e.target;
+      if (scrolled instanceof Node && !inside(scrolled) && triggerRef.current && scrolled.contains(triggerRef.current)) dismiss();
     };
     window.addEventListener("pointerdown", onPointer);
     window.addEventListener("scroll", onScroll, true);

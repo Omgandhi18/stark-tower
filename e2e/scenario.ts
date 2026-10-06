@@ -7,6 +7,7 @@ import type {
   AppConfig,
   Automation,
   AutomationRun,
+  BrowserPage,
   Bug,
   CheckRun,
   Conversation,
@@ -23,10 +24,14 @@ import type {
   Reminder,
   ReviewRequest,
   RuntimeHealth,
+  SimulatorStatus,
   StoredMessage,
   Task,
   TaskEvent,
 } from "../src/lib/types";
+
+/** A phone's home screen (a small JPEG), standing in for the simulator's screen. */
+const PHONE_SCREEN = "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KMUtFACYopaKAFopaKBCUUtFACUUtFACUUtFACUUtFACUUtFACUUtFACUUtFACUUtFACUUtFACUUtFACUUtFACUUtFAC0UtFMBKKWigBKKWigBKKWigBKKWigBKKWigBKKWigBKKWigBKKWigBKKWigBKKWigBKKWigBKKWigBaKWigQlFLRQAlFLRQAlFLRQAlFLRQAlFLRQAlFLRQAlFLRQAlFLRQAlFLRQAlFLRQAlFLRQAlFLRQA6ilooEJRS0UAJRS0UAJRS0UAJRS0UAJRS0UAJRS0UAJRS0UAJRS0UAJRS0UAJRS0UAJRS0UAJRS0UAFFLRTASilooASilooASilooASilooASilooASilooASilooASilooASilooASilooASilooASilooAdijFLRQITFGKWigBMUYpaKAExRilooATFGKWigBMUYpaKAExRilooATFGKWigBMUYpaKAExRilooATFGKWigBMUYpaKAExRS0UALRS0UCEopaKAEopaKAEopaKAEopaKAEopaKAEopaKAEopaKAEopaKAEopaKAEopaKAEopaKAEopaKAFxRilxRimAmKMUuKMUAJijFLijFACYoxS4oxQAmKMUuKMUAJijFLijFACYoxS4oxQAmKMUuKMUAJijFLijFACYoxS4oxQAmKMUuKMUAJijFLijFACYopcUUALijFLRQITFGKWigBMUYpaKAExRilooATFGKWigBMUYpaKAExRilooATFGKWigBMUYpaKAExRilooATFGKWigBMUYpaKAExRS0UALijFLijFACYoxS4oxQAmKMUuKMUAJijFLijFACYoxS4oxQAmKMUuKMUAJijFLijFACYoxS4oxQAmKMUuKMUAJijFLijFACYoxS4oxQAmKMUuKMUAJiilxRQAtFFFAgooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigD//2Q==";
 
 /** Every test runs at this moment, so relative times and screenshots are stable. */
 export const NOW = Date.parse("2026-10-05T10:30:00+05:30");
@@ -69,6 +74,10 @@ export interface Scenario {
   models: Record<string, ModelChoice[]>;
   /** Reminders the developer set, soonest first. */
   reminders: Reminder[];
+  /** The built-in browser's page. */
+  browser: BrowserPage;
+  /** Xcode's simulators, and a screenshot standing in for every frame. */
+  simulator: SimulatorStatus & { frame: string };
 }
 
 const POLICY: PolicyRule[] = [
@@ -647,6 +656,18 @@ export function defaultScenario(): Scenario {
     ],
     ...automations(),
     reminders: reminders(),
+    browser: { url: "", title: "", loading: false },
+    simulator: {
+      available: true,
+      problem: null,
+      touch: true,
+      devices: [
+        { udid: "SIM-17PRO", name: "iPhone 17 Pro", runtime: "iOS 26.0", booted: true },
+        { udid: "SIM-16E", name: "iPhone 16e", runtime: "iOS 26.0", booted: false },
+        { udid: "SIM-IPAD", name: "iPad Air 13-inch (M3)", runtime: "iOS 26.0", booted: false },
+      ],
+      frame: PHONE_SCREEN,
+    },
     policy: POLICY,
     capabilities: CAPABILITIES,
     models: {

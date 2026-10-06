@@ -308,6 +308,39 @@ function install(scenario: Scenario) {
       emit("rules://changed", null);
       return true;
     },
+    browser_page: () => state.browser,
+    browser_show: () => null,
+    browser_hide: () => null,
+    browser_go: () => null,
+    browser_navigate: (args) => {
+      const typed = String(args.url).trim();
+      if (!typed) throw "Type an address.";
+      const url = /^https?:\/\//.test(typed) ? typed : typed.startsWith("localhost") ? `http://${typed}` : `https://${typed}`;
+      state.browser = { url, title: "", loading: true };
+      emit("browser://changed", state.browser);
+      setTimeout(() => {
+        state.browser = { url, title: "Checkout settings", loading: false };
+        emit("browser://changed", state.browser);
+      }, 30);
+      return state.browser;
+    },
+    simulator_status: () => {
+      const { frame: _frame, ...status } = state.simulator;
+      return status;
+    },
+    simulator_boot: (args) => {
+      state.simulator.devices = state.simulator.devices.map((d) => (d.udid === args.udid ? { ...d, booted: true } : d));
+      return null;
+    },
+    simulator_shutdown: (args) => {
+      state.simulator.devices = state.simulator.devices.map((d) => (d.udid === args.udid ? { ...d, booted: false } : d));
+      return null;
+    },
+    simulator_frame: () => state.simulator.frame,
+    simulator_tap: () => null,
+    simulator_type: () => null,
+    simulator_home: () => null,
+    simulator_open_app: () => null,
     list_reminders: () => [...state.reminders].sort((a, b) => a.due - b.due || a.id - b.id),
     save_reminder: (args) => {
       const input = args.input as Scenario["reminders"][number] & { id: number | null };

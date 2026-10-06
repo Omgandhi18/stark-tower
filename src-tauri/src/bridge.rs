@@ -176,6 +176,14 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
             handle_remind(app, &mut writer, &req);
             return;
         }
+        Some("browser") => {
+            handle_browser(app, &mut writer, &req);
+            return;
+        }
+        Some("simulator") => {
+            handle_simulator(app, &mut writer, &req);
+            return;
+        }
         _ => {}
     }
 
@@ -230,6 +238,35 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
     let result = run_task_blocking(app, from, &agent, &task, &cwd)
         .unwrap_or_else(|e| format!("(delegation failed: {e})"));
     complete_delegation(app, &agent, &task, &result);
+}
+
+/// An agent uses the built-in browser. Screenshots come back as a JPEG for the
+/// bridge script to hand over as an image.
+fn handle_browser(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_json::Value) {
+    let agent = req.get("agentId").and_then(|s| s.as_str()).unwrap_or("");
+    let action = req.get("action").and_then(|s| s.as_str()).unwrap_or("");
+    reply_with(writer, crate::browser::act(app, agent, action, req));
+}
+
+/// An agent uses the iOS Simulator.
+fn handle_simulator(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_json::Value) {
+    let action = req.get("action").and_then(|s| s.as_str()).unwrap_or("");
+    reply_with(writer, crate::simulator::act(app, action, req));
+}
+
+/// A tool's words, or its picture (base64, for the bridge script to hand over as an image).
+fn reply_with(writer: &mut UnixStream, outcome: Result<crate::browser::Outcome, String>) {
+    use base64::Engine;
+    let reply = match outcome {
+        Ok(crate::browser::Outcome::Text(text)) => serde_json::json!({ "result": text }),
+        Ok(crate::browser::Outcome::Image { jpeg, caption }) => serde_json::json!({
+            "result": caption,
+            "image": base64::engine::general_purpose::STANDARD.encode(jpeg),
+            "mimeType": "image/jpeg",
+        }),
+        Err(e) => serde_json::json!({ "error": e }),
+    };
+    let _ = writer.write_all((reply.to_string() + "\n").as_bytes());
 }
 
 /// The developer asked an agent to remind them of something: the agent sets the
