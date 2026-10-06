@@ -208,3 +208,21 @@ test("dev_server relays a denied start as an error", async () => {
     assert.match(result.content[0].text, /declined/);
   } finally { app.close(); }
 });
+
+for (const [action, args] of [
+  ["record_start", {}], ["record_stop", {}],
+  ["logs", { minutes: 3, predicate: 'subsystem == "app"', process: "My App" }],
+  ["appearance", { mode: "dark" }], ["location", { latitude: 51.5, longitude: -0.12 }],
+  ["location", { clear: true }], ["push", { bundle_id: "com.example.app", payload: '{"aps":{"alert":"Hello"}}' }],
+  ["status_bar", { enabled: true }],
+]) {
+  test(`simulator forwards ${action} and its arguments`, async () => {
+    const app = await fakeApp(() => ({ result: action === "record_stop" ? "/attachments/movie.mp4" : "Done" }));
+    try {
+      const result = await callTool(app.sock, "simulator", {action, device:"iPhone 17 Pro", ...args});
+      const wanted = {type:"simulator", agentId:"friday", token:TOKEN, action, device:"iPhone 17 Pro", ...args};
+      for (const [key, value] of Object.entries(wanted)) assert.deepEqual(app.requests[0][key], value);
+      assert.equal(result.content[0].text, action === "record_stop" ? "/attachments/movie.mp4" : "Done");
+    } finally { app.close(); }
+  });
+}

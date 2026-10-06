@@ -33,6 +33,7 @@ mod rpc;
 mod schedule;
 mod secrets;
 mod simulator;
+mod simulator_extras;
 #[cfg(target_os = "macos")]
 mod snapshot;
 mod spend;
@@ -713,6 +714,27 @@ fn devserver_list(app: tauri::AppHandle) -> Vec<devserver::Server> {
 #[specta::specta]
 fn devserver_logs(app: tauri::AppHandle, folder: String) -> Result<devserver::Output, String> {
     app.state::<devserver::DevServers>().logs(&folder)
+}
+
+/// start | poll | cancel pointing at something on the page.
+#[tauri::command]
+#[specta::specta]
+async fn browser_picker(app: tauri::AppHandle, action: String) -> Result<browser::PickerResult, String> {
+    browser::picker(&app, &action)
+}
+
+/// What's at a point on the simulator panel's picture, in the picture's pixels.
+#[tauri::command]
+#[specta::specta]
+async fn simulator_point(udid: String, name: String, x: f64, y: f64, width: f64) -> Result<simulator::SimulatorPoint, String> {
+    simulator::point(&udid, &name, x, y, width)
+}
+
+/// The simulator panel's extra controls: recording, logs, appearance, location, push and the status bar.
+#[tauri::command]
+#[specta::specta]
+async fn simulator_extra(app: tauri::AppHandle, udid: String, action: String, args: simulator_extras::ExtraArgs) -> Result<simulator_extras::ExtraState, String> {
+    simulator_extras::control(&app, &udid, &action, &serde_json::to_value(args).map_err(|e| e.to_string())?)
 }
 
 /// The iOS simulators Xcode has, and whether taps can go through from here.
@@ -1854,6 +1876,9 @@ fn specta_builder() -> tauri_specta::Builder {
             permission_policy,
             provider_capabilities,
             provider_models,
+            browser_picker,
+            simulator_point,
+            simulator_extra,
             simulator_status,
             simulator_boot,
             simulator_shutdown,

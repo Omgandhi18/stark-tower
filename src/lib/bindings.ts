@@ -324,6 +324,39 @@ async providerModels(engineId: string) : Promise<Result<ModelChoice[], string>> 
 }
 },
 /**
+ * start | poll | cancel pointing at something on the page.
+ */
+async browserPicker(action: string) : Promise<Result<PickerResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("browser_picker", { action }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * What's at a point on the simulator panel's picture, in the picture's pixels.
+ */
+async simulatorPoint(udid: string, name: string, x: number, y: number, width: number) : Promise<Result<SimulatorPoint, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("simulator_point", { udid, name, x, y, width }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The simulator panel's extra controls: recording, logs, appearance, location, push and the status bar.
+ */
+async simulatorExtra(udid: string, action: string, args: ExtraArgs) : Promise<Result<ExtraState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("simulator_extra", { udid, action, args }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * The iOS simulators Xcode has, and whether taps can go through from here.
  */
 async simulatorStatus() : Promise<SimulatorStatus> {
@@ -1154,6 +1187,7 @@ export type BrowserPage = {
  * "" before anything has been opened.
  */
 url: string; title: string; loading: boolean }
+export type BrowserPick = { selector: string; tag: string; id: string; classes: string[]; role: string; accessible_name: string; text: string; attributes: Partial<{ [key in string]: string }>; styles: Partial<{ [key in string]: string }>; bounds: Bounds; url: string; title: string; viewport: Partial<{ [key in string]: number }>; device_pixel_ratio: number; outer_html: string }
 export type Budget = { period: BudgetPeriod; limit_usd: number; warn_percent: number }
 export type BudgetPeriod = "day" | "week" | "month"
 /**
@@ -1224,6 +1258,8 @@ installed: boolean; path: string | null; version: string | null;
  * Whether the CLI has credentials, as it reports itself; None until it has answered.
  */
 signIn: SignIn | null }
+export type ExtraArgs = { mode?: string | null; latitude?: number | null; longitude?: number | null; clear?: boolean | null; enabled?: boolean | null; bundle_id?: string | null; payload?: string | null; minutes?: number | null; predicate?: string | null; process?: string | null }
+export type ExtraState = { recording: Recording | null; saved: Attachment | null; appearance: string; last_bundle: string; status_bar: boolean; logs: string }
 /**
  * A file with uncommitted changes in the task's folder.
  */
@@ -1314,6 +1350,7 @@ rule: string;
  * "approval" or "never": how strongly the default held this back.
  */
 tier: string; uses: number; last_used: number | null; revoked: number | null }
+export type PickerResult = { active: boolean; pick: BrowserPick | null; attachment?: Attachment | null }
 /**
  * One step of the owner's own plan (its to-do list).
  */
@@ -1326,6 +1363,7 @@ status: string;
  * How the step reads while it's being done ("Running the tests").
  */
 active: string | null }
+export type PointElement = { role: string; label: string; value: string; frame: Bounds }
 /**
  * One rule of the policy, as the interface lists it.
  */
@@ -1386,6 +1424,7 @@ helpers: Capability;
  * Starkline's team tools: delegate, ask you, message teammates, report bugs.
  */
 team_tools: Capability }
+export type Recording = { path: string; started: number }
 /**
  * Something the developer wants reminding of, and the agent who reminds them.
  */
@@ -1548,6 +1587,7 @@ export type SimDevice = { udid: string; name: string;
  * "iOS 26.0"
  */
 runtime: string; booted: boolean }
+export type SimulatorPoint = { device: string; x: number; y: number; element: PointElement | null }
 export type SimulatorStatus = { 
 /**
  * Xcode's simulator tools answered.

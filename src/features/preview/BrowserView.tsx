@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { ArrowLeft, ArrowRight, ExternalLink, Globe, RotateCw, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, Globe, MousePointerClick, RotateCw, X } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { EmptyState, IconButton, SelectField, covered, cx, onOverlaysChanged } from "../../design";
-import { browserGo, browserHide, browserNavigate, browserShow } from "../../lib/api";
+import { browserGo, browserPicker, browserHide, browserNavigate, browserShow } from "../../lib/api";
+import { selectQuestionFor, useAttention } from "../../stores/attention";
 import { errorMessage } from "../../lib/errors";
 import { useNavigation } from "../../stores/navigation";
 import { useChats } from "../../stores/chats";
 import { useWorkspace } from "../../stores/workspace";
+import { addPoint } from "./pointComposer";
+import { browserPointText } from "./pointModel";
 import DevServerToolbar from "./DevServerToolbar";
 import DevServerOutput from "./DevServerOutput";
 import { BROWSER_SIZES, fitBrowser, type BrowserSize } from "./browserModel";
@@ -26,9 +29,12 @@ export default function BrowserView({ active }: { active: boolean }) {
   const size = usePreview((s) => s.size);
   const setSize = usePreview((s) => s.setSize);
   const agentId = useNavigation((s) => s.agentId);
+  const conversationId = useChats(s => agentId ? s.threads[agentId]?.conversationId ?? null : null);
   const chatFolder = useChats((s) => agentId ? s.threads[agentId]?.folder : "");
   const project = useWorkspace((s) => s.activeProject);
   const folder = chatFolder || project;
+  const question = useAttention(selectQuestionFor(agentId ?? ""));
+  const [picking, setPicking] = useState(false);
   const [outputOpen, setOutputOpen] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
   const [panel, setPanel] = useState({ x: 0, y: 0, width: 0, height: 0 });
@@ -86,6 +92,37 @@ export default function BrowserView({ active }: { active: boolean }) {
     };
   }, [active, hasPage, fitted.zoom, size]);
 
+  useEffect(() => useChats.subscribe((next, previous) => {
+    if (agentId && next.threads[agentId]?.conversationId !== previous.threads[agentId]?.conversationId) setPicking(false);
+  }), [agentId]);
+
+  useEffect(() => useAttention.subscribe(state => {
+    if (agentId && selectQuestionFor(agentId)(state)) setPicking(false);
+  }), [agentId]);
+
+  useEffect(() => useNavigation.subscribe((next, previous) => {
+    if (next.agentId !== previous.agentId || next.route !== "conversation") setPicking(false);
+  }), []);
+
+  useEffect(() => {
+    if (!picking || !active || !agentId) return;
+    let live = true;
+    let timer = 0;
+    const poll = async () => {
+      try {
+        const result = await browserPicker("poll");
+        if (result.pick) addPoint(agentId, browserPointText(result.pick), result.attachment, conversationId);
+        if (!live) return;
+        if (!result.active) { setPicking(false); return; }
+        timer = window.setTimeout(poll, 150);
+      } catch (e) { if (live) { setError(errorMessage(e, "The element couldn't be picked. Try again.")); setPicking(false); } }
+    };
+    browserPicker("start").then(() => { if (live) void poll(); }).catch(e => { if (live) { setError(errorMessage(e, "The picker couldn't start.")); setPicking(false); } });
+    const escape = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") setPicking(false); };
+    window.addEventListener("keydown", escape);
+    return () => { live = false; window.clearTimeout(timer); window.removeEventListener("keydown", escape); browserPicker("cancel").catch(report("cancel picking")); };
+  }, [picking, active, agentId, conversationId]);
+
   const open = (address: string) => {
     setError(null);
     browserNavigate(address)
@@ -123,6 +160,7 @@ export default function BrowserView({ active }: { active: boolean }) {
           onFocus={(e) => e.currentTarget.select()}
           onKeyDown={onKeyDown}
         />
+        <IconButton icon={MousePointerClick} label="Point at something" size="sm" aria-pressed={picking} disabled={!hasPage || !agentId || Boolean(question)} title={question ? "Answer the agent’s question first, then point at the page." : undefined} onClick={() => { setError(null); setPicking(on => !on); }} />
         <IconButton icon={ExternalLink} label="Open in your browser" size="sm" disabled={!hasPage} onClick={() => openUrl(page.url).catch(report("open the page outside"))} />
         <span className={cx("browser-progress", page.loading && "is-loading")} aria-hidden />
       </div>

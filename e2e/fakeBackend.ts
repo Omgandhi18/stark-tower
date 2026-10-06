@@ -47,6 +47,7 @@ function install(scenario: Scenario) {
   const kindOf = (name: string): { kind: string; mime: string } => {
     const ext = name.split(".").pop()?.toLowerCase() ?? "";
     if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) return { kind: "image", mime: `image/${ext === "jpg" ? "jpeg" : ext}` };
+    if (ext === "mp4") return { kind: "video", mime: "video/mp4" };
     if (ext === "md") return { kind: "markdown", mime: "text/markdown" };
     if (ext === "html") return { kind: "html", mime: "text/html" };
     if (ext === "pdf") return { kind: "pdf", mime: "application/pdf" };
@@ -66,6 +67,10 @@ function install(scenario: Scenario) {
   };
 
   const emit = (event: string, payload: unknown) => {
+    if (event === "simulator://logs") {
+      const log = payload as {udid:string;text:string};
+      if (state.simulatorExtras[log.udid]) state.simulatorExtras[log.udid].logs = log.text;
+    }
     if (event === "devserver://changed") {
       const server = payload as Scenario["devservers"]["servers"][string];
       state.devservers.servers[server.folder] = server;
@@ -577,6 +582,37 @@ function install(scenario: Scenario) {
     },
     devserver_list: () => Object.values(state.devservers.servers),
     devserver_logs: (args) => state.devservers.output[String(args.folder)] ?? { folder: String(args.folder), generation: 0, cursor: 0, lines: [] },
+    browser_picker: (args) => {
+      if (args.action === "start") { state.picking = true; return {active:true,pick:null,attachment:null}; }
+      if (args.action === "cancel") { state.picking = false; return {active:false,pick:null,attachment:null}; }
+      const pick = state.picking ? state.browserPick : null;
+      if (pick) { state.picking = false; state.browserPick = null; }
+      return {active:state.picking,pick,attachment:pick ? keep("browser-point.jpg") : null};
+    },
+    simulator_point: (args) => ({device:args.name,x:Number(args.x)/2,y:Number(args.y)/2,element:state.simulator.touch ? {role:"Button",label:"Sign in",value:"",frame:{x:20,y:620,width:350,height:50}} : null}),
+    simulator_extra: (args) => {
+      const udid = String(args.udid), action = String(args.action), input = args.args as Json;
+      const extra = state.simulatorExtras[udid] ??= {recording:null,saved:null,appearance:"light",last_bundle:"",status_bar:false,logs:""};
+      if (!["state","record_stop","logs_stop","logs_clear"].includes(action) && !state.simulator.devices.some(d => d.udid === udid && d.booted)) throw "Boot this simulator first.";
+      if (action === "record_start") {
+        if (extra.recording) throw "This simulator is already recording.";
+        extra.recording = {path:"/fake/attachments/simulator-recording.mp4",started:Date.now()};
+      }
+      if (action === "record_stop") {
+        if (!extra.recording) throw "This simulator isn't recording.";
+        extra.recording = null;
+        extra.saved = keep("simulator-recording.mp4");
+      }
+      if (action === "appearance") extra.appearance = String(input.mode);
+      if (action === "status_bar") extra.status_bar = Boolean(input.enabled);
+      if (action === "push") JSON.parse(String(input.payload));
+      if (action === "logs_start") {
+        extra.logs = "MyApp settings: screen opened\nnetwork subsystem: request completed\n";
+        setTimeout(() => emit("simulator://logs",{udid,text:extra.logs}),30);
+      }
+      if (action === "logs_clear") extra.logs = "";
+      return extra;
+    },
     browser_page: () => state.browser,
     browser_show: () => null,
     browser_hide: () => null,

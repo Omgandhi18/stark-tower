@@ -29,6 +29,8 @@ import type {
   ReviewRequest,
   RuntimeHealth,
   SimulatorStatus,
+  BrowserPick,
+  ExtraState,
   StoredMessage,
   DeliveryInfo,
   CodeReviews,
@@ -97,6 +99,9 @@ export interface Scenario {
   /** The built-in browser's page. */
   browser: BrowserPage;
   terminals: Array<TerminalInfo & { output: number[]; offset: number; input: string }>;
+  browserPick: BrowserPick | null;
+  picking: boolean;
+  simulatorExtras: Record<string, ExtraState>;
   devservers: { candidates: Record<string, Candidates>; servers: Record<string, Server>; output: Record<string, Output>; readyAddress: string | null };
   /** Xcode's simulators, and a screenshot standing in for every frame. */
   simulator: SimulatorStatus & { frame: string };
@@ -695,6 +700,9 @@ export function defaultScenario(): Scenario {
     reminders: reminders(),
     terminals: [],
     browser: { url: "", title: "", loading: false },
+    browserPick: null,
+    picking: false,
+    simulatorExtras: {},
     devservers: { candidates: {}, servers: {}, output: {}, readyAddress: null },
     simulator: {
       available: true,
@@ -991,5 +999,22 @@ export function withDevCommands(s: Scenario): Scenario {
     custom: "",
   };
   s.config.dev_servers = { [APP]: { selected: "package:start", custom: "" } };
+  return s;
+}
+
+/** A page element waiting for the developer's next pick. */
+export function withBrowserPick(s: Scenario): Scenario {
+  s.browser = {url:"http://localhost:5173/settings",title:"Settings",loading:false};
+  s.browserPick = {
+    selector:"#save",tag:"button",id:"save",classes:["primary"],role:"button",accessible_name:"Save changes",text:"Save changes",attributes:{type:"submit"},
+    styles:{"background-color":"rgb(20, 120, 110)",color:"rgb(255, 255, 255)","font-size":"14px","line-height":"20px","font-family":"Inter","font-weight":"600",padding:"8px 16px","border-radius":"8px"},
+    bounds:{x:840,y:412,width:120,height:32},url:s.browser.url,title:s.browser.title,viewport:{width:1280,height:800},device_pixel_ratio:2,outer_html:'<button id="save" class="primary">Save changes</button>',
+  };
+  return s;
+}
+
+/** A running device whose app was last launched through Starkline. */
+export function withSimulatorControls(s: Scenario): Scenario {
+  s.simulatorExtras["SIM-17PRO"] = {recording:null,saved:null,appearance:"light",last_bundle:"com.example.app",status_bar:false,logs:""};
   return s;
 }

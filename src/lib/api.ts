@@ -1,6 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { commands, type AutomationInput, type Bounds, type BrowserPage, type Budget, type CodeReviews, type CommitInput, type Output, type PowerState, type ReminderInput, type RequestInput, type Result, type Server, type WorktreeSetup } from "./bindings";
+import { commands, type AutomationInput, type Bounds, type BrowserPage, type Budget, type CodeReviews, type CommitInput, type ExtraArgs, type Output, type PowerState, type ReminderInput, type RequestInput, type Result, type Server, type WorktreeSetup } from "./bindings";
 import type { Attachment, ChatEvent, ChatSwitch, TaskEvent, LedgerEntry, PtyData, ReviewRequest, StatusEvent, UsageUpdate, UpdateStatus } from "./types";
 
 // Commands are the tauri-specta-generated, typed wrappers (bindings.ts). Fallible
@@ -101,6 +101,8 @@ export const onBrowserChanged = (cb: (page: BrowserPage) => void): Promise<Unlis
 /** An agent opened a page: the browser comes into view. */
 export const onBrowserReveal = (cb: (agentId: string) => void): Promise<UnlistenFn> =>
   listen<{ agentId: string }>("browser://reveal", (e) => cb(e.payload.agentId));
+/** Point at something on the page: start, then poll until a pick comes back or picking stops. */
+export const browserPicker = (action: "start" | "poll" | "cancel") => ok(commands.browserPicker(action));
 
 // ---- iOS Simulator ----
 
@@ -120,6 +122,13 @@ export const simulatorOpenApp = (udid: string) => ok(commands.simulatorOpenApp(u
 /** An agent booted a simulator or launched its app: the simulator comes into view. */
 export const onSimulatorReveal = (cb: (udid: string) => void): Promise<UnlistenFn> =>
   listen<{ udid: string }>("simulator://reveal", (e) => cb(e.payload.udid));
+/** What's at a point clicked on the screen, in the screenshot's pixels. */
+export const simulatorPoint = (udid: string, name: string, x: number, y: number, width: number) => ok(commands.simulatorPoint(udid, name, x, y, width));
+/** Recording, logs, appearance, location, push and the status bar. */
+export const simulatorExtra = (udid: string, action: string, args: ExtraArgs = {}) => ok(commands.simulatorExtra(udid, action, args));
+/** A device's streamed logs so far (the last 20 KB), a few times a second while they're shown. */
+export const onSimulatorLogs = (cb: (logs: { udid: string; text: string }) => void): Promise<UnlistenFn> =>
+  listen<{ udid: string; text: string }>("simulator://logs", (e) => cb(e.payload));
 
 // ---- Reminders ----
 

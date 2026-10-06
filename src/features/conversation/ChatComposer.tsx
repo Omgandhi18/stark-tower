@@ -138,6 +138,7 @@ export default function ChatComposer({ agentId, agentName, folder, pending, answ
         />
       )}
       <textarea
+        data-chat-agent={agentId}
         ref={inputRef}
         className="chat-input selectable"
         rows={1}
