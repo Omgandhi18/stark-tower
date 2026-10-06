@@ -191,8 +191,32 @@ const SHARE_TOOL = {
   },
 };
 
+const REMIND_TOOL = {
+  name: "remind",
+  description:
+    "Set a reminder for the developer when they ask to be reminded of something (\"remind me at 5 to " +
+    "check the deploy\"). When it's due, you remind them: a notification from you and a line in your " +
+    "chat. Say when with `at`, a local time as \"YYYY-MM-DD HH:MM\" (or \"HH:MM\" for the next time the " +
+    "clock shows it), or with `in_minutes`. Run `date` first if you need today's date. Tell them the " +
+    "time it was set for.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      text: { type: "string", description: "What to remind them of, in a few words (\"Check the deploy\")." },
+      at: { type: "string", description: "Local time: \"YYYY-MM-DD HH:MM\", or \"HH:MM\"." },
+      in_minutes: { type: "integer", description: "Or this many minutes from now." },
+      repeat: {
+        type: "string",
+        enum: ["daily", "weekdays", "weekly"],
+        description: "Repeat at the same time of day (needs `at`); leave out for once.",
+      },
+    },
+    required: ["text"],
+  },
+};
+
 async function toolsList() {
-  const tools = [ASK_HUMAN_TOOL, MESSAGE_TOOL, SHARE_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
+  const tools = [ASK_HUMAN_TOOL, MESSAGE_TOOL, SHARE_TOOL, REMIND_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
   if (IS_ORCH) {
     const workers = await getRoster();
     tools.unshift(buildDelegateTool(workers));
@@ -275,6 +299,18 @@ rl.on("line", async (raw) => {
       const res = await bridge({ type: "share", agentId: AGENT_ID, paths, caption: args.caption || "" });
       if (res.error) result(id, "share failed: " + res.error, true);
       else result(id, res.result || "(shared)");
+    } else if (name === "remind") {
+      log("remind ->", args.at || args.in_minutes);
+      const res = await bridge({
+        type: "remind",
+        agentId: AGENT_ID,
+        text: args.text || "",
+        at: args.at || "",
+        inMinutes: Number.isInteger(args.in_minutes) ? args.in_minutes : null,
+        repeat: args.repeat || "",
+      });
+      if (res.error) result(id, "remind failed: " + res.error, true);
+      else result(id, res.result || "(set)");
     } else if (name === "report_bug") {
       log("report_bug ->", args.title);
       const res = await bridge({

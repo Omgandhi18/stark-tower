@@ -104,3 +104,27 @@ test("reports a share the app refused as an error", async () => {
     app.close();
   }
 });
+
+test("sets a reminder through the app, saying when", async () => {
+  const app = await fakeApp(() => ({ result: "Reminder set for Wed 7 Oct at 9:00 AM: \"Check the deploy\"." }));
+  try {
+    const result = await callTool(app.sock, "remind", { text: "Check the deploy", at: "2026-10-07 09:00", repeat: "weekdays" });
+    assert.deepEqual(app.requests, [
+      { type: "remind", agentId: "friday", text: "Check the deploy", at: "2026-10-07 09:00", inMinutes: null, repeat: "weekdays", token: TOKEN },
+    ]);
+    assert.match(result.content[0].text, /Wed 7 Oct at 9:00 AM/);
+  } finally {
+    app.close();
+  }
+});
+
+test("passes minutes from now, and relays a time the app couldn't use as an error", async () => {
+  const app = await fakeApp(() => ({ error: "in_minutes has to be between 1 and a year's worth." }));
+  try {
+    const result = await callTool(app.sock, "remind", { text: "Stretch", in_minutes: 0 });
+    assert.equal(app.requests[0].inMinutes, 0);
+    assert.equal(result.isError, true);
+  } finally {
+    app.close();
+  }
+});

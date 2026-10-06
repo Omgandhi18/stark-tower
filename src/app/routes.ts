@@ -1,4 +1,4 @@
-import { Bell, Building2, LayoutGrid, Settings, UsersRound, Zap, type LucideIcon } from "lucide-react";
+import { AlarmClock, Bell, Building2, LayoutGrid, Settings, UsersRound, Zap, type LucideIcon } from "lucide-react";
 import type { RouteId } from "../stores/navigation";
 
 export interface NavItem {
@@ -15,8 +15,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { route: "environment", label: "Environment", icon: Building2, shortcut: "2" },
   { route: "agents", label: "Agents", icon: UsersRound, shortcut: "3" },
   { route: "automations", label: "Automations", icon: Zap, shortcut: "4" },
-  { route: "notifications", label: "Notifications", icon: Bell, shortcut: "5" },
-  { route: "settings", label: "Settings", icon: Settings, shortcut: "6" },
+  { route: "reminders", label: "Reminders", icon: AlarmClock, shortcut: "5" },
+  { route: "notifications", label: "Notifications", icon: Bell, shortcut: "6" },
+  { route: "settings", label: "Settings", icon: Settings, shortcut: "7" },
 ];
 
 /** Which sidebar item a route belongs to: a task and a conversation live under Work. */

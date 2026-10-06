@@ -3,6 +3,7 @@ import { KeepAlive, PortraitOutfits, SkeletonRows } from "../design";
 import { IS_TAURI } from "../lib/platform";
 import AgentsScreen from "../features/agents/AgentsScreen";
 import AutomationsScreen from "../features/automations/AutomationsScreen";
+import RemindersScreen from "../features/reminders/RemindersScreen";
 import ConversationScreen from "../features/conversation/ConversationScreen";
 import NotificationsScreen from "../features/notifications/NotificationsScreen";
 import Onboarding from "../features/onboarding/Onboarding";
@@ -29,6 +30,7 @@ const ROUTE_LABEL: Record<RouteId, string> = {
   environment: "Environment",
   agents: "Agents",
   automations: "Automations",
+  reminders: "Reminders",
   notifications: "Notifications",
   settings: "Settings",
 };
@@ -52,6 +54,8 @@ function screenFor(route: RouteId, comparing: boolean) {
       return <AgentsScreen />;
     case "automations":
       return <AutomationsScreen />;
+    case "reminders":
+      return <RemindersScreen />;
     case "notifications":
       return <NotificationsScreen />;
     case "settings":

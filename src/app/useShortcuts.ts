@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useNavigation } from "../stores/navigation";
 import { NAV_ITEMS } from "./routes";
 
-/** ⌘1 to ⌘6 jump between the six destinations from anywhere. */
+/** ⌘1 to ⌘7 jump between the destinations from anywhere. */
 export function useShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

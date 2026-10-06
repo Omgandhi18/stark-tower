@@ -8,6 +8,7 @@ import {
   listAgents,
   onAgentStatus,
   onAutomationsChanged,
+  onRemindersChanged,
   onBugsChanged,
   onChatEvent,
   onChatSwitched,
@@ -28,6 +29,7 @@ import { useActivity } from "../stores/activity";
 import { useAgents } from "../stores/agents";
 import { useAttention } from "../stores/attention";
 import { useAutomations } from "../stores/automations";
+import { useReminders } from "../stores/reminders";
 import { useChats } from "../stores/chats";
 import { useConfig } from "../stores/config";
 import { useNotifications } from "../stores/notifications";
@@ -93,6 +95,7 @@ export function useBackendSync() {
     first("pending reviews", useAttention.getState().refresh);
     first("notifications", useNotifications.getState().refresh);
     first("automations", useAutomations.getState().refresh);
+    first("reminders", useReminders.getState().refresh);
     first("runtime health", system.refreshHealth);
     first("keep-awake state", system.refreshPower);
     first("update status", checkUpdate);
@@ -119,6 +122,7 @@ export function useBackendSync() {
       onPowerState((p) => useSystem.getState().applyPower(p)),
       onNotificationsChanged(() => useNotifications.getState().refresh().catch(report("notifications"))),
       onAutomationsChanged(() => useAutomations.getState().refreshAll().catch(report("automations"))),
+      onRemindersChanged(() => useReminders.getState().refresh().catch(report("reminders"))),
       onHealthChanged(() => useSystem.getState().refreshHealth().catch(report("runtime health"))),
     ];
     // Background checks started by the first health read may answer before their listener

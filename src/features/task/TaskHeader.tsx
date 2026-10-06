@@ -10,6 +10,7 @@ import { useConfig } from "../../stores/config";
 import { useNavigation } from "../../stores/navigation";
 import { folderName } from "../../stores/workspace";
 import { providerLabel } from "../agents/display";
+import RemindMeButton from "../reminders/RemindMeButton";
 import type { StateTone } from "../../lib/status";
 
 const report = (what: string) => (e: unknown) => console.error(`[task] couldn't ${what}`, e);
@@ -73,6 +74,7 @@ export default function TaskHeader({ detail, owner, requester, state, now }: Tas
           <Button icon={MessageSquareText} onClick={() => openConversation(task.assignee)}>
             Talk to {name}
           </Button>
+          <RemindMeButton task={task} ownerName={name} />
           {task.status === "done" && (
             <Button variant="review" icon={CheckCheck} onClick={markReviewed}>
               Mark as reviewed

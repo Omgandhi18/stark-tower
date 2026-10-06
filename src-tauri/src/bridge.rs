@@ -172,6 +172,10 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
             handle_share(app, &mut writer, &req);
             return;
         }
+        Some("remind") => {
+            handle_remind(app, &mut writer, &req);
+            return;
+        }
         _ => {}
     }
 
@@ -226,6 +230,41 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
     let result = run_task_blocking(app, from, &agent, &task, &cwd)
         .unwrap_or_else(|e| format!("(delegation failed: {e})"));
     complete_delegation(app, &agent, &task, &result);
+}
+
+/// The developer asked an agent to remind them of something: the agent sets the
+/// reminder, and reminds them itself when it comes due.
+fn handle_remind(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_json::Value) {
+    let reply = |w: &mut UnixStream, v: serde_json::Value| {
+        let _ = w.write_all((v.to_string() + "\n").as_bytes());
+    };
+    let agent = req.get("agentId").and_then(|s| s.as_str()).unwrap_or("");
+    let text = req.get("text").and_then(|s| s.as_str()).unwrap_or("");
+    let at = req.get("at").and_then(|s| s.as_str()).unwrap_or("");
+    let in_minutes = req.get("inMinutes").and_then(|m| m.as_i64());
+    let repeat = req.get("repeat").and_then(|s| s.as_str()).unwrap_or("");
+    let now = chrono::Local::now();
+    let set = crate::reminders::parse_when(at, in_minutes, now).and_then(|due| {
+        if !repeat.trim().is_empty() && at.trim().is_empty() {
+            return Err("A repeating reminder needs `at`, for its time of day.".into());
+        }
+        let schedule = crate::reminders::repeat_at(repeat, &due)?;
+        crate::reminders::set_by_agent(app, agent, text, due, schedule)
+    });
+    match set {
+        Ok(r) => {
+            let again = if r.repeat.is_some() { ", and again on that schedule" } else { "" };
+            reply(
+                writer,
+                serde_json::json!({ "result": format!(
+                    "Reminder set for {}{again}: \"{}\". You'll remind the developer then; it's also on their Reminders screen.",
+                    crate::reminders::when(r.due),
+                    r.text
+                ) }),
+            );
+        }
+        Err(e) => reply(writer, serde_json::json!({ "error": e })),
+    }
 }
 
 /// An agent messages a teammate: drop the message into the sender's outbox for

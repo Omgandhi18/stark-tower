@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { cx } from "../design";
+import ReminderToasts from "../features/reminders/ReminderToasts";
 import { HAS_LEFT_WINDOW_CONTROLS } from "../lib/platform";
 import SideNav from "./SideNav";
 import TopBar from "./TopBar";
@@ -14,6 +15,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       <main className="app-main" id="main">
         {children}
       </main>
+      <ReminderToasts />
     </div>
   );
 }

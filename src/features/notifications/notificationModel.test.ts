@@ -20,6 +20,7 @@ const note = (id: number, over: Partial<Notification>): Notification => ({
   handled: null,
   outcome: null,
   automation_id: null,
+  reminder_id: null,
   ...over,
 });
 

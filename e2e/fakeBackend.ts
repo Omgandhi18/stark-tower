@@ -152,6 +152,13 @@ function install(scenario: Scenario) {
     steps.forEach((step, i) => window.setTimeout(step, REPLY_DELAY_MS * (i + 1)));
   };
 
+  // A reminder dealt with settles its open notification, as the backend does.
+  const settleReminder = (id: number, outcome: string) => {
+    state.notifications = state.notifications.map((n) => (n.reminder_id === id && n.handled === null ? { ...n, handled: Date.now(), outcome, read: true } : n));
+    emit("reminders://changed", null);
+    emit("notifications://changed", null);
+  };
+
   const commands: Record<string, (args: Json) => unknown> = {
     "plugin:event|listen": (args) => {
       const event = String(args.event);
@@ -300,6 +307,41 @@ function install(scenario: Scenario) {
       state.rules = state.rules.map((r) => (r.id === args.id ? { ...r, revoked: Date.now() } : r));
       emit("rules://changed", null);
       return true;
+    },
+    list_reminders: () => [...state.reminders].sort((a, b) => a.due - b.due || a.id - b.id),
+    save_reminder: (args) => {
+      const input = args.input as Scenario["reminders"][number] & { id: number | null };
+      if (!input.text.trim()) throw "Say what to remind you of.";
+      if (!input.repeat && input.due <= Date.now()) throw "Pick a time that hasn't passed.";
+      const existing = state.reminders.find((r) => r.id === input.id);
+      const now = Date.now();
+      const saved = {
+        ...(existing ?? { created: now, fired: null, set_by: "you" }),
+        ...input,
+        id: existing?.id ?? Math.max(0, ...state.reminders.map((r) => r.id)) + 1,
+        text: input.text.trim(),
+        status: "waiting",
+        updated: now,
+      } as Scenario["reminders"][number];
+      state.reminders = existing ? state.reminders.map((r) => (r.id === saved.id ? saved : r)) : [...state.reminders, saved];
+      emit("reminders://changed", null);
+      return saved;
+    },
+    complete_reminder: (args) => {
+      state.reminders = state.reminders.map((r) => (r.id === args.id && !r.repeat ? { ...r, status: "done", updated: Date.now() } : r));
+      settleReminder(Number(args.id), "Done");
+      return null;
+    },
+    snooze_reminder: (args) => {
+      if (Number(args.until) <= Date.now()) throw "Pick a time that hasn't passed.";
+      state.reminders = state.reminders.map((r) => (r.id === args.id ? { ...r, due: Number(args.until), status: "waiting", updated: Date.now() } : r));
+      settleReminder(Number(args.id), "Snoozed");
+      return state.reminders.find((r) => r.id === args.id);
+    },
+    delete_reminder: (args) => {
+      state.reminders = state.reminders.filter((r) => r.id !== args.id);
+      settleReminder(Number(args.id), "Deleted");
+      return null;
     },
     list_automations: () => [...state.automations].sort((a, b) => a.name.localeCompare(b.name)),
     list_automation_runs: (args) => state.automationRuns.filter((r) => r.automation_id === args.id),
