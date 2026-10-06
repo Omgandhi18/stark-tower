@@ -29,6 +29,7 @@ export interface ChatRow {
   agent: Agent;
   title: string;
   cwd: string;
+  project?: string;
   activity?: Activity;
   since: number;
   state: { label: string; tone: StateTone };
@@ -97,7 +98,7 @@ export function buildBoard({ agents, since, tasks, conversations, latest, pendin
     };
   };
 
-  const visible = shownOnBoard(tasks).filter((t) => inProject(t.cwd, project) && (tab === "all" || askedByDeveloper(t.requested_by)));
+  const visible = shownOnBoard(tasks).filter((t) => inProject(t.project_folder || t.cwd, project) && (tab === "all" || askedByDeveloper(t.requested_by)));
   const ordered = sort === "longest" ? [...visible].sort((a, b) => (a.started ?? a.ts) - (b.started ?? b.ts)) : newestFirst(visible, (t) => t.updated);
   const withStatus = (status: string) => ordered.filter((t) => t.status === status).map(rowFor);
 
@@ -115,12 +116,13 @@ export function buildBoard({ agents, since, tasks, conversations, latest, pendin
       if ((!presentation.busy && agent.status !== "blocked") || onTask.has(agent.id)) continue;
       const chat = chatOf(agent.id);
       const cwd = chat?.cwd ?? "";
-      if (!inProject(cwd, project)) continue;
+      if (!inProject(chat?.project_folder || cwd, project)) continue;
       const titled = chat && chat.title.trim() && chat.title !== DEFAULT_CHAT_TITLE ? chat.title : undefined;
       chats.push({
         agent,
         title: titled ?? `Chat with ${agent.name}`,
         cwd,
+        project: chat?.project_folder,
         activity: latest[agent.id],
         since: since[agent.id] ?? Date.now(),
         state:

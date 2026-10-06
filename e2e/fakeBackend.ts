@@ -120,6 +120,8 @@ function install(scenario: Scenario) {
         created: Date.now(),
         updated: Date.now(),
         delegated: false,
+        project_folder: cwd,
+        branch: "",
       });
       state.transcripts[id] = [];
       emit("conversations://changed", null);
@@ -292,6 +294,23 @@ function install(scenario: Scenario) {
     conversation_spend: (args) => state.conversationSpend[Number(args.conversationId)] ?? {
       total: { cost_usd: 0, input_tokens: 0, output_tokens: 0, context_tokens: 0, turns: 0, unpriced_turns: 0 }, context_tokens: 0,
     },
+    list_worktrees: () => state.worktrees,
+    set_worktrees_enabled: (args) => { state.config.worktrees_enabled = Boolean(args.enabled); return commitConfig(); },
+    save_worktree_setup: (args) => {
+      state.config.worktree_setup = { ...state.config.worktree_setup, [String(args.project)]: args.setup as NonNullable<Scenario["config"]["worktree_setup"]>[string] };
+      return commitConfig();
+    },
+    remove_worktree: (args) => {
+      const task = state.tasks.find((t) => t.id === args.id);
+      const tree = state.worktrees.find((w) => w.path === task?.cwd);
+      if (!task || !tree || tree.removed !== null) throw "This worktree has already been removed.";
+      if (!["done", "reviewed", "closed"].includes(task.status)) throw "Finish, review or close the task first.";
+      if ((state.changes[tree.path]?.length ?? 0) && !args.force) throw "Review the changes and choose Remove anyway.";
+      tree.removed = Date.now();
+      state.claims = state.claims.filter((c) => c.workspace !== tree.path);
+      emit("workspaces://changed", null);
+      emit("tasks://changed", null);
+    },
     list_projects: () => state.projects,
     add_project: (args) => {
       const path = String(args.path);
@@ -307,6 +326,64 @@ function install(scenario: Scenario) {
     remove_project: (args) => {
       state.projects.projects = state.projects.projects.filter((p) => p.path !== args.path);
       return state.projects;
+    },
+    delivery_info: (args) => {
+      const task = state.tasks.find((t) => t.id === args.id);
+      if (!task) throw "That task doesn't exist.";
+      return state.delivery[task.cwd] ?? { branch: state.branches[task.cwd] ?? "", default_branch:"main", new_branch:"starkline/task", host:null, pushed:false, request_url:task.request_url, request_title:task.title };
+    },
+    draft_delivery: async () => {
+      if (state.draftDelayMs) await new Promise((resolve) => window.setTimeout(resolve, state.draftDelayMs));
+      return { text: state.draftMessage, warning:null };
+    },
+    cancel_delivery_draft: () => null,
+    discard_task_file: (args) => {
+      if (state.deliveryError) throw state.deliveryError;
+      const task = state.tasks.find((t) => t.id === args.id);
+      if (!task) throw "That task doesn't exist.";
+      state.changes[task.cwd] = (state.changes[task.cwd] ?? []).filter((c) => c.path !== args.path);
+      emit("tasks://changed", null); return null;
+    },
+    commit_task: (args) => {
+      if (state.deliveryError) throw state.deliveryError;
+      const task = state.tasks.find((t) => t.id === args.id)!;
+      const input = args.input as { paths:string[]; message:string; branch:string | null; push:boolean };
+      if (!input.paths.length || !input.message.trim()) throw "Select files and write a message first.";
+      if (input.branch) { state.branches[task.cwd] = input.branch; if (state.delivery[task.cwd]) state.delivery[task.cwd].branch = input.branch; }
+      state.changes[task.cwd] = (state.changes[task.cwd] ?? []).filter((c) => !input.paths.includes(c.path));
+      if (state.delivery[task.cwd]) state.delivery[task.cwd].pushed = input.push && !state.pushError;
+      emit("tasks://changed", null);
+      if (input.push && state.pushError) throw `The commit is saved. ${state.pushError}`;
+      return null;
+    },
+    push_task: (args) => {
+      if (state.pushError) throw state.pushError;
+      if (state.deliveryError) throw state.deliveryError;
+      const task = state.tasks.find((t) => t.id === args.id)!;
+      if (!state.delivery[task.cwd]?.host) throw "This folder has no remote. Add one in Terminal, then push again.";
+      state.delivery[task.cwd].pushed = true; emit("tasks://changed", null); return null;
+    },
+    create_task_request: (args) => {
+      if (state.deliveryError) throw state.deliveryError;
+      const task = state.tasks.find((t) => t.id === args.id)!;
+      const info = state.delivery[task.cwd];
+      if (!info.pushed || !info.host) throw "Push this branch before opening a request.";
+      if (info.host.connection) throw info.host.connection;
+      const gitlab = info.host.kind === "gitlab";
+      const number = gitlab ? 45 : 128;
+      const url = `https://${info.host.hostname}/${info.host.repository}/${gitlab ? "-/merge_requests" : "pull"}/${number}`;
+      task.request_url = url; task.request_host = info.host.kind; task.request_number = number; info.request_url = url;
+      emit("tasks://changed", null); return url;
+    },
+    code_reviews: () => state.codeReviews,
+    refresh_code_reviews: () => { emit("hosting://changed", state.codeReviews); return null; },
+    see_code_review: (args) => { state.codeReviews.items = state.codeReviews.items.filter((i) => i.id !== args.id || i.reason !== "comments" || i.host_kind !== "github"); emit("hosting://changed", state.codeReviews); return null; },
+    ask_code_review: (args) => {
+      const item = state.codeReviews.items.find((i) => i.id === args.id);
+      if (!item) throw "That request no longer needs attention.";
+      const cli = item.host_kind === "github" ? "gh pr" : "glab mr";
+      const instructions = item.reason === "failed" ? `Fix failed checks: ${item.failed_checks.join(", ")}. Read ${item.host_kind === "github" ? `gh pr checks ${item.number}; gh run view <run-id> --log-failed` : "glab ci view; glab ci trace <job>"}. Work on branch ${item.branch}. Push nothing; the developer will deliver it.` : item.reason === "review" ? `Review with ${cli} diff ${item.number}. Report findings to the developer. Post nothing and push nothing.` : `Read ${cli} view ${item.number} --comments. Address feedback on branch ${item.branch}. Post nothing and push nothing.`;
+      return commands.start_task({ agentId:args.agentId, dir:item.cwd, prompt:`${item.title}\n${instructions}\nRequest: ${item.url}\nBranch: ${item.branch}` });
     },
     get_tasks: () => state.tasks,
     start_task: (args) => {
@@ -334,6 +411,9 @@ function install(scenario: Scenario) {
         finished: null,
         plan_done: null,
         plan_total: null,
+        workspace_kind: "checkout",
+        project_folder: cwd,
+        request_url: null, request_host: null, request_number: null,
       };
       state.tasks.unshift(task);
       if (!busy) {
@@ -344,7 +424,7 @@ function install(scenario: Scenario) {
         const chat = open && inFolder(open) ? open : [...state.conversations].filter(inFolder).sort((a, b) => b.updated - a.updated)[0];
         const conversationId = chat?.id ?? nextConversation++;
         if (!chat) {
-          state.conversations.unshift({ id: conversationId, agent_id: agentId, title: task.title, cwd, created: now, updated: now, delegated: false });
+          state.conversations.unshift({ id: conversationId, agent_id: agentId, title: task.title, cwd, created: now, updated: now, delegated: false, project_folder: cwd, branch: "" });
           state.transcripts[conversationId] = [];
         }
         state.current[agentId] = conversationId;
@@ -360,7 +440,17 @@ function install(scenario: Scenario) {
       const id = String(args.id);
       const task = state.tasks.find((t) => t.id === id);
       if (!task) return null;
+      const tree = state.worktrees.find((w) => w.path === task.cwd);
+      const workspace = {
+        kind: task.workspace_kind || "checkout", path: task.cwd, project: task.project_folder || task.cwd,
+        branch: state.branches[task.cwd] ?? task.branch, base: tree?.base ?? "", base_commit: tree?.base_commit ?? "",
+        decision: state.taskEvents[id]?.filter((e) => e.kind === "workspace").at(-1)?.summary ?? "This task is using the current checkout because no other task is editing it.",
+        ahead: tree ? 1 : 0, changes: state.changes[task.cwd] ?? [], unmerged: [], removed: tree?.removed !== null && tree?.removed !== undefined,
+        removable: Boolean(tree && ["done", "reviewed", "closed"].includes(task.status)),
+      };
       return {
+        workspace,
+        claims: state.claims.filter((c) => c.workspace === task.cwd),
         task,
         children: state.tasks.filter((t) => t.parent_id === id),
         events: state.taskEvents[id] ?? [],
@@ -542,6 +632,8 @@ function install(scenario: Scenario) {
         conversation_id: null,
         parent_id: null,
         requested_by: `automation:${a.id}`,
+        workspace_kind: "checkout",
+        project_folder: a.cwd,
         prompt: a.instruction,
         branch: state.branches[a.cwd] ?? "",
         started: now,
@@ -582,7 +674,7 @@ function install(scenario: Scenario) {
       const agentId = String(args.agentId);
       const id = nextConversation++;
       const cwd = typeof args.cwd === "string" && args.cwd ? args.cwd : (conversationOf(agentId)?.cwd ?? state.projects.active);
-      state.conversations.unshift({ id, agent_id: agentId, title: "", cwd, created: Date.now(), updated: Date.now(), delegated: false });
+      state.conversations.unshift({ id, agent_id: agentId, title: "", cwd, created: Date.now(), updated: Date.now(), delegated: false, project_folder: cwd, branch: "" });
       state.transcripts[id] = [];
       state.current[agentId] = id;
       setStatus(agentId, "offline");
@@ -604,7 +696,7 @@ function install(scenario: Scenario) {
       state.tasks = state.tasks.map((t) => (t.conversation_id === id ? { ...t, conversation_id: null } : t));
       if (wasOpen) {
         const fresh = nextConversation++;
-        state.conversations.unshift({ id: fresh, agent_id: agentId, title: "", cwd: chat.cwd, created: Date.now(), updated: Date.now(), delegated: false });
+        state.conversations.unshift({ id: fresh, agent_id: agentId, title: "", cwd: chat.cwd, created: Date.now(), updated: Date.now(), delegated: false, project_folder: chat.project_folder, branch: "" });
         state.transcripts[fresh] = [];
         state.current[agentId] = fresh;
         emit("chat://switched", { agentId, conversationId: fresh });
@@ -784,7 +876,7 @@ function install(scenario: Scenario) {
           return null;
         }
         // Real IPC serialises every answer, so callers never share objects with the backend.
-        const answer = handler(args);
+        const answer = await handler(args);
         return answer === undefined ? null : JSON.parse(JSON.stringify(answer));
       },
     },

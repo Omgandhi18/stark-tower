@@ -1,6 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { commands, type Budget, type AutomationInput, type Bounds, type BrowserPage, type PowerState, type ReminderInput, type Result } from "./bindings";
+import { commands, type AutomationInput, type Bounds, type BrowserPage, type Budget, type CodeReviews, type CommitInput, type PowerState, type ReminderInput, type RequestInput, type Result, type WorktreeSetup } from "./bindings";
 import type { Attachment, ChatEvent, ChatSwitch, TaskEvent, LedgerEntry, PtyData, ReviewRequest, StatusEvent, UsageUpdate, UpdateStatus } from "./types";
 
 // Commands are the tauri-specta-generated, typed wrappers (bindings.ts). Fallible
@@ -350,3 +350,21 @@ export const spendSummary = () => ok(commands.spendSummary());
 export const setBudget = (budget: Budget) => ok(commands.setBudget(budget));
 export const conversationSpend = (id: number) => ok(commands.conversationSpend(id));
 export const onSpendChanged = (cb: () => void): Promise<UnlistenFn> => listen("spend://changed", cb);
+export const listWorktrees = () => commands.listWorktrees();
+export const setWorktreesEnabled = (enabled: boolean) => commands.setWorktreesEnabled(enabled);
+export const saveWorktreeSetup = (project: string, setup: WorktreeSetup) => ok(commands.saveWorktreeSetup(project, setup));
+export const removeWorktree = (id: string, force: boolean) => ok(commands.removeWorktree(id, force));
+export const onWorkspacesChanged = (cb: () => void): Promise<UnlistenFn> => listen("workspaces://changed", () => cb());
+
+export const deliveryInfo = (id: string) => ok(commands.deliveryInfo(id));
+export const discardTaskFile = (id: string, path: string) => ok(commands.discardTaskFile(id, path));
+export const commitTask = (id: string, input: CommitInput) => ok(commands.commitTask(id, input));
+export const pushTask = (id: string) => ok(commands.pushTask(id));
+export const draftDelivery = (id: string, paths: string[], request: boolean, token: string) => ok(commands.draftDelivery(id, paths, request, token));
+export const cancelDeliveryDraft = (token: string) => commands.cancelDeliveryDraft(token);
+export const createTaskRequest = (id: string, input: RequestInput) => ok(commands.createTaskRequest(id, input));
+export const codeReviews = () => commands.codeReviews();
+export const refreshCodeReviews = () => commands.refreshCodeReviews();
+export const seeCodeReview = (id: string) => ok(commands.seeCodeReview(id));
+export const askCodeReview = (id: string, agentId: string) => ok(commands.askCodeReview(id, agentId));
+export const onCodeReviewsChanged = (cb: (value: CodeReviews) => void): Promise<UnlistenFn> => listen<CodeReviews>("hosting://changed", (event) => cb(event.payload));

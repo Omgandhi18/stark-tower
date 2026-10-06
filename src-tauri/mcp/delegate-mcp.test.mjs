@@ -154,3 +154,32 @@ test("passes what to click and relays the page's answer", async () => {
     app.close();
   }
 });
+
+test("claims files exclusively with the agent's reason and relays overlapping holders", async () => {
+  const app = await fakeApp(() => ({ result: "Claimed src/ui exclusively. VISION holds src/types (Shared types)." }));
+  try {
+    const result = await callTool(app.sock, "claim_files", { paths: ["src/ui", "src/types", 42], reason: "Settings UI" });
+    assert.deepEqual(app.requests, [{ type: "claim_files", agentId: "friday", paths: ["src/ui", "src/types"], reason: "Settings UI", token: TOKEN }]);
+    assert.match(result.content[0].text, /VISION holds/);
+  } finally { app.close(); }
+});
+
+test("releases selected paths or all claims", async () => {
+  const app = await fakeApp(() => ({ result: "Released your file claims." }));
+  try {
+    await callTool(app.sock, "release_files", { paths: ["src/ui"] });
+    await callTool(app.sock, "release_files", {});
+    assert.deepEqual(app.requests.map((r) => r.paths), [["src/ui"], []]);
+    assert.equal(app.requests[0].type, "release_files");
+    assert.equal(app.requests[0].agentId, "friday");
+  } finally { app.close(); }
+});
+
+test("reports claims the app refuses as errors", async () => {
+  const app = await fakeApp(() => ({ error: "Claim files inside your workspace." }));
+  try {
+    const result = await callTool(app.sock, "claim_files", { paths: ["../outside"], reason: "Edit" });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /inside your workspace/);
+  } finally { app.close(); }
+});

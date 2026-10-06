@@ -25,11 +25,15 @@ pub struct Conversation {
     pub updated: i64,
     /// A teammate's delegation ran here, not a chat the developer had.
     pub delegated: bool,
+    pub project_folder: String,
+    pub branch: String,
 }
 
 /// A conversation's columns (aliased `c`), then whether a delegation ran in it.
 const CONVERSATION_COLUMNS: &str = "c.id, c.agent_id, c.title, c.cwd, c.created, c.updated, \
-    EXISTS (SELECT 1 FROM tasks t WHERE t.conversation_id = c.id AND t.parent_id IS NOT NULL)";
+    EXISTS (SELECT 1 FROM tasks t WHERE t.conversation_id = c.id AND t.parent_id IS NOT NULL), \
+    COALESCE((SELECT project FROM worktrees w WHERE w.path = c.cwd), c.cwd), \
+    COALESCE((SELECT branch FROM worktrees w WHERE w.path = c.cwd), '')";
 
 fn conversation_row(r: &rusqlite::Row) -> rusqlite::Result<Conversation> {
     Ok(Conversation {
@@ -40,6 +44,8 @@ fn conversation_row(r: &rusqlite::Row) -> rusqlite::Result<Conversation> {
         created: r.get(4)?,
         updated: r.get(5)?,
         delegated: r.get(6)?,
+        project_folder: r.get(7)?,
+        branch: r.get(8)?,
     })
 }
 
@@ -122,12 +128,17 @@ pub struct Task {
     pub prompt: String,
     /// The git branch checked out when the task started ("" outside a repository).
     pub branch: String,
+    pub request_url: Option<String>,
+    pub request_host: Option<String>,
+    pub request_number: Option<i64>,
     /// When it started running, and when it stopped (finished, blocked or closed).
     pub started: Option<i64>,
     pub finished: Option<i64>,
     /// The owner's own plan, as steps done out of steps total (from its to-do list).
     pub plan_done: Option<i64>,
     pub plan_total: Option<i64>,
+    pub workspace_kind: String,
+    pub project_folder: String,
 }
 
 /// What a new task needs to begin with.
@@ -365,7 +376,7 @@ pub struct TaskEvent {
 }
 
 const TASK_COLUMNS: &str = "id, ts, updated, title, assignee, status, detail, cwd, conversation_id, parent_id, \
-    requested_by, prompt, branch, started, finished, plan_done, plan_total";
+    requested_by, prompt, branch, started, finished, plan_done, plan_total, workspace_kind, project_folder, request_url, request_host, request_number";
 
 fn task_from_row(r: &rusqlite::Row) -> rusqlite::Result<Task> {
     Ok(Task {
@@ -386,6 +397,11 @@ fn task_from_row(r: &rusqlite::Row) -> rusqlite::Result<Task> {
         finished: r.get(14)?,
         plan_done: r.get(15)?,
         plan_total: r.get(16)?,
+        workspace_kind: r.get(17)?,
+        project_folder: r.get(18)?,
+        request_url: r.get(19)?,
+        request_host: r.get(20)?,
+        request_number: r.get(21)?,
     })
 }
 
@@ -414,7 +430,7 @@ pub struct Bug {
     pub updated: i64,
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -501,6 +517,13 @@ impl Ledger {
         ensure_column(&conn, "tasks", "finished", "INTEGER")?;
         ensure_column(&conn, "tasks", "plan_done", "INTEGER")?;
         ensure_column(&conn, "tasks", "plan_total", "INTEGER")?;
+        ensure_column(&conn, "tasks", "workspace_kind", "TEXT NOT NULL DEFAULT ''")?;
+        ensure_column(&conn, "tasks", "project_folder", "TEXT NOT NULL DEFAULT ''")?;
+        conn.execute("CREATE TABLE IF NOT EXISTS worktrees (path TEXT PRIMARY KEY, project TEXT NOT NULL, branch TEXT NOT NULL, base TEXT NOT NULL, base_commit TEXT NOT NULL, task_id TEXT NOT NULL, created INTEGER NOT NULL, removed INTEGER)", [])?;
+        ensure_column(&conn, "tasks", "request_url", "TEXT")?;
+        ensure_column(&conn, "tasks", "request_host", "TEXT")?;
+        ensure_column(&conn, "tasks", "request_number", "INTEGER")?;
+        conn.execute("CREATE TABLE IF NOT EXISTS code_review_seen (id TEXT PRIMARY KEY, seen TEXT NOT NULL DEFAULT '', failed_head TEXT NOT NULL DEFAULT '')", [])?;
         // Everything that happens in a task, append-only.
         conn.execute(
             "CREATE TABLE IF NOT EXISTS task_events (
@@ -940,6 +963,42 @@ impl Ledger {
         self.task(t.id)
     }
 
+    pub fn save_worktree(&self, w: &crate::workspaces::Worktree) -> Result<(), String> {
+        self.conn.lock().unwrap().execute("INSERT INTO worktrees (path, project, branch, base, base_commit, task_id, created, removed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)", rusqlite::params![w.path, w.project, w.branch, w.base, w.base_commit, w.task_id, w.created, w.removed]).map(|_| ()).map_err(|e| e.to_string())
+    }
+
+    pub fn worktrees(&self) -> Vec<crate::workspaces::Worktree> {
+        let conn = self.conn.lock().unwrap();
+        let Ok(mut stmt) = conn.prepare("SELECT path, project, branch, base, base_commit, task_id, created, removed FROM worktrees ORDER BY created") else { return vec![] };
+        let Ok(rows) = stmt.query_map([], |r| Ok(crate::workspaces::Worktree { path: r.get(0)?, project: r.get(1)?, branch: r.get(2)?, base: r.get(3)?, base_commit: r.get(4)?, task_id: r.get(5)?, created: r.get(6)?, removed: r.get(7)? })) else { return vec![] };
+        rows.filter_map(Result::ok).collect()
+    }
+
+    pub fn mark_worktree_removed(&self, path: &str) {
+        let _ = self.conn.lock().unwrap().execute("UPDATE worktrees SET removed = ?2 WHERE path = ?1 AND removed IS NULL", rusqlite::params![path, now_ms()]);
+    }
+
+    pub fn set_task_workspace(&self, id: &str, cwd: &str, kind: &str, project: &str) -> Result<(), String> {
+        self.conn.lock().unwrap().execute("UPDATE tasks SET cwd = ?2, workspace_kind = ?3, project_folder = ?4 WHERE id = ?1", rusqlite::params![id, cwd, kind, project]).map(|_| ()).map_err(|e| e.to_string())
+    }
+
+    pub fn save_request(&self, id: &str, url: &str, host: &str, number: i64) -> Result<(), String> {
+        self.conn.lock().unwrap().execute("UPDATE tasks SET request_url=?2, request_host=?3, request_number=?4 WHERE id=?1", rusqlite::params![id, url, host, number]).map(|_| ()).map_err(|e| e.to_string())
+    }
+
+    pub fn review_seen(&self, id: &str) -> String {
+        self.conn.lock().unwrap().query_row("SELECT seen FROM code_review_seen WHERE id=?1", [id], |r| r.get(0)).unwrap_or_default()
+    }
+
+    pub fn mark_review_seen(&self, id: &str, time: &str) {
+        let _ = self.conn.lock().unwrap().execute("INSERT INTO code_review_seen(id,seen) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET seen=excluded.seen", rusqlite::params![id, time]);
+    }
+
+    /// Atomically remember the head before notifying, including across restarts.
+    pub fn review_failure(&self, id: &str, head: &str) -> bool {
+        self.conn.lock().unwrap().execute("INSERT INTO code_review_seen(id,failed_head) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET failed_head=excluded.failed_head WHERE failed_head != excluded.failed_head", rusqlite::params![id, head]).unwrap_or(0) > 0
+    }
+
     pub fn task(&self, id: &str) -> Option<Task> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"), [id], task_from_row)
@@ -962,6 +1021,11 @@ impl Ledger {
     /// The most recently updated `limit` tasks, newest first.
     pub fn tasks(&self, limit: i64) -> Vec<Task> {
         self.query_tasks(&format!("SELECT {TASK_COLUMNS} FROM tasks ORDER BY updated DESC LIMIT ?1"), &[&limit])
+    }
+
+    /// Who has a task running in exactly this folder right now.
+    pub fn running_in(&self, cwd: &str) -> Vec<String> {
+        self.query_tasks(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE status = 'doing' AND cwd = ?1"), &[&cwd]).into_iter().map(|t| t.assignee).collect()
     }
 
     /// Tasks delegated from `parent`, oldest first.
@@ -1643,6 +1707,23 @@ mod tests {
         let p = std::env::temp_dir().join(format!("stark-led-{}-{n}.db", std::process::id()));
         let _ = std::fs::remove_file(&p);
         (Ledger::open(&p).unwrap(), p)
+    }
+
+    #[test]
+    fn request_and_review_memory_survive_reopening() {
+        let (ledger, path) = temp_db();
+        ledger.create_task(&NewTask { id:"hosting", title:"Fix", assignee:"friday", status:"done", cwd:"/w", parent_id:None, requested_by:"you", prompt:"Fix" }).unwrap();
+        ledger.save_request("hosting", "https://gitlab.com/g/r/-/merge_requests/45", "gitlab", 45).unwrap();
+        ledger.mark_review_seen("request", "2026-10-06T10:00:00Z");
+        assert!(ledger.review_failure("request", "sha1"));
+        assert!(!ledger.review_failure("request", "sha1"));
+        drop(ledger);
+        let ledger = Ledger::open(&path).unwrap();
+        let task = ledger.task("hosting").unwrap();
+        assert_eq!(task.request_number, Some(45)); assert_eq!(task.request_host.as_deref(), Some("gitlab")); assert!(task.request_url.unwrap().ends_with("/45"));
+        assert_eq!(ledger.review_seen("request"), "2026-10-06T10:00:00Z");
+        assert!(!ledger.review_failure("request", "sha1")); assert!(ledger.review_failure("request", "sha2"));
+        drop(ledger); let _ = std::fs::remove_file(path);
     }
 
     #[test]

@@ -64,6 +64,8 @@ process.stdin.on("end", async () => {
   if (verdict.error) {
     // Fail closed: the prompt goes to Starkline's approve tool, which asks the developer.
     ask(`Starkline couldn't check this call (${verdict.error}).`);
+  } else if (verdict.tier === "refused") {
+    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: verdict.reason } }));
   } else if (verdict.tier !== "automatic") {
     ask(`${verdict.rule}: ${verdict.reason}`);
   }

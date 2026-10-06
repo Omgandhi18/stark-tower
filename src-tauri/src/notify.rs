@@ -307,3 +307,9 @@ pub fn budget(app: &tauri::AppHandle, agent_id: &str, exhausted: bool, title: &s
         ..Default::default()
     }, "Spending budget");
 }
+
+/// One update per failing head; the URL opens the request from Notifications.
+pub fn code_review(app: &tauri::AppHandle, item: &crate::hosting::CodeReviewItem) {
+    let title = format!("Checks failed on {}{}", if item.host_kind == crate::hosting::HostKind::Gitlab { "!" } else { "#" }, item.number);
+    add(app, NewNotification { kind: "code_review", urgency: UPDATE, agent_id: &item.agent_id, task_id: item.task_id.as_deref(), cwd: &item.cwd, title: &title, body: &item.url, review_id: None, automation_id: None, reminder_id: None }, &title);
+}

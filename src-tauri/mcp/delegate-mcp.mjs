@@ -271,8 +271,19 @@ const SIMULATOR_TOOL = {
   },
 };
 
+const CLAIM_FILES_TOOL = {
+  name: "claim_files",
+  description: "Reserve files or folders exclusively before editing in a shared workspace. Sensitive files must be claimed. Overlaps report who holds them and why.",
+  inputSchema: { type: "object", properties: { paths: { type: "array", items: { type: "string" } }, reason: { type: "string" } }, required: ["paths", "reason"] },
+};
+const RELEASE_FILES_TOOL = {
+  name: "release_files",
+  description: "Release your reservations when done. Omit paths to release all your files.",
+  inputSchema: { type: "object", properties: { paths: { type: "array", items: { type: "string" } } } },
+};
+
 async function toolsList() {
-  const tools = [ASK_HUMAN_TOOL, MESSAGE_TOOL, SHARE_TOOL, REMIND_TOOL, BROWSER_TOOL, SIMULATOR_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
+  const tools = [CLAIM_FILES_TOOL, RELEASE_FILES_TOOL, ASK_HUMAN_TOOL, MESSAGE_TOOL, SHARE_TOOL, REMIND_TOOL, BROWSER_TOOL, SIMULATOR_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
   if (IS_ORCH) {
     const workers = await getRoster();
     tools.unshift(buildDelegateTool(workers));
@@ -349,6 +360,11 @@ rl.on("line", async (raw) => {
       });
       if (res.error) result(id, "message failed: " + res.error, true);
       else result(id, res.result || "(queued)");
+    } else if (name === "claim_files" || name === "release_files") {
+      const paths = Array.isArray(args.paths) ? args.paths.filter((p) => typeof p === "string") : [];
+      const res = await bridge({ type: name, agentId: AGENT_ID, paths, reason: args.reason || "" });
+      if (res.error) result(id, name + " failed: " + res.error, true);
+      else result(id, res.result || "Done.");
     } else if (name === "share") {
       const paths = Array.isArray(args.paths) ? args.paths.filter((p) => typeof p === "string") : [];
       log("share ->", paths.length);

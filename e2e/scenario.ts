@@ -27,8 +27,12 @@ import type {
   RuntimeHealth,
   SimulatorStatus,
   StoredMessage,
+  DeliveryInfo,
+  CodeReviews,
   Task,
   TaskEvent,
+  Worktree,
+  FileClaim,
 } from "../src/lib/types";
 
 /** A phone's home screen (a small JPEG), standing in for the simulator's screen. */
@@ -45,9 +49,17 @@ export interface Scenario {
   /** How long after the page loads the backend starts answering (the launch race); by default at once. */
   backendReadyAfterMs?: number;
   config: AppConfig;
+  worktrees: Worktree[];
+  claims: FileClaim[];
   statuses: Record<string, AgentStatus>;
   projects: ProjectsState;
   tasks: Task[];
+  delivery: Record<string, DeliveryInfo>;
+  codeReviews: CodeReviews;
+  draftMessage: string;
+  deliveryError?: string;
+  pushError?: string;
+  draftDelayMs?: number;
   conversations: Conversation[];
   /** Saved transcript per conversation id. */
   transcripts: Record<number, StoredMessage[]>;
@@ -262,6 +274,9 @@ const task = (
   finished: over.status === "done" || over.status === "blocked" ? ago(updatedMinutesAgo) : null,
   plan_done: null,
   plan_total: null,
+  workspace_kind: "checkout",
+  project_folder: over.cwd,
+  request_url: null, request_host: null, request_number: null,
   ...over,
 });
 
@@ -284,6 +299,8 @@ const conversation = (id: number, agentId: string, title: string, cwd: string, u
   created: ago(updatedMinutesAgo + 30),
   updated: ago(updatedMinutesAgo),
   delegated: false,
+  project_folder: cwd,
+  branch: "",
 });
 
 const message = (id: number, role: string, fields: Partial<StoredMessage>): StoredMessage => ({
@@ -301,6 +318,8 @@ export function defaultScenario(): Scenario {
     spend: emptySpend(),
     conversationSpend: {},
     config,
+    worktrees: [],
+    claims: [],
     statuses: { jarvis: "idle", vision: "thinking", friday: "working", edith: "idle", karen: "working", veronica: "blocked", "dum-e": "offline" },
     projects: {
       active: APP,
@@ -309,6 +328,9 @@ export function defaultScenario(): Scenario {
         { path: API, name: "payments-api" },
       ],
     },
+    delivery: {},
+    codeReviews: { items: [], connections: [], has_host: false },
+    draftMessage: "feat: redesign settings\n\nAdd search and grouped settings.",
     tasks: [
       task(
         { id: "t-refunds", title: "Ship the refunds feature", assignee: "jarvis", status: "doing", cwd: API, conversation_id: 20, plan_done: 1, plan_total: 4 },
@@ -907,5 +929,47 @@ export function spendScenario(): Scenario {
   scenario.spend.days[29].total = total(3.2, 3, 1);
   scenario.config = { ...scenario.config, budget: scenario.spend.budget };
   scenario.conversationSpend = { 20: { total: total(1.24, 2), context_tokens: 3200 } };
+  return scenario;
+}
+
+/** A completed task with a worktree and collaborators' file reservations. */
+export function workspacesScenario(dirty = false): Scenario {
+  const scenario = defaultScenario();
+  const owner = scenario.tasks.find((t) => t.id === "t-settings")!;
+  const path = "/Users/dev/.starkline/worktrees/checkout-web/settings-abcd";
+  const branch = "starkline/settings-abcd";
+  owner.project_folder = owner.cwd;
+  owner.cwd = path;
+  owner.workspace_kind = "worktree";
+  owner.branch = branch;
+  owner.status = "done";
+  owner.finished = NOW;
+  scenario.statuses[owner.assignee] = "idle";
+  scenario.worktrees = [{ path, project: APP, branch, base: "main", base_commit: "a1b2c3d4567890", task_id: owner.id, created: NOW, removed: null }];
+  scenario.branches[path] = branch;
+  scenario.changes[path] = dirty ? [{ path: "src/settings/Form.tsx", status: "modified", added: 8, removed: 2 }] : [];
+  const chat = scenario.conversations.find((c) => c.id === owner.conversation_id)!;
+  chat.cwd = path;
+  chat.project_folder = APP;
+  chat.branch = branch;
+  scenario.taskEvents[owner.id] = [taskEvent(owner.id, owner.assignee, "workspace", "A separate worktree was created because FRIDAY is already working in checkout-web. It starts from main at a1b2c3d; your uncommitted changes aren't in it.", 5), taskEvent(owner.id, owner.assignee, "claim_refused", "VISION has claimed src/types.ts (Shared types). Ask VISION to release it.", 3)];
+  scenario.claims = [{ workspace: path, path: "src/settings/Form.tsx", agent_id: owner.assignee, task_id: owner.id, reason: "Settings UI", exclusive: true }];
+  return scenario;
+}
+
+/** Both hosts use the same delivery flow, with provider-specific names and URLs. */
+export function deliveryScenario(kind: "github" | "gitlab" = "github"): Scenario {
+  const scenario = defaultScenario();
+  const task = scenario.tasks.find((t) => t.id === "t-settings")!;
+  const hostname = kind === "github" ? "github.com" : "gitlab.example.com";
+  scenario.branches[task.cwd] = "main";
+  scenario.delivery[task.cwd] = { branch:"main", default_branch:"main", new_branch:"starkline/redesign-the-settings-page", host: { kind, hostname, repository:"team/sub/app", remote:"origin", connection:null }, pushed:false, request_url:null, request_title:task.title };
+  return scenario;
+}
+export function codeReviewScenario(kind: "github" | "gitlab" = "github"): Scenario {
+  const scenario = deliveryScenario(kind);
+  const task = scenario.tasks.find((t) => t.id === "t-settings")!;
+  const url = kind === "github" ? "https://github.com/team/app/pull/128" : "https://gitlab.example.com/team/sub/app/-/merge_requests/45";
+  scenario.codeReviews = { has_host:true, connections:[], items:[{ id:url, cwd:task.cwd, host_kind:kind, number:kind === "github" ? 128 : 45, title:"Fix the login redirect", url, branch:"fix/login", head:"abc123", reason:"failed", updated:"2026-10-06T10:00:00Z", failed_checks:["Tests"], agent_id:"friday", task_id:task.id }] };
   return scenario;
 }

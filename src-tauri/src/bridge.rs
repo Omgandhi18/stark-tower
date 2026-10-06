@@ -152,6 +152,15 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
             handle_approve(app, &mut writer, &req);
             return;
         }
+        Some("claim_files" | "release_files") => {
+            let agent = req.get("agentId").and_then(|v| v.as_str()).unwrap_or("");
+            let paths = req.get("paths").and_then(|v| v.as_array()).map(|p| p.iter().filter_map(|v| v.as_str().map(str::to_string)).collect::<Vec<_>>()).unwrap_or_default();
+            let reason = req.get("reason").and_then(|v| v.as_str()).unwrap_or("");
+            let release = req.get("type").and_then(|v| v.as_str()) == Some("release_files");
+            let value = match crate::claims::tool(app, agent, &paths, reason, release) { Ok(result) => serde_json::json!({ "result": result }), Err(error) => serde_json::json!({ "error": error }) };
+            reply(&mut writer, value);
+            return;
+        }
         Some("classify") => {
             handle_classify(app, &mut writer, &req);
             return;
@@ -553,18 +562,26 @@ fn files_word(n: usize) -> String {
 /// The provider's pre-tool hook asks before every call: anything that isn't
 /// automatic becomes a permission prompt, which arrives at `handle_approve`.
 fn handle_classify(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_json::Value) {
-    let (_, _, _, a) = assess_request(app, req);
-    let reply = serde_json::json!({ "tier": a.tier.as_str(), "rule": a.rule.label(), "reason": a.reason });
+    let (tool, input, _, a) = assess_request(app, req);
+    let agent = req.get("agentId").and_then(|v| v.as_str()).unwrap_or("");
+    let claim = crate::claims::check(app, agent, &tool, &input).and_then(|_| {
+        if a.tier == crate::gate::Tier::Automatic { crate::claims::allowed(app, agent, &tool, &input) } else { Ok(()) }
+    });
+    let reply = match claim {
+        Err(reason) => serde_json::json!({ "tier": "refused", "rule": "File ownership", "reason": reason }),
+        Ok(()) => serde_json::json!({ "tier": a.tier.as_str(), "rule": a.rule.label(), "reason": a.reason }),
+    };
     let _ = writer.write_all((reply.to_string() + "\n").as_bytes());
 }
 
 /// The project folder a request falls in: the longest known project containing `cwd`.
 fn project_of(app: &tauri::AppHandle, cwd: &str) -> String {
     let state = app.state::<crate::AppState>();
+    let cwd = crate::workspaces::project_for(&state.ledger, cwd);
     let projects = state.projects.lock().unwrap().clone();
     projects
         .into_iter()
-        .filter(|p| std::path::Path::new(cwd).starts_with(p))
+        .filter(|p| std::path::Path::new(&cwd).starts_with(p))
         .max_by_key(|p| p.len())
         .unwrap_or_else(|| cwd.to_string())
 }
@@ -616,8 +633,9 @@ pub fn decide(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_
     let (tool, input) = (tool.to_string(), input.clone());
     let (cwd, assessment) = assess(app, &agent_id, &tool, &input);
     let state = app.state::<crate::AppState>();
+    if let Err(reason) = crate::claims::check(app, &agent_id, &tool, &input) { return Verdict { approved: false, reason }; }
     if assessment.tier == crate::gate::Tier::Automatic {
-        return Verdict::allow();
+        return match crate::claims::allowed(app, &agent_id, &tool, &input) { Ok(()) => Verdict::allow(), Err(reason) => Verdict { approved: false, reason } };
     }
 
     let subject = subject_of(&tool, &input);
@@ -637,14 +655,14 @@ pub fn decide(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_
         let granted = state.ledger.rules(false).into_iter().find(|r| {
             let rule_key = crate::policy::RuleKey { tool: r.tool.clone(), pattern: r.pattern.clone(), display: r.display.clone() };
             crate::policy::covers(&rule_key, key)
-                && crate::policy::applies(r, task.as_deref(), &folder)
+                && crate::policy::applies(r, task.as_deref(), &project)
                 && (r.tier == tier || r.tier == "never")
         });
         if let Some(rule) = granted {
             state.ledger.record_rule_use(rule.id);
             crate::tasks::decision(app, &agent_id, &format!("{} (your rule: {})", truncate(&subject, 80), rule.display), "Allow", Some(true));
             crate::notify::rule_used(app, &agent_id, task.as_deref(), &folder, &rule.display, &subject);
-            return Verdict::allow();
+            return match crate::claims::allowed(app, &agent_id, &tool, &input) { Ok(()) => Verdict::allow(), Err(reason) => Verdict { approved: false, reason } };
         }
     }
 
@@ -715,5 +733,8 @@ pub fn decide(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_
     } else {
         format!("The developer didn't allow this ({}). Find another way, or ask them with ask_human.", assessment.rule.label())
     };
+    if approved {
+        if let Err(reason) = crate::claims::allowed(app, &agent_id, &tool, &input) { return Verdict { approved: false, reason }; }
+    }
     Verdict { approved, reason }
 }

@@ -1,7 +1,8 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
 import { AlarmClock, CalendarClock, Check, CheckCheck, Play, RotateCcw, SkipForward, SquareArrowOutUpRight, X } from "lucide-react";
 import { Button, InlineCode, Portrait, StatusPill } from "../../design";
-import { closeTask, completeReminder, resumeTask, reviewTask, runAutomationNow, skipMissedRun, snoozeReminder, startTask } from "../../lib/api";
+import { seeCodeReview, closeTask, completeReminder, resumeTask, reviewTask, runAutomationNow, skipMissedRun, snoozeReminder, startTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { formatRelative } from "../../lib/time";
 import type { Agent, Notification } from "../../lib/types";
@@ -103,6 +104,7 @@ export default function NotificationSummary({ notification: n, agent, now }: Not
           <Button onClick={() => openSettings("spend")}>Review budget</Button>
         </div>
       )}
+      {n.kind === "code_review" && /^https?:\/\//.test(n.body) && <Button onClick={() => run(() => openUrl(n.body).then(() => seeCodeReview(n.body)), "The request couldn't be opened.")}>Open request</Button>}
       {n.reminder_id !== null && (
         <div className="notification-actions">
           {open && (

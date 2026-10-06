@@ -96,7 +96,7 @@ export default function TaskScreen() {
           </div>
           <TerminalDrawer folder={task.cwd} active={route === "task"} />
         </section>
-        <TaskSideRail reviews={reviews} changes={detail.changes} checks={detail.checks} now={now} onShowFiles={() => setTab("files")} />
+        <TaskSideRail taskId={task.id} reviews={reviews} changes={detail.changes} checks={detail.checks} now={now} onShowFiles={() => setTab("files")} />
       </div>
     </div>
   );

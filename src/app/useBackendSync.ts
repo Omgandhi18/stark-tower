@@ -5,6 +5,8 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   checkUpdate,
   onSpendChanged,
+  onCodeReviewsChanged,
+  refreshCodeReviews,
   getConfig,
   listAgents,
   onAgentStatus,
@@ -25,10 +27,12 @@ import {
   onReviewRequest,
   onReviewResolved,
   onTasksChanged,
+  onWorkspacesChanged,
   onUpdateStatus,
 } from "../lib/api";
 import { errorMessage } from "../lib/errors";
 import { IS_TAURI } from "../lib/platform";
+import { useCodeReviews } from "../stores/codeReviews";
 import { useActivity } from "../stores/activity";
 import { useAgents } from "../stores/agents";
 import { useAttention } from "../stores/attention";
@@ -81,6 +85,8 @@ export function useBackendSync() {
   useEffect(() => {
     if (!IS_TAURI) return;
 
+    const refreshReviews = () => void refreshCodeReviews().catch(report("code review"));
+    window.addEventListener("focus", refreshReviews);
     const workspace = useWorkspace.getState();
     const system = useSystem.getState();
     let unmounted = false;
@@ -96,7 +102,9 @@ export function useBackendSync() {
     first("spending", useSpend.getState().refresh);
     first("projects", workspace.refreshProjects);
     first("saved chats", workspace.refreshConversations);
+    first("worktrees", workspace.refreshWorktrees);
     first("tasks", workspace.refreshTasks);
+    first("code review", useCodeReviews.getState().refresh);
     first("bugs", workspace.refreshBugs);
     first("pending reviews", useAttention.getState().refresh);
     first("notifications", useNotifications.getState().refresh);
@@ -108,6 +116,7 @@ export function useBackendSync() {
     first("update status", checkUpdate);
 
     const subscriptions: Array<Promise<UnlistenFn>> = [
+      onCodeReviewsChanged(useCodeReviews.getState().apply),
       onAgentStatus((e) => useAgents.getState().setStatus(e.agentId, e.status)),
       onConfigChanged((c) => {
         useConfig.getState().apply(c);
@@ -122,6 +131,7 @@ export function useBackendSync() {
       }),
       onChatSwitched((s) => useChats.getState().switchTo(s.agentId, s.conversationId)),
       onSpendChanged(() => useSpend.getState().changed().catch(report("spending"))),
+      onWorkspacesChanged(() => useWorkspace.getState().refreshWorktrees().catch(report("worktrees"))),
       onTasksChanged(() => useWorkspace.getState().refreshTasks().catch(report("tasks"))),
       onConversationsChanged(() => useWorkspace.getState().refreshConversations().catch(report("saved chats"))),
       onBugsChanged(() => useWorkspace.getState().refreshBugs().catch(report("bugs"))),
@@ -149,6 +159,7 @@ export function useBackendSync() {
     const healthTimer = window.setInterval(() => useSystem.getState().refreshHealth().catch(report("runtime health")), HEALTH_REFRESH_MS);
     return () => {
       unmounted = true;
+      window.removeEventListener("focus", refreshReviews);
       window.clearInterval(agentTimer);
       window.clearInterval(healthTimer);
       window.clearInterval(spendTimer);

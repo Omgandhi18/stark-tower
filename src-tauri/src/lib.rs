@@ -13,6 +13,9 @@ mod engine;
 mod floor;
 mod gate;
 mod health;
+mod hosting;
+mod delivery;
+mod delivery_draft;
 mod ledger;
 mod lifecycle;
 mod notify;
@@ -34,6 +37,8 @@ mod snapshot;
 mod spend;
 mod tasks;
 mod terminal;
+mod workspaces;
+mod claims;
 mod tone;
 mod update;
 
@@ -90,6 +95,8 @@ pub struct AppState {
     pub memory_dir: String,
     /// Which task each agent is on, and the work waiting for busy agents.
     pub tasks: tasks::TaskEngine,
+    pub claims: Mutex<claims::Claims>,
+    pub workspace_lock: Mutex<()>,
     /// The bridge and gate scripts agents' providers run.
     pub scripts: health::BridgeScripts,
     /// The git-versioned floor: an append-only event log + per-agent mailboxes,
@@ -496,15 +503,17 @@ fn set_login_item(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> 
 /// waits its turn if the agent is busy.
 #[tauri::command]
 #[specta::specta]
-fn start_task(
+async fn start_task(
     app: tauri::AppHandle,
     agent_id: String,
     prompt: String,
     dir: Option<String>,
     attachments: Vec<attachments::Attachment>,
 ) -> Result<ledger::Task, String> {
-    let files = attachments::checked(&attachments::root(&app), &attachments)?;
-    tasks::start(&app, &agent_id, &prompt, dir.map(|d| shellexpand_home(d.trim())), &files)
+    tauri::async_runtime::spawn_blocking(move || {
+        let files = attachments::checked(&attachments::root(&app), &attachments)?;
+        tasks::start(&app, &agent_id, &prompt, dir.map(|d| shellexpand_home(d.trim())), &files)
+    }).await.map_err(|e| e.to_string())?
 }
 
 /// The Notification Centre's record, newest first.
@@ -755,12 +764,104 @@ fn delete_reminder(app: tauri::AppHandle, id: i64) -> Result<(), String> {
     reminders::delete(&app, id)
 }
 
+#[tauri::command]
+#[specta::specta]
+async fn delivery_info(app: tauri::AppHandle, id: String) -> Result<delivery::DeliveryInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || delivery::task(&app, &id).map(|t| delivery::info(&app, &t))).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+#[specta::specta]
+async fn discard_task_file(app: tauri::AppHandle, id: String, path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || { let task = delivery::task(&app, &id)?; delivery::discard(&task.cwd, &path)?; app.emit("tasks://changed", ()).map_err(|e| e.to_string()) }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+#[specta::specta]
+async fn commit_task(app: tauri::AppHandle, id: String, input: delivery::CommitInput) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || { let task = delivery::task(&app, &id)?; let result = delivery::commit(&task.cwd, &input, Some(&app)); let _ = app.emit("tasks://changed", ()); result }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+#[specta::specta]
+async fn push_task(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || { let task = delivery::task(&app, &id)?; delivery::push(&task.cwd, Some(&app))?; let _ = app.emit("tasks://changed", ()); Ok(()) }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+#[specta::specta]
+async fn draft_delivery(app: tauri::AppHandle, id: String, paths: Vec<String>, request: bool, token: String) -> Result<delivery::Draft, String> {
+    tauri::async_runtime::spawn_blocking(move || delivery::task(&app, &id).map(|t| delivery::draft(&app, &t, &paths, request, &token))).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+#[specta::specta]
+fn cancel_delivery_draft(token: String) { delivery_draft::cancel(&token); }
+#[tauri::command]
+#[specta::specta]
+async fn create_task_request(app: tauri::AppHandle, id: String, input: delivery::RequestInput) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || { let task = delivery::task(&app, &id)?; delivery::create_request(&app, &task, &input) }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+#[specta::specta]
+fn code_reviews() -> hosting::CodeReviews { hosting::snapshot() }
+#[tauri::command]
+#[specta::specta]
+async fn refresh_code_reviews(app: tauri::AppHandle) { let _ = tauri::async_runtime::spawn_blocking(move || hosting::poll(&app, true)).await; }
+#[tauri::command]
+#[specta::specta]
+async fn see_code_review(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || hosting::seen(&app, &id)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+#[specta::specta]
+async fn ask_code_review(app: tauri::AppHandle, id: String, agent_id: String) -> Result<ledger::Task, String> {
+    tauri::async_runtime::spawn_blocking(move || hosting::ask(&app, &id, &agent_id)).await.map_err(|e| e.to_string())?
+}
+
 /// Everything the task screen shows: the task, what it delegated, its history,
 /// plan, checks, uncommitted changes and conversation.
 #[tauri::command]
 #[specta::specta]
-fn get_task_detail(app: tauri::AppHandle, id: String) -> Option<tasks::TaskDetail> {
-    tasks::detail(&app, &id)
+async fn get_task_detail(app: tauri::AppHandle, id: String) -> Option<tasks::TaskDetail> {
+    tauri::async_runtime::spawn_blocking(move || tasks::detail(&app, &id)).await.ok().flatten()
+}
+
+#[tauri::command]
+#[specta::specta]
+fn list_worktrees(state: tauri::State<AppState>) -> Vec<workspaces::Worktree> { state.ledger.worktrees() }
+
+#[tauri::command]
+#[specta::specta]
+fn set_worktrees_enabled(state: tauri::State<AppState>, enabled: bool) -> AppConfig {
+    state.config.lock().unwrap().worktrees_enabled = enabled;
+    state.save_config();
+    state.config.lock().unwrap().clone()
+}
+
+#[tauri::command]
+#[specta::specta]
+fn save_worktree_setup(state: tauri::State<AppState>, project: String, setup: workspaces::WorktreeSetup) -> Result<AppConfig, String> {
+    workspaces::validate_setup(&setup)?;
+    state.config.lock().unwrap().worktree_setup.insert(project, setup);
+    state.save_config();
+    Ok(state.config.lock().unwrap().clone())
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn remove_worktree(app: tauri::AppHandle, id: String, force: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let _lock = state.workspace_lock.lock().unwrap();
+        let task = state.ledger.task(&id).ok_or("That task doesn't exist.")?;
+        let statuses = state.statuses.lock().unwrap().clone();
+        let workdirs = state.workdirs.lock().unwrap().clone();
+        if workdirs.iter().any(|(agent, cwd)| cwd == &task.cwd && matches!(statuses.get(agent), Some(AgentStatus::Working | AgentStatus::Thinking | AgentStatus::Blocked))) {
+            return Err("An agent is still using this worktree. Stop its session first.".into());
+        }
+        workspaces::remove(&state.ledger, &task, force)?;
+        let e = state.ledger.add_task_event(&id, &task.assignee, "workspace", "You removed the worktree. Its branch was kept.", "");
+        let _ = app.emit("tasks://event", e);
+        let _ = app.emit("workspaces://changed", ());
+        let _ = app.emit("tasks://changed", ());
+        Ok(())
+    }).await.map_err(|e| e.to_string())?
 }
 
 /// The readable diff of one changed file in a task's folder.
@@ -1692,6 +1793,12 @@ fn specta_builder() -> tauri_specta::Builder {
             login_item_enabled,
             set_login_item,
             get_task_detail,
+            list_worktrees,
+            set_worktrees_enabled,
+            save_worktree_setup,
+            remove_worktree,
+            delivery_info, discard_task_file, commit_task, push_task, draft_delivery, cancel_delivery_draft, create_task_request,
+            code_reviews, refresh_code_reviews, see_code_review, ask_code_review,
             get_task_file_diff,
             list_notifications,
             mark_notifications_read,
@@ -1870,6 +1977,8 @@ pub fn run() {
                 oneshot_pids: Mutex::new(HashSet::new()),
                 memory_dir,
                 tasks: tasks::TaskEngine::default(),
+                claims: Mutex::new(claims::Claims::default()),
+                workspace_lock: Mutex::new(()),
                 scripts: health::BridgeScripts::resolve(app.handle()),
                 floor_dir,
                 secrets: Mutex::new(secret_store),
@@ -1899,9 +2008,11 @@ pub fn run() {
             if !lifecycle::launched_in_background() {
                 lifecycle::show_main(app.handle());
             }
+            workspaces::reconcile(&app.state::<AppState>().ledger);
             // Recovery first, then the automation scheduler.
             automations::start(app.handle().clone());
             reminders::start(app.handle().clone());
+            hosting::start(app.handle().clone());
             // Copies of files attached to messages that were never sent go after a day.
             {
                 let h = app.handle().clone();

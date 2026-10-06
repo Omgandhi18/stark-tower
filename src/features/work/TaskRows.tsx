@@ -121,7 +121,7 @@ export function TaskRowView({ row, now }: TaskRowViewProps) {
         </button>
         {task.cwd && (
           <span className="work-row-project" title={task.cwd}>
-            {folderName(task.cwd)}
+            {folderName(task.project_folder || task.cwd)}
             {task.branch && <span className="work-row-branch"> · {task.branch}</span>}
           </span>
         )}
@@ -186,7 +186,7 @@ export function ChatRowView({ row, now }: { row: ChatRow; now: number }) {
         </button>
         {row.cwd && (
           <span className="work-row-project" title={row.cwd}>
-            {folderName(row.cwd)}
+            {folderName(row.project || row.cwd)}
           </span>
         )}
         <p className="work-row-activity">{row.activity?.summary ?? "Getting started"}</p>

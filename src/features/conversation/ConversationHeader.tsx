@@ -22,6 +22,7 @@ import { folderOptions } from "./folders";
 export default function ConversationHeader({ agent }: { agent: Agent }) {
   const navigate = useNavigation((s) => s.navigate);
   const config = useConfig((s) => s.config);
+  const worktrees = useWorkspace((s) => s.worktrees);
   const projects = useWorkspace((s) => s.projects);
   const activeProject = useWorkspace((s) => s.activeProject);
   const chatFolder = useChats((s) => selectThread(agent.id)(s).folder);
@@ -81,7 +82,7 @@ export default function ConversationHeader({ agent }: { agent: Agent }) {
           hideLabel
           icon={FolderOpen}
           value={folder}
-          options={folderOptions(projects, folder)}
+          options={folderOptions(projects, folder, worktrees)}
           onChange={(path) => useChats.getState().setFolder(agent.id, path)}
           className="conversation-folder"
         />

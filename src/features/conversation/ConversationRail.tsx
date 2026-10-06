@@ -104,9 +104,10 @@ export default function ConversationRail({ agentId }: { agentId: string | null }
                     >
                       <span className="rail-chat-title">{title}</span>
                       <span className="rail-chat-meta">
-                        {c.cwd ? `${folderName(c.cwd)}, ` : ""}
+                        {c.cwd ? `${folderName(c.project_folder || c.cwd)}, ` : ""}
                         {formatRelative(c.updated, now)}
                       </span>
+                      {c.branch && <Tag>{c.branch}</Tag>}
                       {current && <Tag tone="accent">Open</Tag>}
                     </button>
                     <OverflowMenu

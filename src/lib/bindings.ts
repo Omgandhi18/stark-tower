@@ -169,6 +169,101 @@ async setLoginItem(enabled: boolean) : Promise<Result<boolean, string>> {
 async getTaskDetail(id: string) : Promise<TaskDetail | null> {
     return await TAURI_INVOKE("get_task_detail", { id });
 },
+async listWorktrees() : Promise<Worktree[]> {
+    return await TAURI_INVOKE("list_worktrees");
+},
+async setWorktreesEnabled(enabled: boolean) : Promise<AppConfig> {
+    return await TAURI_INVOKE("set_worktrees_enabled", { enabled });
+},
+async saveWorktreeSetup(project: string, setup: WorktreeSetup) : Promise<Result<AppConfig, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_worktree_setup", { project, setup }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async removeWorktree(id: string, force: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_worktree", { id, force }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deliveryInfo(id: string) : Promise<Result<DeliveryInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delivery_info", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async discardTaskFile(id: string, path: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("discard_task_file", { id, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async commitTask(id: string, input: CommitInput) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("commit_task", { id, input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async pushTask(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("push_task", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async draftDelivery(id: string, paths: string[], request: boolean, token: string) : Promise<Result<Draft, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("draft_delivery", { id, paths, request, token }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async cancelDeliveryDraft(token: string) : Promise<void> {
+    await TAURI_INVOKE("cancel_delivery_draft", { token });
+},
+async createTaskRequest(id: string, input: RequestInput) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_task_request", { id, input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async codeReviews() : Promise<CodeReviews> {
+    return await TAURI_INVOKE("code_reviews");
+},
+async refreshCodeReviews() : Promise<void> {
+    await TAURI_INVOKE("refresh_code_reviews");
+},
+async seeCodeReview(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("see_code_review", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async askCodeReview(id: string, agentId: string) : Promise<Result<Task, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ask_code_review", { id, agentId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * The readable diff of one changed file in a task's folder.
  */
@@ -895,7 +990,7 @@ standup_minutes?: number;
 /**
  * The developer allows Starkline to keep this Mac awake while agents work.
  */
-keep_awake?: boolean; budget?: Budget; 
+keep_awake?: boolean; budget?: Budget; worktrees_enabled?: boolean; worktree_setup?: Partial<{ [key in string]: WorktreeSetup }>; 
 /**
  * How Starkline looks: one of [`THEMES`]. Tasks, permissions and providers don't change with it.
  */
@@ -1023,6 +1118,13 @@ note: string }
  * The latest result of each distinct check.
  */
 export type CheckRun = { kind: string; command: string; passed: boolean; at: number; duration_ms: number | null; agent_id: string }
+export type CodeReviewItem = { id: string; cwd: string; host_kind: HostKind; number: number; title: string; url: string; branch: string; head: string; 
+/**
+ * failed | changes | comments | review
+ */
+reason: string; updated: string; failed_checks: string[]; agent_id: string; task_id: string | null }
+export type CodeReviews = { items: CodeReviewItem[]; connections: string[]; has_host: boolean }
+export type CommitInput = { paths: string[]; message: string; branch: string | null; push: boolean }
 export type ContextSource = { group: number; name: string; scope: string; delivery: string; accepted: boolean; conditional: boolean; path: string | null; characters: number; tokens: number; text: string; omitted_characters: number; markdown: boolean }
 /**
  * A saved chat — one continuous conversation with an agent, resumable later.
@@ -1031,9 +1133,11 @@ export type Conversation = { id: number; agent_id: string; title: string; cwd: s
 /**
  * A teammate's delegation ran here, not a chat the developer had.
  */
-delegated: boolean }
+delegated: boolean; project_folder: string; branch: string }
 export type ConversationSpend = { total: SpendTotal; context_tokens: number }
+export type DeliveryInfo = { branch: string; default_branch: string; new_branch: string; host: Host | null; pushed: boolean; request_url: string | null; request_title: string }
 export type DispatchResult = { agent_id: string; name: string; spawned: boolean }
+export type Draft = { text: string; warning: string | null }
 /**
  * A backend an agent can run on. `kind` selects the adapter (how we build the
  * command and parse its output); `command`/`extra_args` are the concrete CLI.
@@ -1070,6 +1174,9 @@ export type FileChange = { path: string;
  * added | modified | deleted | renamed | untracked
  */
 status: string; added: number | null; removed: number | null }
+export type FileClaim = { workspace: string; path: string; agent_id: string; task_id: string | null; reason: string; exclusive: boolean }
+export type Host = { kind: HostKind; hostname: string; repository: string; remote: string; connection: string | null }
+export type HostKind = "github" | "gitlab" | "unknown"
 export type LedgerEntry = { id: number; ts: number; agent_id: string; kind: string; detail: string; load: number }
 /**
  * A model an agent can run on.
@@ -1272,6 +1379,7 @@ agent_id: string; task_id: string | null;
  * When it goes off. A repeating reminder goes off on its schedule instead.
  */
 due: number; repeat: Schedule | null }
+export type RequestInput = { title: string; body: string; base: string; draft: boolean }
 /**
  * Something an agent is blocked on until the developer decides: a plan, diff,
  * question or choice (`ask_human`), or a command the permission gate routed.
@@ -1448,7 +1556,7 @@ prompt: string;
 /**
  * The git branch checked out when the task started ("" outside a repository).
  */
-branch: string; 
+branch: string; request_url: string | null; request_host: string | null; request_number: number | null; 
 /**
  * When it started running, and when it stopped (finished, blocked or closed).
  */
@@ -1456,7 +1564,7 @@ started: number | null; finished: number | null;
 /**
  * The owner's own plan, as steps done out of steps total (from its to-do list).
  */
-plan_done: number | null; plan_total: number | null }
+plan_done: number | null; plan_total: number | null; workspace_kind: string; project_folder: string }
 /**
  * Everything the task screen shows.
  */
@@ -1472,7 +1580,7 @@ branch: string | null;
 /**
  * The task's part of its owner's chat.
  */
-messages: StoredMessage[] }
+messages: StoredMessage[]; workspace: WorkspaceInfo; claims: FileClaim[] }
 /**
  * One thing that happened in a task, in order. Append-only.
  */
@@ -1512,6 +1620,9 @@ enthusiasm: number;
  * Brief (0) to thorough.
  */
 detail: number }
+export type WorkspaceInfo = { kind: string; path: string; project: string; branch: string; base: string; base_commit: string; decision: string; ahead: number; changes: FileChange[]; unmerged: string[]; removed: boolean; removable: boolean }
+export type Worktree = { path: string; project: string; branch: string; base: string; base_commit: string; task_id: string; created: number; removed: number | null }
+export type WorktreeSetup = { copy: string[]; command: string }
 
 /** tauri-specta globals **/
 
