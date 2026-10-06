@@ -12,6 +12,10 @@ import {
   onAgentStatus,
   onAutomationsChanged,
   browserPage,
+  browserNavigate,
+  devserverList,
+  onDevserverChanged,
+  onDevserverOutput,
   onBrowserChanged,
   onBrowserReveal,
   onSimulatorReveal,
@@ -37,6 +41,7 @@ import { useActivity } from "../stores/activity";
 import { useAgents } from "../stores/agents";
 import { useAttention } from "../stores/attention";
 import { useAutomations } from "../stores/automations";
+import { useDevServers } from "../stores/devservers";
 import { usePreview } from "../stores/preview";
 import { useReminders } from "../stores/reminders";
 import { useChats } from "../stores/chats";
@@ -110,6 +115,7 @@ export function useBackendSync() {
     first("notifications", useNotifications.getState().refresh);
     first("automations", useAutomations.getState().refresh);
     first("reminders", useReminders.getState().refresh);
+    first("dev servers", () => devserverList().then((servers) => servers.forEach(useDevServers.getState().apply)));
     first("browser", () => browserPage().then(usePreview.getState().applyPage));
     first("runtime health", system.refreshHealth);
     first("keep-awake state", system.refreshPower);
@@ -140,6 +146,14 @@ export function useBackendSync() {
       onNotificationsChanged(() => useNotifications.getState().refresh().catch(report("notifications"))),
       onAutomationsChanged(() => useAutomations.getState().refreshAll().catch(report("automations"))),
       onRemindersChanged(() => useReminders.getState().refresh().catch(report("reminders"))),
+      onDevserverChanged((server) => {
+        const previous = useDevServers.getState().servers[server.folder];
+        useDevServers.getState().apply(server);
+        if (server.status === "running" && server.address && (previous?.generation !== server.generation || previous?.address !== server.address || previous?.status !== "running")) {
+          if (server.open_page || !usePreview.getState().page.url) browserNavigate(server.address).catch(report("dev server page"));
+        }
+      }),
+      onDevserverOutput((output) => useDevServers.getState().append(output)),
       onBrowserChanged((page) => usePreview.getState().applyPage(page)),
       onBrowserReveal(() => usePreview.getState().show("browser")),
       onSimulatorReveal((udid) => {

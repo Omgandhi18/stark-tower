@@ -9,6 +9,7 @@ mod codex;
 mod config;
 mod context;
 mod delegation;
+mod devserver;
 mod engine;
 mod floor;
 mod gate;
@@ -637,8 +638,8 @@ fn list_automation_runs(app: tauri::AppHandle, id: i64) -> Vec<ledger::Automatio
 /// made on the main thread, which this waits for.
 #[tauri::command]
 #[specta::specta]
-async fn browser_show(app: tauri::AppHandle, bounds: browser::Bounds) -> Result<(), String> {
-    browser::show(&app, bounds)
+async fn browser_show(app: tauri::AppHandle, bounds: browser::Bounds, zoom: Option<f64>) -> Result<(), String> {
+    browser::show(&app, bounds, zoom.unwrap_or(1.0))
 }
 
 /// Hide the built-in browser (its panel closed, or something is drawn over it).
@@ -667,6 +668,51 @@ async fn browser_go(app: tauri::AppHandle, action: String) -> Result<(), String>
 #[specta::specta]
 fn browser_page(app: tauri::AppHandle) -> browser::BrowserPage {
     browser::page(&app)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn devserver_candidates(app: tauri::AppHandle, folder: String) -> Result<devserver::Candidates, String> {
+    devserver::candidates(&app, &folder)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn devserver_select(app: tauri::AppHandle, folder: String, selected: String, custom: String) -> Result<devserver::Candidates, String> {
+    devserver::select(&app, &folder, &selected, &custom)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn devserver_start(app: tauri::AppHandle, folder: String, option: Option<String>, command: Option<String>) -> Result<devserver::Server, String> {
+    let candidate = devserver::resolve(&app, &folder, option.as_deref(), command.as_deref())?;
+    app.state::<devserver::DevServers>().start(Some(app.clone()), &folder, candidate, false)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn devserver_stop(app: tauri::AppHandle, folder: String) -> Result<devserver::Server, String> {
+    app.state::<devserver::DevServers>().stop(&folder)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn devserver_restart(app: tauri::AppHandle, folder: String) -> Result<devserver::Server, String> {
+    let manager = app.state::<devserver::DevServers>();
+    let option = manager.restart_option(&folder)?;
+    manager.start(Some(app.clone()), &folder, option, true)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn devserver_list(app: tauri::AppHandle) -> Vec<devserver::Server> {
+    app.state::<devserver::DevServers>().list()
+}
+
+#[tauri::command]
+#[specta::specta]
+fn devserver_logs(app: tauri::AppHandle, folder: String) -> Result<devserver::Output, String> {
+    app.state::<devserver::DevServers>().logs(&folder)
 }
 
 /// The iOS simulators Xcode has, and whether taps can go through from here.
@@ -1822,6 +1868,13 @@ fn specta_builder() -> tauri_specta::Builder {
             browser_navigate,
             browser_go,
             browser_page,
+            devserver_candidates,
+            devserver_select,
+            devserver_start,
+            devserver_stop,
+            devserver_restart,
+            devserver_list,
+            devserver_logs,
             list_reminders,
             save_reminder,
             complete_reminder,
@@ -1956,6 +2009,7 @@ pub fn run() {
             floor::start_committer(floor_dir.clone());
 
             app.manage(browser::Browser::default());
+            app.manage(devserver::DevServers::default());
             app.manage(AppState {
                 pty: PtyManager::default(),
                 terminals: terminal::TerminalManager::default(),

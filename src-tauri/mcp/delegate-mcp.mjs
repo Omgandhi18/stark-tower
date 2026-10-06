@@ -243,6 +243,20 @@ const BROWSER_TOOL = {
   },
 };
 
+const DEV_SERVER_TOOL = {
+  name: "dev_server",
+  description: "Run your project's dev server in Starkline and open it in the shared browser. Use list for all servers, status for this project's server, start (optional command, otherwise its remembered choice), stop, restart, or logs (optional text filter). Starts and restarts go through the developer's shell permission rules.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["list", "start", "stop", "restart", "logs", "status"] },
+      command: { type: "string", description: "For start: a custom shell command; omit to use the project's choice." },
+      filter: { type: "string", description: "For logs: return only lines containing this text." },
+    },
+    required: ["action"],
+  },
+};
+
 const SIMULATOR_TOOL = {
   name: "simulator",
   description:
@@ -283,7 +297,7 @@ const RELEASE_FILES_TOOL = {
 };
 
 async function toolsList() {
-  const tools = [CLAIM_FILES_TOOL, RELEASE_FILES_TOOL, ASK_HUMAN_TOOL, MESSAGE_TOOL, SHARE_TOOL, REMIND_TOOL, BROWSER_TOOL, SIMULATOR_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
+  const tools = [CLAIM_FILES_TOOL, RELEASE_FILES_TOOL, ASK_HUMAN_TOOL, MESSAGE_TOOL, SHARE_TOOL, REMIND_TOOL, BROWSER_TOOL, DEV_SERVER_TOOL, SIMULATOR_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
   if (IS_ORCH) {
     const workers = await getRoster();
     tools.unshift(buildDelegateTool(workers));
@@ -383,12 +397,14 @@ rl.on("line", async (raw) => {
       });
       if (res.error) result(id, "remind failed: " + res.error, true);
       else result(id, res.result || "(set)");
-    } else if (name === "browser" || name === "simulator") {
+    } else if (name === "browser" || name === "simulator" || name === "dev_server") {
       log(name, "->", args.action);
       const res = await bridge({
         type: name,
         agentId: AGENT_ID,
         action: args.action || "",
+        command: args.command || "",
+        filter: args.filter || "",
         url: args.url || "",
         target: args.target ?? "",
         text: args.text ?? "",

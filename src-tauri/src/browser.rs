@@ -169,8 +169,12 @@ fn view(app: &tauri::AppHandle) -> Result<tauri::Webview, String> {
 }
 
 /// Place the browser over the panel and show it.
-pub fn show(app: &tauri::AppHandle, bounds: Bounds) -> Result<(), String> {
+pub fn show(app: &tauri::AppHandle, bounds: Bounds, zoom: f64) -> Result<(), String> {
+    if !zoom.is_finite() || !(0.01..=1.0).contains(&zoom) || [bounds.x, bounds.y, bounds.width, bounds.height].iter().any(|n| !n.is_finite()) {
+        return Err("The browser size or zoom is invalid.".into());
+    }
     let v = view(app)?;
+    v.set_zoom(zoom).map_err(|e| e.to_string())?;
     v.set_position(LogicalPosition::new(bounds.x, bounds.y)).map_err(|e| e.to_string())?;
     v.set_size(LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0))).map_err(|e| e.to_string())?;
     v.show().map_err(|e| e.to_string())

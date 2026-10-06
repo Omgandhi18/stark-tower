@@ -183,3 +183,28 @@ test("reports claims the app refuses as errors", async () => {
     assert.match(result.content[0].text, /inside your workspace/);
   } finally { app.close(); }
 });
+
+for (const action of ["list", "start", "stop", "restart", "logs", "status"]) {
+  test(`dev_server forwards ${action} with the agent and relays the result`, async () => {
+    const app = await fakeApp(() => ({ result: "server result" }));
+    try {
+      const result = await callTool(app.sock, "dev_server", { action, command: "npm run dev", filter: "error" });
+      assert.equal(app.requests[0].type, "dev_server");
+      assert.equal(app.requests[0].agentId, "friday");
+      assert.equal(app.requests[0].action, action);
+      assert.equal(app.requests[0].command, "npm run dev");
+      assert.equal(app.requests[0].filter, "error");
+      assert.equal(result.content[0].text, "server result");
+    } finally { app.close(); }
+  });
+}
+
+test("dev_server relays a denied start as an error", async () => {
+  const app = await fakeApp(() => ({ error: "The developer declined this command." }));
+  try {
+    const result = await callTool(app.sock, "dev_server", { action: "start" });
+    assert.equal(app.requests[0].command, "");
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /declined/);
+  } finally { app.close(); }
+});

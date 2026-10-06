@@ -9,6 +9,9 @@ import type {
   Automation,
   AutomationRun,
   BrowserPage,
+  Candidates,
+  Server,
+  Output,
   Bug,
   CheckRun,
   Conversation,
@@ -94,6 +97,7 @@ export interface Scenario {
   /** The built-in browser's page. */
   browser: BrowserPage;
   terminals: Array<TerminalInfo & { output: number[]; offset: number; input: string }>;
+  devservers: { candidates: Record<string, Candidates>; servers: Record<string, Server>; output: Record<string, Output>; readyAddress: string | null };
   /** Xcode's simulators, and a screenshot standing in for every frame. */
   simulator: SimulatorStatus & { frame: string };
 }
@@ -691,6 +695,7 @@ export function defaultScenario(): Scenario {
     reminders: reminders(),
     terminals: [],
     browser: { url: "", title: "", loading: false },
+    devservers: { candidates: {}, servers: {}, output: {}, readyAddress: null },
     simulator: {
       available: true,
       problem: null,
@@ -972,4 +977,19 @@ export function codeReviewScenario(kind: "github" | "gitlab" = "github"): Scenar
   const url = kind === "github" ? "https://github.com/team/app/pull/128" : "https://gitlab.example.com/team/sub/app/-/merge_requests/45";
   scenario.codeReviews = { has_host:true, connections:[], items:[{ id:url, cwd:task.cwd, host_kind:kind, number:kind === "github" ? 128 : 45, title:"Fix the login redirect", url, branch:"fix/login", head:"abc123", reason:"failed", updated:"2026-10-06T10:00:00Z", failed_checks:["Tests"], agent_id:"friday", task_id:task.id }] };
   return scenario;
+}
+
+/** Dev commands only appear in scenarios that give the project a package file. */
+export function withDevCommands(s: Scenario): Scenario {
+  s.devservers.candidates[APP] = {
+    folder: APP,
+    options: [
+      { id: "package:dev", label: "dev", command: "npm run dev", cwd: APP, env: {}, port: null },
+      { id: "package:start", label: "start", command: "npm run start", cwd: APP, env: {}, port: null },
+    ],
+    selected: "package:start",
+    custom: "",
+  };
+  s.config.dev_servers = { [APP]: { selected: "package:start", custom: "" } };
+  return s;
 }

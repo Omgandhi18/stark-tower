@@ -1,6 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { commands, type AutomationInput, type Bounds, type BrowserPage, type Budget, type CodeReviews, type CommitInput, type PowerState, type ReminderInput, type RequestInput, type Result, type WorktreeSetup } from "./bindings";
+import { commands, type AutomationInput, type Bounds, type BrowserPage, type Budget, type CodeReviews, type CommitInput, type Output, type PowerState, type ReminderInput, type RequestInput, type Result, type Server, type WorktreeSetup } from "./bindings";
 import type { Attachment, ChatEvent, ChatSwitch, TaskEvent, LedgerEntry, PtyData, ReviewRequest, StatusEvent, UsageUpdate, UpdateStatus } from "./types";
 
 // Commands are the tauri-specta-generated, typed wrappers (bindings.ts). Fallible
@@ -77,9 +77,21 @@ export const providerCapabilities = () => commands.providerCapabilities();
 /** The models a provider offers, as its CLI lists them. */
 export const providerModels = (engineId: string) => ok(commands.providerModels(engineId));
 
+// ---- Project dev servers ----
+
+export const devserverCandidates = (folder: string) => ok(commands.devserverCandidates(folder));
+export const devserverSelect = (folder: string, selected: string, custom: string) => ok(commands.devserverSelect(folder, selected, custom));
+export const devserverStart = (folder: string, option?: string, command?: string) => ok(commands.devserverStart(folder, option ?? null, command ?? null));
+export const devserverStop = (folder: string) => ok(commands.devserverStop(folder));
+export const devserverRestart = (folder: string) => ok(commands.devserverRestart(folder));
+export const devserverList = () => commands.devserverList();
+export const devserverLogs = (folder: string) => ok(commands.devserverLogs(folder));
+export const onDevserverChanged = (cb: (server: Server) => void): Promise<UnlistenFn> => listen<Server>("devserver://changed", (e) => cb(e.payload));
+export const onDevserverOutput = (cb: (output: Output) => void): Promise<UnlistenFn> => listen<Output>("devserver://output", (e) => cb(e.payload));
+
 // ---- Built-in browser ----
 
-export const browserShow = (bounds: Bounds) => ok(commands.browserShow(bounds));
+export const browserShow = (bounds: Bounds, zoom = 1) => ok(commands.browserShow(bounds, zoom));
 export const browserHide = () => commands.browserHide();
 /** Open what was typed in the address bar. */
 export const browserNavigate = (url: string) => ok(commands.browserNavigate(url));

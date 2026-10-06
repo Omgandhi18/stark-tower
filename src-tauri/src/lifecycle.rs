@@ -134,6 +134,9 @@ pub fn on_run_event(app: &tauri::AppHandle, event: &tauri::RunEvent) {
                 show_main(app);
                 let _ = app.emit("app://quit-requested", busy_agents(app));
             } else {
+                if let Some(servers) = app.try_state::<crate::devserver::DevServers>() {
+                    servers.kill_all();
+                }
                 crate::chat::kill_all(app);
                 crate::pty::kill_all(app);
                 app.state::<crate::AppState>().terminals.kill_all();

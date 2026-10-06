@@ -216,6 +216,9 @@ pub struct AppConfig {
     /// theme ("own"), or one theme's outfits (one of [`THEMES`]).
     #[serde(default = "default_outfits")]
     pub outfits: String,
+    /// The chosen dev command and custom command, per project folder.
+    #[serde(default)]
+    pub dev_servers: std::collections::HashMap<String, crate::devserver::Choice>,
     pub engines: Vec<EngineConfig>,
     pub agents: Vec<AgentConfig>,
 }
@@ -428,6 +431,7 @@ pub fn default_config() -> AppConfig {
         keep_awake: false,
         theme: default_theme(),
         outfits: default_outfits(),
+        dev_servers: std::collections::HashMap::new(),
         engines: default_engines(),
         agents: default_agents(),
     }

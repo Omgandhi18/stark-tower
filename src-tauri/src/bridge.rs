@@ -185,6 +185,12 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
             handle_remind(app, &mut writer, &req);
             return;
         }
+        Some("dev_server") => {
+            let agent = req.get("agentId").and_then(|v| v.as_str()).unwrap_or("");
+            let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
+            reply_with(&mut writer, crate::devserver::act(app, agent, action, &req));
+            return;
+        }
         Some("browser") => {
             handle_browser(app, &mut writer, &req);
             return;

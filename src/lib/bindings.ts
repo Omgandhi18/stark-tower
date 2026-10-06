@@ -409,9 +409,9 @@ async simulatorOpenApp(udid: string) : Promise<Result<null, string>> {
  * Place the built-in browser over its panel and show it. Async: the browser view is
  * made on the main thread, which this waits for.
  */
-async browserShow(bounds: Bounds) : Promise<Result<null, string>> {
+async browserShow(bounds: Bounds, zoom: number | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("browser_show", { bounds }) };
+    return { status: "ok", data: await TAURI_INVOKE("browser_show", { bounds, zoom }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -450,6 +450,57 @@ async browserGo(action: string) : Promise<Result<null, string>> {
  */
 async browserPage() : Promise<BrowserPage> {
     return await TAURI_INVOKE("browser_page");
+},
+async devserverCandidates(folder: string) : Promise<Result<Candidates, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("devserver_candidates", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async devserverSelect(folder: string, selected: string, custom: string) : Promise<Result<Candidates, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("devserver_select", { folder, selected, custom }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async devserverStart(folder: string, option: string | null, command: string | null) : Promise<Result<Server, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("devserver_start", { folder, option, command }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async devserverStop(folder: string) : Promise<Result<Server, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("devserver_stop", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async devserverRestart(folder: string) : Promise<Result<Server, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("devserver_restart", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async devserverList() : Promise<Server[]> {
+    return await TAURI_INVOKE("devserver_list");
+},
+async devserverLogs(folder: string) : Promise<Result<Output, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("devserver_logs", { folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 },
 /**
  * Every reminder, soonest first.
@@ -999,7 +1050,11 @@ theme?: string;
  * What the agents wear: the active theme's outfits ("theme"), their own look in every
  * theme ("own"), or one theme's outfits (one of [`THEMES`]).
  */
-outfits?: string; engines: EngineConfig[]; agents: AgentConfig[] }
+outfits?: string; 
+/**
+ * The chosen dev command and custom command, per project folder.
+ */
+dev_servers?: Partial<{ [key in string]: Choice }>; engines: EngineConfig[]; agents: AgentConfig[] }
 export type Attachment = { 
 /**
  * Where the file is kept: Starkline's copy.
@@ -1109,6 +1164,8 @@ export type Bug = { id: number; reporter: string; title: string; detail: string;
  * open | doing | fixed | wontfix
  */
 status: string; created: number; updated: number }
+export type Candidate = { id: string; label: string; command: string; cwd: string; env: Partial<{ [key in string]: string }>; port: number | null }
+export type Candidates = { folder: string; options: Candidate[]; selected: string; custom: string }
 export type Capability = { support: Support; 
 /**
  * One plain sentence on what that means here.
@@ -1118,6 +1175,7 @@ note: string }
  * The latest result of each distinct check.
  */
 export type CheckRun = { kind: string; command: string; passed: boolean; at: number; duration_ms: number | null; agent_id: string }
+export type Choice = { selected: string; custom: string }
 export type CodeReviewItem = { id: string; cwd: string; host_kind: HostKind; number: number; title: string; url: string; branch: string; head: string; 
 /**
  * failed | changes | comments | review
@@ -1234,6 +1292,7 @@ automation_id: number | null;
  * The reminder that went off.
  */
 reminder_id: number | null }
+export type Output = { folder: string; generation: number; cursor: number; lines: string[] }
 export type PathEntry = { path: string; dir: boolean }
 /**
  * A stored rule, as Settings lists it.
@@ -1472,6 +1531,7 @@ export type Schedule =
  * Every so many hours after the previous run.
  */
 { kind: "everyHours"; hours: number }
+export type Server = { folder: string; command: string; status: Status; address: string | null; exit_code: number | null; generation: number; open_page: boolean }
 /**
  * A provider CLI's own account of whether it can reach its models.
  */
@@ -1505,6 +1565,7 @@ export type SpendDay = { date: string; total: SpendTotal }
 export type SpendGroup = { key: string; total: SpendTotal }
 export type SpendSummary = { today: SpendTotal; week: SpendTotal; month: SpendTotal; budget: Budget; budget_spend: number; days: SpendDay[]; agents: SpendGroup[]; projects: SpendGroup[]; models: SpendGroup[]; first_date: string | null; has_spend: boolean }
 export type SpendTotal = { cost_usd: number; input_tokens: number; output_tokens: number; context_tokens: number; turns: number; unpriced_turns: number }
+export type Status = "starting" | "running" | "stopped" | "crashed"
 /**
  * One persisted chat turn — enough to rebuild the transcript UI on reopen.
  */

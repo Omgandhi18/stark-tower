@@ -66,6 +66,18 @@ function install(scenario: Scenario) {
   };
 
   const emit = (event: string, payload: unknown) => {
+    if (event === "devserver://changed") {
+      const server = payload as Scenario["devservers"]["servers"][string];
+      state.devservers.servers[server.folder] = server;
+    }
+    if (event === "devserver://output") {
+      const batch = payload as Scenario["devservers"]["output"][string];
+      const previous = state.devservers.output[batch.folder];
+      if (!previous || batch.generation > previous.generation) state.devservers.output[batch.folder] = batch;
+      else if (batch.generation === previous.generation && batch.cursor > previous.cursor) {
+        state.devservers.output[batch.folder] = { ...batch, lines: [...previous.lines, ...batch.lines.slice(-Math.min(batch.lines.length, batch.cursor - previous.cursor))].slice(-2000) };
+      }
+    }
     for (const id of listeners.get(event) ?? []) callbacks.get(id)?.({ event, id, payload });
   };
 
@@ -171,6 +183,34 @@ function install(scenario: Scenario) {
     terminal.offset += data.length;
     const channel = terminalChannels.get(id);
     if (channel) callbacks.get(channel.callback)?.({ index: channel.index++, message: { data, offset: terminal.offset, exit_code } });
+  };
+
+  const devCandidates = (folder: string) => {
+    const choices = state.devservers.candidates[folder] ?? { options: [], selected: "", custom: "" };
+    const remembered = state.config.dev_servers?.[folder];
+    const custom = remembered?.custom ?? choices.custom;
+    const options = choices.options.filter((o) => o.id !== "custom");
+    if (custom.trim()) options.push({ id: "custom", label: "Custom command", command: custom, cwd: folder, env: {}, port: null });
+    const selected = remembered?.selected ?? choices.selected;
+    return { folder, options, custom, selected: options.some((o) => o.id === selected) ? selected : options[0]?.id ?? "" };
+  };
+  const devStart = (args: Json, restart = false) => {
+    const folder = String(args.folder);
+    const previous = state.devservers.servers[folder];
+    if (!restart && previous && ["starting", "running"].includes(previous.status)) throw "A dev server is already running for this project.";
+    if (restart && !previous) throw "This project hasn't run a dev server yet.";
+    const choices = devCandidates(folder);
+    const command = restart ? previous.command : String(args.command || choices.options.find((o) => o.id === (args.option ?? choices.selected))?.command || "");
+    if (!command) throw "No dev command was found. Choose a custom command in the browser's Run menu.";
+    const server: Scenario["devservers"]["servers"][string] = { folder, command, status: "starting", address: null, exit_code: null, generation: (previous?.generation ?? 0) + 1, open_page: true };
+    state.devservers.servers[folder] = server;
+    state.devservers.output[folder] = { folder, generation: server.generation, cursor: 0, lines: [] };
+    emit("devserver://changed", server);
+    if (state.devservers.readyAddress) window.setTimeout(() => {
+      const current = state.devservers.servers[folder];
+      if (current.generation === server.generation && current.status === "starting") emit("devserver://changed", { ...server, status: "running", address: state.devservers.readyAddress });
+    }, REPLY_DELAY_MS);
+    return server;
   };
 
   const commands: Record<string, (args: Json) => unknown> = {
@@ -511,6 +551,32 @@ function install(scenario: Scenario) {
       emit("rules://changed", null);
       return true;
     },
+    devserver_candidates: (args) => devCandidates(String(args.folder)),
+    devserver_select: (args) => {
+      const folder = String(args.folder);
+      state.config.dev_servers ??= {};
+      const previous = state.config.dev_servers[folder];
+      state.config.dev_servers[folder] = { selected: String(args.selected), custom: String(args.custom).trim() };
+      const choices = devCandidates(folder);
+      if (!choices.options.some((o) => o.id === args.selected)) {
+        if (previous) state.config.dev_servers[folder] = previous;
+        else delete state.config.dev_servers[folder];
+        throw "Choose a command, or enter a custom command first.";
+      }
+      emit("config://changed", state.config);
+      return choices;
+    },
+    devserver_start: (args) => devStart(args),
+    devserver_restart: (args) => devStart(args, true),
+    devserver_stop: (args) => {
+      const server = state.devservers.servers[String(args.folder)];
+      if (!server) throw "This project hasn't run a dev server yet.";
+      const stopped = { ...server, status: "stopped" as const, exit_code: 0 };
+      emit("devserver://changed", stopped);
+      return stopped;
+    },
+    devserver_list: () => Object.values(state.devservers.servers),
+    devserver_logs: (args) => state.devservers.output[String(args.folder)] ?? { folder: String(args.folder), generation: 0, cursor: 0, lines: [] },
     browser_page: () => state.browser,
     browser_show: () => null,
     browser_hide: () => null,
