@@ -406,6 +406,16 @@ mod tests {
     use super::*;
     /// How long a login shell may take to start and answer: a busy test machine runs many at once.
     const SHELL_START: Duration = Duration::from_secs(20);
+    /// Wait for the shell's first output (its prompt) before typing. On macOS, input typed
+    /// before bash sets up its line editor can be discarded.
+    fn wait_ready(manager: &TerminalManager, id: &str) {
+        let deadline = Instant::now() + SHELL_START;
+        while manager.sessions.lock().unwrap()[id].output.replay(None).data.is_empty() {
+            assert!(Instant::now() < deadline, "the shell never started");
+            std::thread::sleep(FRAME);
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
     fn wait_for(manager: &TerminalManager, id: &str, text: &str) {
         let deadline = Instant::now() + SHELL_START;
         loop {
@@ -450,6 +460,7 @@ mod tests {
         let info = manager
             .spawn(folder.to_str().unwrap(), "/bin/bash", 80, 24)
             .unwrap();
+        wait_ready(&manager, &info.id);
         let pid = manager.sessions.lock().unwrap()[&info.id].pid;
         manager
             .write(&info.id, "echo terminal-test-$PWD\n")
@@ -486,6 +497,7 @@ mod tests {
         let info = manager
             .spawn(std::env::temp_dir().to_str().unwrap(), "/bin/bash", 80, 24)
             .unwrap();
+        wait_ready(&manager, &info.id);
         manager
             .write(&info.id, "printf 'retained-output\\n'; exit 7\n")
             .unwrap();
@@ -511,6 +523,7 @@ mod tests {
         let info = manager
             .spawn(std::env::temp_dir().to_str().unwrap(), "/bin/bash", 80, 24)
             .unwrap();
+        wait_ready(&manager, &info.id);
         manager.write(&info.id, "echo before-attach\n").unwrap();
         wait_for(&manager, &info.id, "before-attach");
         let (tx, rx) = mpsc::channel();
@@ -550,6 +563,7 @@ mod tests {
         let info = manager
             .spawn(std::env::temp_dir().to_str().unwrap(), "/bin/bash", 80, 24)
             .unwrap();
+        wait_ready(&manager, &info.id);
         manager
             .write(
                 &info.id,
