@@ -4,6 +4,13 @@ version = "0.1.0"
 description = "Stark Tower — multi-agent orchestration for Claude Code, Iron Man style"
 authors = ["Om Gandhi"]
 edition = "2021"
+default-run = "Starkline"
+
+# The program is called Starkline, so the Dock names it that in dev mode too
+# (a built app is named by productName).
+[[bin]]
+name = "Starkline"
+path = "src/main.rs"
 
 [lib]
 # The `_lib` suffix keeps the lib name unique from the bin on Windows.
