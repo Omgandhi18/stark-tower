@@ -1,0 +1,10 @@
+.delivery-actions, .delivery-form { display: grid; gap: var(--space-3); }
+.delivery-buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.delivery-note { color: var(--text-muted); font-size: var(--text-sm); }
+.delivery-error { color: var(--state-danger); font-size: var(--text-sm); }
+.delivery-error pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+.delivery-files { display: grid; gap: var(--space-2); border: 1px solid var(--border); padding: var(--space-3); border-radius: var(--radius-control); max-height: 240px; overflow: auto; }
+.delivery-files label { display: flex; gap: var(--space-2); align-items: center; overflow-wrap: anywhere; }
+.change-row-head { display: flex; align-items: center; }
+.change-row-head .change-head { flex: 1; min-width: 0; }
+.rail-change-list .menu-root { margin-left: auto; }

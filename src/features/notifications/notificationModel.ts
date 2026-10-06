@@ -38,6 +38,7 @@ export interface KindPresentation {
 }
 
 const KINDS: Record<string, KindPresentation> = {
+  code_review: { label: "Code review", verb: "has failed checks", tone: "danger", icon: TriangleAlert },
   approval: { label: "Approval", verb: "needs your approval", tone: "attention", icon: ShieldAlert },
   question: { label: "Question", verb: "has a question", tone: "review", icon: MessageCircleQuestion },
   review: { label: "Review", verb: "needs your review", tone: "review", icon: FileSearch },

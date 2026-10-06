@@ -3,6 +3,8 @@ import { CircleCheck, CircleX, ShieldCheck } from "lucide-react";
 import { Button, EmptyState, Tabs, cx, ICON_SIZE, ICON_STROKE, type TabItem } from "../../design";
 import { formatElapsed, formatRelative } from "../../lib/time";
 import type { CheckRun, FileChange, ReviewRequest } from "../../lib/types";
+import DeliveryActions from "./DeliveryActions";
+import DiscardFile from "./DiscardFile";
 import AttentionCard from "../attention/AttentionCard";
 import { changeLetter, changeSummary } from "./taskPresentation";
 
@@ -11,6 +13,7 @@ type RailTab = "attention" | "changes" | "checks";
 const TOP_CHANGES = 5;
 
 interface TaskSideRailProps {
+  taskId: string;
   reviews: readonly ReviewRequest[];
   changes: readonly FileChange[];
   checks: readonly CheckRun[];
@@ -19,7 +22,7 @@ interface TaskSideRailProps {
 }
 
 /** What the task needs from you, what it changed, and how its checks went. */
-export default function TaskSideRail({ reviews, changes, checks, now, onShowFiles }: TaskSideRailProps) {
+export default function TaskSideRail({ taskId, reviews, changes, checks, now, onShowFiles }: TaskSideRailProps) {
   const [tab, setTab] = useState<RailTab>(reviews.length ? "attention" : "checks");
   const tabs: TabItem<RailTab>[] = [
     { id: "attention", label: "Attention", count: reviews.length },
@@ -43,11 +46,13 @@ export default function TaskSideRail({ reviews, changes, checks, now, onShowFile
             </div>
           ))}
 
+        {tab === "changes" && <DeliveryActions taskId={taskId} changes={changes} />}
         {tab === "changes" &&
           (changes.length === 0 ? (
             <EmptyState compact icon={CircleCheck} title="No uncommitted changes" body="The folder matches its last commit." />
           ) : (
             <div className="rail-changes">
+              <p className="delivery-note">Everything uncommitted in the task’s folder, including changes made outside this task.</p>
               <p className="rail-changes-summary">
                 {summary.added} added, {summary.modified} modified, {summary.deleted} deleted
                 <span className="tabular">
@@ -57,11 +62,12 @@ export default function TaskSideRail({ reviews, changes, checks, now, onShowFile
               </p>
               <ul className="rail-change-list">
                 {changes.slice(0, TOP_CHANGES).map((c) => (
-                  <li key={c.path}>
+                  <li key={c.path} aria-label={`Changes to ${c.path}`}>
                     <span className={cx("change-letter", `is-${c.status}`)}>{changeLetter(c)}</span>
                     <span className="mono rail-change-path" title={c.path}>
                       {c.path}
                     </span>
+                    <DiscardFile taskId={taskId} change={c} />
                   </li>
                 ))}
               </ul>

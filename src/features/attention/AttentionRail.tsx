@@ -3,6 +3,7 @@ import { EmptyState, SectionHeader } from "../../design";
 import { useNow } from "../../lib/useNow";
 import { useAttention } from "../../stores/attention";
 import UpcomingReminders from "../reminders/UpcomingReminders";
+import CodeReview from "./CodeReview";
 import AttentionCard from "./AttentionCard";
 import "./attention.css";
 
@@ -31,6 +32,7 @@ export default function AttentionRail() {
             ))}
           </div>
         )}
+        <CodeReview />
       </div>
       <UpcomingReminders now={now} />
     </aside>

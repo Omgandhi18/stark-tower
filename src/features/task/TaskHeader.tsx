@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { ArrowLeft, CheckCheck, Clock, Folder, FolderOpen, MessageSquareText, Play, ShieldCheck, Square, SquareTerminal, X } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Button, IconButton, OverflowMenu, Portrait, StatusPill, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
-import { chatStop, closeTask, resumeTask, reviewTask } from "../../lib/api";
+import { seeCodeReview, chatStop, closeTask, resumeTask, reviewTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { formatElapsed } from "../../lib/time";
 import type { Agent, TaskDetail } from "../../lib/types";
@@ -95,6 +96,7 @@ export default function TaskHeader({ detail, owner, requester, state, now }: Tas
         </p>
       )}
       <h1 className="task-title">{task.title}</h1>
+      {task.request_url && <a className="link-button" href={task.request_url} onClick={(event) => { event.preventDefault(); void openUrl(task.request_url as string).then(() => seeCodeReview(task.request_url as string)).catch(report("open the request")); }}>{task.request_host === "gitlab" ? `Merge request !${task.request_number}` : `Pull request #${task.request_number}`}</a>}
       <dl className="task-facts">
         <div className="task-fact">
           <dt>Status</dt>

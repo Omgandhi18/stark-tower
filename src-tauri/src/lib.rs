@@ -13,6 +13,9 @@ mod engine;
 mod floor;
 mod gate;
 mod health;
+mod hosting;
+mod delivery;
+mod delivery_draft;
 mod ledger;
 mod lifecycle;
 mod notify;
@@ -759,6 +762,56 @@ fn snooze_reminder(app: tauri::AppHandle, id: i64, until: i64) -> Result<ledger:
 #[specta::specta]
 fn delete_reminder(app: tauri::AppHandle, id: i64) -> Result<(), String> {
     reminders::delete(&app, id)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn delivery_info(app: tauri::AppHandle, id: String) -> Result<delivery::DeliveryInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || delivery::task(&app, &id).map(|t| delivery::info(&app, &t))).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+#[specta::specta]
+async fn discard_task_file(app: tauri::AppHandle, id: String, path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || { let task = delivery::task(&app, &id)?; delivery::discard(&task.cwd, &path)?; app.emit("tasks://changed", ()).map_err(|e| e.to_string()) }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+#[specta::specta]
+async fn commit_task(app: tauri::AppHandle, id: String, input: delivery::CommitInput) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || { let task = delivery::task(&app, &id)?; let result = delivery::commit(&task.cwd, &input, Some(&app)); let _ = app.emit("tasks://changed", ()); result }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+#[specta::specta]
+async fn push_task(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || { let task = delivery::task(&app, &id)?; delivery::push(&task.cwd, Some(&app))?; let _ = app.emit("tasks://changed", ()); Ok(()) }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+#[specta::specta]
+async fn draft_delivery(app: tauri::AppHandle, id: String, paths: Vec<String>, request: bool, token: String) -> Result<delivery::Draft, String> {
+    tauri::async_runtime::spawn_blocking(move || delivery::task(&app, &id).map(|t| delivery::draft(&app, &t, &paths, request, &token))).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+#[specta::specta]
+fn cancel_delivery_draft(token: String) { delivery_draft::cancel(&token); }
+#[tauri::command]
+#[specta::specta]
+async fn create_task_request(app: tauri::AppHandle, id: String, input: delivery::RequestInput) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || { let task = delivery::task(&app, &id)?; delivery::create_request(&app, &task, &input) }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+#[specta::specta]
+fn code_reviews() -> hosting::CodeReviews { hosting::snapshot() }
+#[tauri::command]
+#[specta::specta]
+async fn refresh_code_reviews(app: tauri::AppHandle) { let _ = tauri::async_runtime::spawn_blocking(move || hosting::poll(&app, true)).await; }
+#[tauri::command]
+#[specta::specta]
+async fn see_code_review(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || hosting::seen(&app, &id)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+#[specta::specta]
+async fn ask_code_review(app: tauri::AppHandle, id: String, agent_id: String) -> Result<ledger::Task, String> {
+    tauri::async_runtime::spawn_blocking(move || hosting::ask(&app, &id, &agent_id)).await.map_err(|e| e.to_string())?
 }
 
 /// Everything the task screen shows: the task, what it delegated, its history,
@@ -1744,6 +1797,8 @@ fn specta_builder() -> tauri_specta::Builder {
             set_worktrees_enabled,
             save_worktree_setup,
             remove_worktree,
+            delivery_info, discard_task_file, commit_task, push_task, draft_delivery, cancel_delivery_draft, create_task_request,
+            code_reviews, refresh_code_reviews, see_code_review, ask_code_review,
             get_task_file_diff,
             list_notifications,
             mark_notifications_read,
@@ -1957,6 +2012,7 @@ pub fn run() {
             // Recovery first, then the automation scheduler.
             automations::start(app.handle().clone());
             reminders::start(app.handle().clone());
+            hosting::start(app.handle().clone());
             // Copies of files attached to messages that were never sent go after a day.
             {
                 let h = app.handle().clone();

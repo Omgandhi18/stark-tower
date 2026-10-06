@@ -20,7 +20,6 @@ const TITLE_LIMIT: usize = 80;
 const EVENT_LIMIT: i64 = 400;
 const MESSAGE_LIMIT: i64 = 500;
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
-const GIT_POLL: Duration = Duration::from_millis(20);
 
 /// A check the owner ran (tests, type check, lint, build), waiting for its result.
 struct PendingCheck {
@@ -189,7 +188,7 @@ fn relative(path: &str, cwd: &str) -> String {
 }
 
 /// Only plain paths inside the folder may be diffed (no `..`, no absolute paths).
-fn safe_relative(path: &str) -> bool {
+pub(crate) fn safe_relative(path: &str) -> bool {
     let p = Path::new(path);
     !path.is_empty() && p.components().all(|c| matches!(c, Component::Normal(_)))
 }
@@ -201,32 +200,9 @@ fn git(cwd: &str, args: &[&str]) -> Option<String> {
     if cwd.is_empty() || !Path::new(cwd).is_dir() {
         return None;
     }
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(cwd)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let deadline = Instant::now() + GIT_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => break,
-            Ok(Some(_)) => return None,
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(GIT_POLL),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
-    }
-    let mut out = String::new();
-    use std::io::Read;
-    child.stdout.take()?.read_to_string(&mut out).ok()?;
-    Some(out)
+    let mut command = Command::new("git");
+    command.arg("--literal-pathspecs").arg("-C").arg(cwd).args(args).stdin(Stdio::null()).env("GIT_TERMINAL_PROMPT", "0");
+    crate::hosting::run(command, GIT_TIMEOUT, None).ok()
 }
 
 pub fn current_branch(cwd: &str) -> Option<String> {
@@ -262,8 +238,9 @@ pub fn file_diff(cwd: &str, path: &str) -> Result<String, String> {
     git(cwd, &["diff", "--no-color", "--no-index", "--", "/dev/null", path])
         .or_else(|| {
             // `--no-index` exits 1 when files differ, which `git` treats as failure.
-            std::fs::read_to_string(Path::new(cwd).join(path))
-                .ok()
+            let file = Path::new(cwd).join(path);
+            let text = if file.is_symlink() { std::fs::read_link(&file).map(|target| target.to_string_lossy().into_owned()) } else { std::fs::read_to_string(&file) };
+            text.ok()
                 .map(|text| text.lines().map(|l| format!("+{l}")).collect::<Vec<_>>().join("\n"))
         })
         .ok_or_else(|| "There is no change to show for that file.".into())

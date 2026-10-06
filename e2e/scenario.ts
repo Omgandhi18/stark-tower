@@ -27,6 +27,8 @@ import type {
   RuntimeHealth,
   SimulatorStatus,
   StoredMessage,
+  DeliveryInfo,
+  CodeReviews,
   Task,
   TaskEvent,
   Worktree,
@@ -52,6 +54,12 @@ export interface Scenario {
   statuses: Record<string, AgentStatus>;
   projects: ProjectsState;
   tasks: Task[];
+  delivery: Record<string, DeliveryInfo>;
+  codeReviews: CodeReviews;
+  draftMessage: string;
+  deliveryError?: string;
+  pushError?: string;
+  draftDelayMs?: number;
   conversations: Conversation[];
   /** Saved transcript per conversation id. */
   transcripts: Record<number, StoredMessage[]>;
@@ -268,6 +276,7 @@ const task = (
   plan_total: null,
   workspace_kind: "checkout",
   project_folder: over.cwd,
+  request_url: null, request_host: null, request_number: null,
   ...over,
 });
 
@@ -319,6 +328,9 @@ export function defaultScenario(): Scenario {
         { path: API, name: "payments-api" },
       ],
     },
+    delivery: {},
+    codeReviews: { items: [], connections: [], has_host: false },
+    draftMessage: "feat: redesign settings\n\nAdd search and grouped settings.",
     tasks: [
       task(
         { id: "t-refunds", title: "Ship the refunds feature", assignee: "jarvis", status: "doing", cwd: API, conversation_id: 20, plan_done: 1, plan_total: 4 },
@@ -942,5 +954,22 @@ export function workspacesScenario(dirty = false): Scenario {
   chat.branch = branch;
   scenario.taskEvents[owner.id] = [taskEvent(owner.id, owner.assignee, "workspace", "A separate worktree was created because FRIDAY is already working in checkout-web. It starts from main at a1b2c3d; your uncommitted changes aren't in it.", 5), taskEvent(owner.id, owner.assignee, "claim_refused", "VISION has claimed src/types.ts (Shared types). Ask VISION to release it.", 3)];
   scenario.claims = [{ workspace: path, path: "src/settings/Form.tsx", agent_id: owner.assignee, task_id: owner.id, reason: "Settings UI", exclusive: true }];
+  return scenario;
+}
+
+/** Both hosts use the same delivery flow, with provider-specific names and URLs. */
+export function deliveryScenario(kind: "github" | "gitlab" = "github"): Scenario {
+  const scenario = defaultScenario();
+  const task = scenario.tasks.find((t) => t.id === "t-settings")!;
+  const hostname = kind === "github" ? "github.com" : "gitlab.example.com";
+  scenario.branches[task.cwd] = "main";
+  scenario.delivery[task.cwd] = { branch:"main", default_branch:"main", new_branch:"starkline/redesign-the-settings-page", host: { kind, hostname, repository:"team/sub/app", remote:"origin", connection:null }, pushed:false, request_url:null, request_title:task.title };
+  return scenario;
+}
+export function codeReviewScenario(kind: "github" | "gitlab" = "github"): Scenario {
+  const scenario = deliveryScenario(kind);
+  const task = scenario.tasks.find((t) => t.id === "t-settings")!;
+  const url = kind === "github" ? "https://github.com/team/app/pull/128" : "https://gitlab.example.com/team/sub/app/-/merge_requests/45";
+  scenario.codeReviews = { has_host:true, connections:[], items:[{ id:url, cwd:task.cwd, host_kind:kind, number:kind === "github" ? 128 : 45, title:"Fix the login redirect", url, branch:"fix/login", head:"abc123", reason:"failed", updated:"2026-10-06T10:00:00Z", failed_checks:["Tests"], agent_id:"friday", task_id:task.id }] };
   return scenario;
 }

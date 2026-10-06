@@ -4,6 +4,12 @@
 export type {
   ActiveContext,
   ContextSource,
+  DeliveryInfo,
+  CommitInput,
+  RequestInput,
+  CodeReviewItem,
+  CodeReviews,
+  HostKind,
   Agent,
   AgentKind,
   AgentStatus,

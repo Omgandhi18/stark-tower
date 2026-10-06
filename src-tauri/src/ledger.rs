@@ -128,6 +128,9 @@ pub struct Task {
     pub prompt: String,
     /// The git branch checked out when the task started ("" outside a repository).
     pub branch: String,
+    pub request_url: Option<String>,
+    pub request_host: Option<String>,
+    pub request_number: Option<i64>,
     /// When it started running, and when it stopped (finished, blocked or closed).
     pub started: Option<i64>,
     pub finished: Option<i64>,
@@ -373,7 +376,7 @@ pub struct TaskEvent {
 }
 
 const TASK_COLUMNS: &str = "id, ts, updated, title, assignee, status, detail, cwd, conversation_id, parent_id, \
-    requested_by, prompt, branch, started, finished, plan_done, plan_total, workspace_kind, project_folder";
+    requested_by, prompt, branch, started, finished, plan_done, plan_total, workspace_kind, project_folder, request_url, request_host, request_number";
 
 fn task_from_row(r: &rusqlite::Row) -> rusqlite::Result<Task> {
     Ok(Task {
@@ -396,6 +399,9 @@ fn task_from_row(r: &rusqlite::Row) -> rusqlite::Result<Task> {
         plan_total: r.get(16)?,
         workspace_kind: r.get(17)?,
         project_folder: r.get(18)?,
+        request_url: r.get(19)?,
+        request_host: r.get(20)?,
+        request_number: r.get(21)?,
     })
 }
 
@@ -514,6 +520,10 @@ impl Ledger {
         ensure_column(&conn, "tasks", "workspace_kind", "TEXT NOT NULL DEFAULT ''")?;
         ensure_column(&conn, "tasks", "project_folder", "TEXT NOT NULL DEFAULT ''")?;
         conn.execute("CREATE TABLE IF NOT EXISTS worktrees (path TEXT PRIMARY KEY, project TEXT NOT NULL, branch TEXT NOT NULL, base TEXT NOT NULL, base_commit TEXT NOT NULL, task_id TEXT NOT NULL, created INTEGER NOT NULL, removed INTEGER)", [])?;
+        ensure_column(&conn, "tasks", "request_url", "TEXT")?;
+        ensure_column(&conn, "tasks", "request_host", "TEXT")?;
+        ensure_column(&conn, "tasks", "request_number", "INTEGER")?;
+        conn.execute("CREATE TABLE IF NOT EXISTS code_review_seen (id TEXT PRIMARY KEY, seen TEXT NOT NULL DEFAULT '', failed_head TEXT NOT NULL DEFAULT '')", [])?;
         // Everything that happens in a task, append-only.
         conn.execute(
             "CREATE TABLE IF NOT EXISTS task_events (
@@ -970,6 +980,23 @@ impl Ledger {
 
     pub fn set_task_workspace(&self, id: &str, cwd: &str, kind: &str, project: &str) -> Result<(), String> {
         self.conn.lock().unwrap().execute("UPDATE tasks SET cwd = ?2, workspace_kind = ?3, project_folder = ?4 WHERE id = ?1", rusqlite::params![id, cwd, kind, project]).map(|_| ()).map_err(|e| e.to_string())
+    }
+
+    pub fn save_request(&self, id: &str, url: &str, host: &str, number: i64) -> Result<(), String> {
+        self.conn.lock().unwrap().execute("UPDATE tasks SET request_url=?2, request_host=?3, request_number=?4 WHERE id=?1", rusqlite::params![id, url, host, number]).map(|_| ()).map_err(|e| e.to_string())
+    }
+
+    pub fn review_seen(&self, id: &str) -> String {
+        self.conn.lock().unwrap().query_row("SELECT seen FROM code_review_seen WHERE id=?1", [id], |r| r.get(0)).unwrap_or_default()
+    }
+
+    pub fn mark_review_seen(&self, id: &str, time: &str) {
+        let _ = self.conn.lock().unwrap().execute("INSERT INTO code_review_seen(id,seen) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET seen=excluded.seen", rusqlite::params![id, time]);
+    }
+
+    /// Atomically remember the head before notifying, including across restarts.
+    pub fn review_failure(&self, id: &str, head: &str) -> bool {
+        self.conn.lock().unwrap().execute("INSERT INTO code_review_seen(id,failed_head) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET failed_head=excluded.failed_head WHERE failed_head != excluded.failed_head", rusqlite::params![id, head]).unwrap_or(0) > 0
     }
 
     pub fn task(&self, id: &str) -> Option<Task> {
@@ -1680,6 +1707,23 @@ mod tests {
         let p = std::env::temp_dir().join(format!("stark-led-{}-{n}.db", std::process::id()));
         let _ = std::fs::remove_file(&p);
         (Ledger::open(&p).unwrap(), p)
+    }
+
+    #[test]
+    fn request_and_review_memory_survive_reopening() {
+        let (ledger, path) = temp_db();
+        ledger.create_task(&NewTask { id:"hosting", title:"Fix", assignee:"friday", status:"done", cwd:"/w", parent_id:None, requested_by:"you", prompt:"Fix" }).unwrap();
+        ledger.save_request("hosting", "https://gitlab.com/g/r/-/merge_requests/45", "gitlab", 45).unwrap();
+        ledger.mark_review_seen("request", "2026-10-06T10:00:00Z");
+        assert!(ledger.review_failure("request", "sha1"));
+        assert!(!ledger.review_failure("request", "sha1"));
+        drop(ledger);
+        let ledger = Ledger::open(&path).unwrap();
+        let task = ledger.task("hosting").unwrap();
+        assert_eq!(task.request_number, Some(45)); assert_eq!(task.request_host.as_deref(), Some("gitlab")); assert!(task.request_url.unwrap().ends_with("/45"));
+        assert_eq!(ledger.review_seen("request"), "2026-10-06T10:00:00Z");
+        assert!(!ledger.review_failure("request", "sha1")); assert!(ledger.review_failure("request", "sha2"));
+        drop(ledger); let _ = std::fs::remove_file(path);
     }
 
     #[test]

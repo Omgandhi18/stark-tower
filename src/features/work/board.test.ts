@@ -29,6 +29,7 @@ const task = (id: string, assignee: string, status: string, updated: number, cwd
   requested_by: "you",
   prompt: "",
   branch: "",
+  request_url: null, request_host: null, request_number: null,
   started: updated,
   finished: null,
   plan_done: null,

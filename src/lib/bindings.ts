@@ -191,6 +191,79 @@ async removeWorktree(id: string, force: boolean) : Promise<Result<null, string>>
     else return { status: "error", error: e  as any };
 }
 },
+async deliveryInfo(id: string) : Promise<Result<DeliveryInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delivery_info", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async discardTaskFile(id: string, path: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("discard_task_file", { id, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async commitTask(id: string, input: CommitInput) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("commit_task", { id, input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async pushTask(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("push_task", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async draftDelivery(id: string, paths: string[], request: boolean, token: string) : Promise<Result<Draft, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("draft_delivery", { id, paths, request, token }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async cancelDeliveryDraft(token: string) : Promise<void> {
+    await TAURI_INVOKE("cancel_delivery_draft", { token });
+},
+async createTaskRequest(id: string, input: RequestInput) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_task_request", { id, input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async codeReviews() : Promise<CodeReviews> {
+    return await TAURI_INVOKE("code_reviews");
+},
+async refreshCodeReviews() : Promise<void> {
+    await TAURI_INVOKE("refresh_code_reviews");
+},
+async seeCodeReview(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("see_code_review", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async askCodeReview(id: string, agentId: string) : Promise<Result<Task, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ask_code_review", { id, agentId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * The readable diff of one changed file in a task's folder.
  */
@@ -1045,6 +1118,13 @@ note: string }
  * The latest result of each distinct check.
  */
 export type CheckRun = { kind: string; command: string; passed: boolean; at: number; duration_ms: number | null; agent_id: string }
+export type CodeReviewItem = { id: string; cwd: string; host_kind: HostKind; number: number; title: string; url: string; branch: string; head: string; 
+/**
+ * failed | changes | comments | review
+ */
+reason: string; updated: string; failed_checks: string[]; agent_id: string; task_id: string | null }
+export type CodeReviews = { items: CodeReviewItem[]; connections: string[]; has_host: boolean }
+export type CommitInput = { paths: string[]; message: string; branch: string | null; push: boolean }
 export type ContextSource = { group: number; name: string; scope: string; delivery: string; accepted: boolean; conditional: boolean; path: string | null; characters: number; tokens: number; text: string; omitted_characters: number; markdown: boolean }
 /**
  * A saved chat — one continuous conversation with an agent, resumable later.
@@ -1055,7 +1135,9 @@ export type Conversation = { id: number; agent_id: string; title: string; cwd: s
  */
 delegated: boolean; project_folder: string; branch: string }
 export type ConversationSpend = { total: SpendTotal; context_tokens: number }
+export type DeliveryInfo = { branch: string; default_branch: string; new_branch: string; host: Host | null; pushed: boolean; request_url: string | null; request_title: string }
 export type DispatchResult = { agent_id: string; name: string; spawned: boolean }
+export type Draft = { text: string; warning: string | null }
 /**
  * A backend an agent can run on. `kind` selects the adapter (how we build the
  * command and parse its output); `command`/`extra_args` are the concrete CLI.
@@ -1093,6 +1175,8 @@ export type FileChange = { path: string;
  */
 status: string; added: number | null; removed: number | null }
 export type FileClaim = { workspace: string; path: string; agent_id: string; task_id: string | null; reason: string; exclusive: boolean }
+export type Host = { kind: HostKind; hostname: string; repository: string; remote: string; connection: string | null }
+export type HostKind = "github" | "gitlab" | "unknown"
 export type LedgerEntry = { id: number; ts: number; agent_id: string; kind: string; detail: string; load: number }
 /**
  * A model an agent can run on.
@@ -1295,6 +1379,7 @@ agent_id: string; task_id: string | null;
  * When it goes off. A repeating reminder goes off on its schedule instead.
  */
 due: number; repeat: Schedule | null }
+export type RequestInput = { title: string; body: string; base: string; draft: boolean }
 /**
  * Something an agent is blocked on until the developer decides: a plan, diff,
  * question or choice (`ask_human`), or a command the permission gate routed.
@@ -1471,7 +1556,7 @@ prompt: string;
 /**
  * The git branch checked out when the task started ("" outside a repository).
  */
-branch: string; 
+branch: string; request_url: string | null; request_host: string | null; request_number: number | null; 
 /**
  * When it started running, and when it stopped (finished, blocked or closed).
  */
