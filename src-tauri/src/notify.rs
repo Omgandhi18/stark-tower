@@ -194,6 +194,27 @@ pub fn rule_used(app: &tauri::AppHandle, agent_id: &str, task_id: Option<&str>, 
     changed(app);
 }
 
+/// Auto mode let something go ahead that would have asked: it's on the record.
+pub fn auto_mode_used(app: &tauri::AppHandle, agent_id: &str, task_id: Option<&str>, cwd: &str, what: &str, subject: &str) {
+    let Some(state) = app.try_state::<crate::AppState>() else { return };
+    let Some(n) = state.ledger.add_notification(&NewNotification {
+        kind: "auto_mode",
+        urgency: UPDATE,
+        agent_id,
+        task_id,
+        cwd,
+        title: &format!("Allowed by auto mode: {what}"),
+        body: &crate::chat::truncate(subject, BODY_LIMIT),
+        review_id: None,
+        automation_id: None,
+        reminder_id: None,
+    }) else {
+        return;
+    };
+    state.ledger.mark_notifications_read(&[n.id]);
+    changed(app);
+}
+
 /// A scheduled run didn't happen on time. With "ask", the developer decides
 /// whether it runs now; with "skip", it's on the record.
 pub fn automation_missed(app: &tauri::AppHandle, a: &Automation, due: &str, ask: bool) {

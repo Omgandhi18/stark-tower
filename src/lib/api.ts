@@ -261,6 +261,21 @@ export const pendingReviews = () => commands.pendingReviews();
 /** A review was decided (or its agent went away). Payload: the review id. */
 export const onReviewResolved = (cb: (id: string) => void): Promise<UnlistenFn> => listen<string>("review://resolved", (evt) => cb(evt.payload));
 
+// ---- Auto mode: what would ask goes ahead in a conversation ----
+
+export const autoMode = (conversationId: number) => commands.autoMode(conversationId);
+
+/** Turn auto mode on or off for a conversation and the work delegated from its task. */
+export const setAutoMode = (conversationId: number, on: boolean) => ok(commands.setAutoMode(conversationId, on));
+
+export interface AutoModeChange {
+  conversationId: number;
+  on: boolean;
+}
+
+export const onAutoModeChanged = (cb: (change: AutoModeChange) => void): Promise<UnlistenFn> =>
+  listen<AutoModeChange>("automode://changed", (evt) => cb(evt.payload));
+
 export const getProject = () => commands.getProject();
 
 export const listProjects = () => commands.listProjects();

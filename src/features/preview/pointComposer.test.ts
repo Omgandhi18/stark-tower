@@ -29,6 +29,7 @@ describe("adding preview references to the composer", () => {
         rule: null,
         tier: null,
         taskId: null,
+        conversationId: null,
         grant: null,
         project: null,
       });

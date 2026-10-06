@@ -3,13 +3,16 @@ import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { Button, Dialog, InlineCode, cx } from "../../design";
 import type { ReviewRequest } from "../../lib/types";
 import { folderName } from "../../stores/workspace";
+import type { GrantScope } from "./grantScope";
 
-export type GrantScope = "project" | "everywhere";
+const PROJECT_OR_EVERYWHERE: readonly GrantScope[] = ["project", "everywhere"];
 
 interface GrantDialogProps {
   open: boolean;
   review: ReviewRequest;
   agentName: string;
+  /** Where the rule can apply, narrowest first. */
+  scopes?: readonly GrantScope[];
   onCancel: () => void;
   onConfirm: (scope: GrantScope) => void;
 }
@@ -18,12 +21,21 @@ interface GrantDialogProps {
  * Confirms an "always allow" rule: shows exactly what it allows and asks where.
  * Actions that normally never run on their own need an explicit acknowledgement.
  */
-export default function GrantDialog({ open, review, agentName, onCancel, onConfirm }: GrantDialogProps) {
+export default function GrantDialog({ open, review, agentName, scopes = PROJECT_OR_EVERYWHERE, onCancel, onConfirm }: GrantDialogProps) {
   const [scope, setScope] = useState<GrantScope>("project");
   const [understood, setUnderstood] = useState(false);
   const high = review.tier === "never";
   const project = review.project ? folderName(review.project) : "this project";
-  const where = scope === "project" ? `in ${project}` : "in every project";
+  const where = scope === "task" ? "in this task" : scope === "project" ? `in ${project}` : "in every project";
+  const options: Record<GrantScope, { title: string; detail: string }> = {
+    task: { title: "Only for this task", detail: "Other tasks and chats keep asking." },
+    project: { title: `Only in ${project}`, detail: "Other projects keep asking." },
+    everywhere: { title: "In every project", detail: "Every project, including ones you add later." },
+  };
+  const who =
+    scope === "task"
+      ? `${agentName} will be able to do this without asking you for the rest of this task.`
+      : `${agentName} and every other agent will be able to do this without asking you.`;
 
   return (
     <Dialog
@@ -33,7 +45,7 @@ export default function GrantDialog({ open, review, agentName, onCancel, onConfi
       tone={high ? "danger" : "attention"}
       icon={high ? ShieldAlert : ShieldCheck}
       title={<InlineCode text={`Always allow ${review.grant ?? "this"}?`} />}
-      description={`${agentName} and every other agent will be able to do this without asking you. You can take it back in Settings.`}
+      description={`${who} You can take it back in Settings.`}
       actions={
         <>
           <Button onClick={onCancel}>Cancel</Button>
@@ -53,14 +65,12 @@ export default function GrantDialog({ open, review, agentName, onCancel, onConfi
         </div>
         <fieldset className="grant-scope">
           <legend className="visually-hidden">Where it applies</legend>
-          {(["project", "everywhere"] as const).map((option) => (
+          {scopes.map((option) => (
             <label key={option} className={cx("grant-option", scope === option && "is-selected")}>
               <input type="radio" name="grant-scope" value={option} checked={scope === option} onChange={() => setScope(option)} />
               <span>
-                <span className="grant-option-title">{option === "project" ? `Only in ${project}` : "In every project"}</span>
-                <span className="grant-option-detail">
-                  {option === "project" ? "Other projects keep asking." : "Every project, including ones you add later."}
-                </span>
+                <span className="grant-option-title">{options[option].title}</span>
+                <span className="grant-option-detail">{options[option].detail}</span>
               </span>
             </label>
           ))}

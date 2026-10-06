@@ -6,6 +6,7 @@ import type { CheckRun, FileChange, ReviewRequest } from "../../lib/types";
 import DeliveryActions from "./DeliveryActions";
 import DiscardFile from "./DiscardFile";
 import AttentionCard from "../attention/AttentionCard";
+import AutoModeSwitch from "../automode/AutoModeSwitch";
 import { changeLetter, changeSummary } from "./taskPresentation";
 
 type RailTab = "attention" | "changes" | "checks";
@@ -14,6 +15,8 @@ const TOP_CHANGES = 5;
 
 interface TaskSideRailProps {
   taskId: string;
+  /** The conversation the task works in: its auto mode is switched here. */
+  conversationId: number | null;
   reviews: readonly ReviewRequest[];
   changes: readonly FileChange[];
   checks: readonly CheckRun[];
@@ -22,7 +25,7 @@ interface TaskSideRailProps {
 }
 
 /** What the task needs from you, what it changed, and how its checks went. */
-export default function TaskSideRail({ taskId, reviews, changes, checks, now, onShowFiles }: TaskSideRailProps) {
+export default function TaskSideRail({ taskId, conversationId, reviews, changes, checks, now, onShowFiles }: TaskSideRailProps) {
   const [tab, setTab] = useState<RailTab>(reviews.length ? "attention" : "checks");
   const tabs: TabItem<RailTab>[] = [
     { id: "attention", label: "Attention", count: reviews.length },
@@ -35,6 +38,7 @@ export default function TaskSideRail({ taskId, reviews, changes, checks, now, on
     <aside className="task-rail" aria-label="Task status">
       <Tabs tabs={tabs} value={tab} onChange={setTab} label="Task status" idPrefix="task-rail" />
       <div role="tabpanel" id={`task-rail-panel-${tab}`} aria-labelledby={`task-rail-tab-${tab}`} className="task-rail-body">
+        {tab === "attention" && conversationId !== null && <AutoModeSwitch conversationId={conversationId} className="task-rail-auto-mode" />}
         {tab === "attention" &&
           (reviews.length === 0 ? (
             <EmptyState compact icon={ShieldCheck} title="Nothing needs you" body="Approvals and questions from this task's agents show up here." />

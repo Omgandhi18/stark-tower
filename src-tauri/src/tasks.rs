@@ -604,6 +604,8 @@ pub fn time_out(app: &tauri::AppHandle, id: &str, minutes: i64) {
 pub fn begin_child(app: &tauri::AppHandle, from: &str, worker: &str, prompt: &str, cwd: &str) -> Option<(Task, i64)> {
     let state = engine(app)?;
     let parent = current(app, from);
+    // The work this comes from, for its auto mode: the parent task, else whatever the delegating agent is on.
+    let source = parent.clone().or_else(|| active_task_for(app, from));
     let inherited = parent.as_deref().and_then(|id| state.ledger.task(id)).map(|t| t.cwd);
     let cwd = inherited.as_deref().unwrap_or(cwd);
     let id = crate::chat::next_task_id();
@@ -622,6 +624,7 @@ pub fn begin_child(app: &tauri::AppHandle, from: &str, worker: &str, prompt: &st
     let cwd = prepared.cwd.as_str();
     state.workdirs.lock().unwrap().insert(worker.into(), cwd.into());
     let conversation = state.ledger.create_conversation(worker, cwd, &title);
+    crate::automode::inherit(app, from, source.as_deref(), conversation);
     state.ledger.begin_task(&id, Some(conversation), &current_branch(cwd).unwrap_or_default());
     let worker_name = crate::prompts::agent_name(app, worker);
     let origin = if from == BY_DEVELOPER { "You asked for this".to_string() } else { format!("{} delegated this", requester_name(app, from)) };

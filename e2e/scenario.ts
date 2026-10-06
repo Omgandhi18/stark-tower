@@ -83,6 +83,8 @@ export interface Scenario {
   /** The open conversation per agent. */
   current: Record<string, number>;
   reviews: ReviewRequest[];
+  /** Conversations in auto mode. */
+  autoMode?: number[];
   bugs: Bug[];
   health: RuntimeHealth;
   power: PowerState;
@@ -507,6 +509,7 @@ export function defaultScenario(): Scenario {
         rule: "Run database migrations",
         tier: "approval",
         taskId: "t-ci",
+        conversationId: null,
         grant: "`npm run` commands",
         project: API,
         created: ago(14),
@@ -523,6 +526,7 @@ export function defaultScenario(): Scenario {
         rule: null,
         tier: null,
         taskId: null,
+        conversationId: null,
         grant: null,
         project: null,
         created: ago(6),
@@ -539,6 +543,7 @@ export function defaultScenario(): Scenario {
         rule: null,
         tier: null,
         taskId: null,
+        conversationId: null,
         grant: null,
         project: null,
         created: ago(2),

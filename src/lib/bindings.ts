@@ -954,6 +954,23 @@ async pendingReviews() : Promise<ReviewRequest[]> {
     return await TAURI_INVOKE("pending_reviews");
 },
 /**
+ * Whether a conversation is in auto mode, where what would ask goes ahead.
+ */
+async autoMode(conversationId: number) : Promise<boolean> {
+    return await TAURI_INVOKE("auto_mode", { conversationId });
+},
+/**
+ * Turn auto mode on or off for a conversation, and the work delegated from its task.
+ */
+async setAutoMode(conversationId: number, on: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_auto_mode", { conversationId, on }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * What the agent runtime can do right now: installed provider CLIs, the data
  * store and the agent bridge.
  */
@@ -1492,7 +1509,7 @@ older: boolean }
  */
 export type Notification = { id: number; ts: number; 
 /**
- * approval | question | review | task_ready | task_blocked | check_failed | rule_used
+ * approval | question | review | task_ready | task_blocked | check_failed | rule_used | auto_mode
  */
 kind: string; 
 /**
@@ -1698,6 +1715,10 @@ tier: string | null;
  * The task the agent is working on, if any.
  */
 taskId: string | null; 
+/**
+ * The conversation it came from: the task's, else the agent's chat.
+ */
+conversationId: number | null; 
 /**
  * For `command` and `permission`: what a rule from this request would allow
  * ("`npm install` commands"); None when no rule can safely cover it.

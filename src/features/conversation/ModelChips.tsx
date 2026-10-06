@@ -1,30 +1,13 @@
-import { Box, ChevronDown, Gauge, type LucideIcon } from "lucide-react";
-import { ICON_SIZE, ICON_STROKE, Popover, type PopoverTriggerProps } from "../../design";
+import { Box, Gauge } from "lucide-react";
+import { Popover } from "../../design";
 import { useConfig } from "../../stores/config";
 import { useSystem } from "../../stores/system";
 import EffortSlider from "../agents/EffortSlider";
 import { ModelMenu } from "../agents/ModelPicker";
 import { defaultChoice, effortFor, effortLabel, effortLevels, findModel, nearestLevel, runningModel } from "../agents/modelSettings";
 import { useProviderModels } from "../agents/useProviderModels";
+import Chip from "./ComposerChip";
 import { saveQuickSettings } from "./quickSettings";
-
-interface ChipProps {
-  trigger: PopoverTriggerProps;
-  icon: LucideIcon;
-  text: string;
-  /** What it changes ("FRIDAY's model"). */
-  title: string;
-}
-
-function Chip({ trigger, icon: Icon, text, title }: ChipProps) {
-  return (
-    <button {...trigger} type="button" className="composer-chip" aria-haspopup="dialog" title={title}>
-      <Icon aria-hidden size={ICON_SIZE.sm} strokeWidth={ICON_STROKE} />
-      <span className="composer-chip-text">{text}</span>
-      <ChevronDown aria-hidden className="composer-chip-chevron" size={12} strokeWidth={ICON_STROKE} />
-    </button>
-  );
-}
 
 /** The agent's model and effort under its message box, each changed in place. */
 export default function ModelChips({ agentId, agentName }: { agentId: string; agentName: string }) {
