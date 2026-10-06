@@ -1,16 +1,18 @@
-import { useEffect, useId, useState } from "react";
 import { Settings2 } from "lucide-react";
-import { Button, InlineCode, SelectField, TextField, Toggle, cx } from "../../design";
-import { providerCapabilities, providerModels } from "../../lib/api";
+import { Button, InlineCode, SelectField, Toggle, cx } from "../../design";
+import { providerCapabilities } from "../../lib/api";
 import { signInCommandFor } from "../../lib/engines";
-import { errorMessage } from "../../lib/errors";
-import type { AgentConfig, AppConfig, ModelChoice } from "../../lib/types";
+import type { AgentConfig, AppConfig } from "../../lib/types";
 import { useOnce } from "../../lib/useOnce";
 import { useNavigation } from "../../stores/navigation";
 import { useSystem } from "../../stores/system";
 import { installSummary, signInSummary } from "../settings/providerDraft";
 import CapabilityMatrix from "./CapabilityMatrix";
+import EffortSlider from "./EffortSlider";
+import ModelPicker from "./ModelPicker";
 import type { AgentProblems } from "./agentDraft";
+import { defaultChoice, effortFor, effortLevels, runningModel } from "./modelSettings";
+import { useProviderModels } from "./useProviderModels";
 
 interface AgentProviderFieldsProps {
   draft: AgentConfig;
@@ -18,29 +20,6 @@ interface AgentProviderFieldsProps {
   config: AppConfig;
   problems: AgentProblems;
   set: <K extends keyof AgentConfig>(key: K, value: AgentConfig[K]) => void;
-}
-
-interface ModelList {
-  engine: string;
-  models: ModelChoice[] | null;
-  error: string | null;
-}
-
-/** The models an installed provider offers, as it lists them; asked again when the provider changes. */
-function useModels(engineId: string | undefined, installed: boolean): ModelList | null {
-  const [list, setList] = useState<ModelList | null>(null);
-  useEffect(() => {
-    if (!engineId || !installed) return;
-    let live = true;
-    providerModels(engineId).then(
-      (models) => live && setList({ engine: engineId, models, error: null }),
-      (e) => live && setList({ engine: engineId, models: null, error: errorMessage(e, "The provider didn't list its models.") }),
-    );
-    return () => {
-      live = false;
-    };
-  }, [engineId, installed]);
-  return list?.engine === engineId ? list : null;
 }
 
 /** What runs the agent: the provider and model, whether it's ready, and what it can do here. */
@@ -56,16 +35,34 @@ export default function AgentProviderFields({ draft, saved, config, problems, se
   const signedOut = engineHealth?.installed === true && engineHealth.signIn?.signedIn === false && (engine?.auth?.method ?? "cli-login") === "cli-login";
   const ready = engine?.enabled && engineHealth?.installed && engineHealth.signIn?.signedIn !== false;
   const helpersPossible = caps ? caps.helpers.support !== "no" : true;
-  const modelList = useModels(engine?.id, engineHealth?.installed === true);
-  const listId = useId();
+  const installed = engineHealth?.installed === true;
+  const modelList = useProviderModels(engine?.id, installed);
   const label = engine?.label ?? "the provider";
-  const modelHelper = !engineHealth?.installed
-    ? `Leave empty to use ${label}'s own default.`
+  const models = modelList?.models ?? [];
+  const engineModel = engine?.model ?? "";
+  const running = runningModel(models, draft.model ?? "", engineModel);
+  const fallback = defaultChoice(models, engineModel, label);
+  const listStatus = !installed ? `${label} isn't installed, so it can't list its models. You can still type a model ID.` : !modelList ? `Loading ${label}'s models…` : modelList.error;
+  const modelHelper = !installed
+    ? `Install ${label} to choose from its models.`
     : !modelList
       ? `Loading ${label}'s models…`
-      : modelList.error
-        ? modelList.error
-        : `${modelList.models?.length ?? 0} models from ${label}. Leave empty to use the default in ${label}'s own settings.`;
+      : (modelList.error ?? `${models.length} models from ${label}.`);
+
+  // A new model keeps the effort as closely as it can; a provider of another kind starts over.
+  const pickModel = (id: string) => {
+    set("model", id);
+    set("effort", effortFor(runningModel(models, id, engineModel), draft.effort ?? ""));
+  };
+  const pickEngine = (id: string) => {
+    set("engine", id);
+    const kind = (engineId: string | undefined) => config.engines.find((e) => e.id === engineId)?.kind;
+    if (kind(id) !== kind(draft.engine)) {
+      set("model", "");
+      set("effort", "");
+      set("helper_model", "");
+    }
+  };
 
   const engineOptions = config.engines.map((e) => ({
     value: e.id,
@@ -78,24 +75,19 @@ export default function AgentProviderFields({ draft, saved, config, problems, se
       <fieldset className="form-section">
         <legend className="form-section-title">Provider</legend>
         <div className="form-grid">
-          <SelectField label="Runs on" value={draft.engine ?? ""} options={engineOptions} error={problems.engine} onChange={(value) => set("engine", value)} />
-          <TextField
-            label="Model"
-            value={draft.model ?? ""}
-            placeholder={engine?.model ? `Provider default (${engine.model})` : "Provider default"}
-            spellCheck={false}
-            autoComplete="off"
-            list={listId}
-            helper={modelHelper}
-            onChange={(e) => set("model", e.target.value)}
-          />
-          <datalist id={listId}>
-            {(modelList?.models ?? []).map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name === m.id ? (m.default ? "Default" : "") : `${m.name}${m.default ? ", default" : ""}`}
-              </option>
-            ))}
-          </datalist>
+          <SelectField label="Runs on" value={draft.engine ?? ""} options={engineOptions} error={problems.engine} onChange={pickEngine} />
+          <ModelPicker label="Model" value={draft.model ?? ""} models={models} fallback={fallback} status={listStatus} helper={modelHelper} onChange={pickModel} />
+          {modelList?.models && (
+            <div className="agent-effort">
+              <EffortSlider
+                levels={effortLevels(models, running)}
+                defaultLevel={running?.default_effort ?? null}
+                value={draft.effort ?? ""}
+                modelName={running?.name ?? (draft.model || "This model")}
+                onChange={(level) => set("effort", level)}
+              />
+            </div>
+          )}
         </div>
         <div className="agent-provider-status">
           <span className={cx("provider-dot", ready ? "tone-success" : engine?.enabled ? "tone-attention" : "tone-idle")} aria-hidden />
@@ -130,13 +122,14 @@ export default function AgentProviderFields({ draft, saved, config, problems, se
           onChange={(on) => set("helpers", on)}
         />
         {engine?.kind === "claude-code" && (draft.helpers ?? true) && (
-          <TextField
+          <ModelPicker
             label="Helper model"
             value={draft.helper_model ?? ""}
-            placeholder="Claude Code's choice"
+            models={models}
+            fallback={{ name: "Claude Code's choice", note: "Claude Code picks a model for each helper" }}
+            status={listStatus}
             helper="A smaller model keeps side work quick and cheap."
-            spellCheck={false}
-            onChange={(e) => set("helper_model", e.target.value)}
+            onChange={(id) => set("helper_model", id)}
           />
         )}
       </fieldset>

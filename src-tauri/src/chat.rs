@@ -56,6 +56,8 @@ pub struct ChatSession {
     /// Which spawn this is. A stop, new chat or folder switch replaces the session
     /// under the same agent id; the replaced session's reader must leave it alone.
     gen: u64,
+    /// The model and effort it started on, so a change can take effect on the next message.
+    settings: String,
 }
 
 /// What the developer sends in one turn: words, and the files attached to them.
@@ -524,8 +526,29 @@ pub(crate) struct Launch {
     /// The agent may start temporary helpers, and on which model ("" = the provider's choice).
     pub helpers: bool,
     pub helper_model: String,
+    /// How hard the model thinks ("" = the model's own default).
+    pub effort: String,
     /// Starkline's attachments folder, which the agent may read.
     pub shared_dir: String,
+}
+
+/// The model and effort an agent's session runs on, compared to tell when they changed.
+fn settings_key(model: &str, effort: &str) -> String {
+    format!("{}\u{1f}{}", model.trim(), effort.trim())
+}
+
+/// The model and effort the agent is set to now.
+fn current_settings(app: &tauri::AppHandle, agent_id: &str) -> String {
+    let engine = engine_for_spawn(app, agent_id);
+    let effort = app
+        .state::<crate::AppState>()
+        .config
+        .lock()
+        .unwrap()
+        .agent(agent_id)
+        .map(|a| a.effort.clone())
+        .unwrap_or_default();
+    settings_key(&crate::prompts::agent_model(app, agent_id, &engine), &effort)
 }
 
 /// Gather an agent's launch settings; fails when its provider's CLI isn't installed.
@@ -533,13 +556,13 @@ pub(crate) fn launch_for(app: &tauri::AppHandle, agent_id: &str, cwd: &str, resu
     let engine = engine_for_spawn(app, agent_id);
     let program = resolve_program(&engine.command).ok_or_else(|| missing_engine_error(&engine))?;
     let state = app.state::<crate::AppState>();
-    let (helpers, helper_model) = state
+    let (helpers, helper_model, effort) = state
         .config
         .lock()
         .unwrap()
         .agent(agent_id)
-        .map(|a| (a.helpers, a.helper_model.clone()))
-        .unwrap_or((true, String::new()));
+        .map(|a| (a.helpers, a.helper_model.clone(), a.effort.clone()))
+        .unwrap_or((true, String::new(), String::new()));
     Ok(Launch {
         model: crate::prompts::agent_model(app, agent_id, &engine),
         program,
@@ -555,6 +578,7 @@ pub(crate) fn launch_for(app: &tauri::AppHandle, agent_id: &str, cwd: &str, resu
         node: resolve_program("node").unwrap_or_else(|| "node".into()),
         helpers,
         helper_model,
+        effort,
         shared_dir: attachments::root(app).to_string_lossy().into_owned(),
         engine,
     })
@@ -672,6 +696,10 @@ fn build_headless(launch: &Launch) -> Command {
         if !model.trim().is_empty() {
             args.push("--model".into());
             args.push(model.to_string());
+        }
+        if !launch.effort.trim().is_empty() {
+            args.push("--effort".into());
+            args.push(launch.effort.trim().to_string());
         }
 
         // The Stark bridge MCP: ask_human (everyone) + delegate (JARVIS only),
@@ -1052,6 +1080,7 @@ pub fn start_session(
         .try_state::<crate::AppState>()
         .and_then(|s| s.ledger.conversation_session(s.ledger.active_conversation(agent_id)));
     let launch = launch_for(app, agent_id, cwd, resume)?;
+    let settings = settings_key(&launch.model, &launch.effort);
     let gen = SESSION_GEN.fetch_add(1, Ordering::Relaxed);
     let (child, input) = match launch.engine.kind.as_str() {
         "codex" => crate::codex::start_chat(app, &launch, gen)?,
@@ -1063,7 +1092,7 @@ pub fn start_session(
         .sessions
         .lock()
         .unwrap()
-        .insert(agent_id.to_string(), ChatSession { child, input, cwd: cwd.to_string(), gen });
+        .insert(agent_id.to_string(), ChatSession { child, input, cwd: cwd.to_string(), gen, settings });
     crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
     Ok(())
 }
@@ -1105,15 +1134,26 @@ pub fn send(
     sock_path: &str,
 ) -> Result<(), String> {
     // Start a session if none exists, or restart it if the target directory
-    // changed (so switching an agent to another repo just works).
-    let need_start = {
+    // changed (so switching an agent to another repo just works), or if its model
+    // or effort changed while it was between turns: the conversation resumes on the
+    // new settings. A turn in progress is never cut short for that; the change waits.
+    let settings = current_settings(app, agent_id);
+    let (need_start, switched) = {
         let state = app.state::<crate::AppState>();
+        let busy = matches!(state.statuses.lock().unwrap().get(agent_id), Some(AgentStatus::Working | AgentStatus::Thinking));
         let map = state.chat.sessions.lock().unwrap();
         match map.get(agent_id) {
-            None => true,
-            Some(s) => s.cwd != cwd,
+            None => (true, false),
+            Some(s) if s.cwd != cwd => (true, false),
+            Some(s) => {
+                let switched = s.settings != settings && !busy;
+                (switched, switched)
+            }
         }
     };
+    if switched {
+        note(app, agent_id, &switch_note(app, agent_id));
+    }
     if need_start {
         {
             let state = app.state::<crate::AppState>();
@@ -1142,6 +1182,19 @@ pub fn send(
 
     crate::pty::emit_status(app, agent_id, AgentStatus::Thinking);
     Ok(())
+}
+
+/// "Now on claude-opus-5-5 at high effort." for the chat, when a session restarts on new settings.
+fn switch_note(app: &tauri::AppHandle, agent_id: &str) -> String {
+    let engine = engine_for_spawn(app, agent_id);
+    let model = crate::prompts::agent_model(app, agent_id, &engine);
+    let effort = app.state::<crate::AppState>().config.lock().unwrap().agent(agent_id).map(|a| a.effort.clone()).unwrap_or_default();
+    let model = if model.trim().is_empty() { format!("{}'s default model", engine.label) } else { crate::providers::model_name(model.trim()) };
+    if effort.trim().is_empty() {
+        format!("Now on {model}, at its own effort.")
+    } else {
+        format!("Now on {model} at {} effort.", crate::providers::effort_words(effort.trim()))
+    }
 }
 
 pub fn stop(app: &tauri::AppHandle, agent_id: &str) {

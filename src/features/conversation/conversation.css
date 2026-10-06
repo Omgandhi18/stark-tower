@@ -598,6 +598,39 @@
   white-space: nowrap;
 }
 
+/* The agent's model and effort, each opening its own picker. */
+.composer-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  max-width: 168px;
+  height: 26px;
+  padding: 0 6px 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.composer-chip:hover { background: var(--surface-hover); color: var(--text); }
+.composer-chip[aria-expanded="true"] { border-color: var(--border); background: var(--surface-selected); color: var(--text); }
+.composer-chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.composer-chip-chevron { flex: none; color: var(--text-muted); }
+
+.chip-popover.effort-popover { width: 300px; padding: 12px 14px 4px; }
+.chip-popover-note {
+  flex: none;
+  margin: 0;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.effort-popover .chip-popover-note { margin: 10px -14px 0; padding: 8px 14px 8px; }
+
 .chat-panel.is-compact .chat-composer-hint {
   visibility: hidden;
 }

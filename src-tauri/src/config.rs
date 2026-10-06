@@ -118,6 +118,9 @@ pub struct AgentConfig {
     /// Model override ("" = use the engine's default model).
     #[serde(default)]
     pub model: String,
+    /// How hard the model thinks: one of the levels it takes ("" = the model's own default).
+    #[serde(default)]
+    pub effort: String,
     /// Editable character/system prompt.
     #[serde(default)]
     pub personality: String,
@@ -381,6 +384,7 @@ pub fn default_agents() -> Vec<AgentConfig> {
         .map(|a| AgentConfig {
             personality: default_personality(&a.id),
             model: String::new(),
+            effort: String::new(),
             enabled: true,
             helpers: true,
             helper_model: String::new(),

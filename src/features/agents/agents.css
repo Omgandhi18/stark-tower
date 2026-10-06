@@ -287,6 +287,9 @@ form.agent-editor-body {
 }
 
 /* ---- Provider tab ------------------------------------------------------------------ */
+/* Effort belongs to the model, so it sits under it. */
+.agent-effort { grid-column: 2; }
+
 .agent-provider-status {
   display: flex;
   align-items: center;

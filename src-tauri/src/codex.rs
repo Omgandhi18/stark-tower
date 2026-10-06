@@ -53,6 +53,8 @@ struct Codex {
     rpc: Rpc,
     turns: Mutex<Turns>,
     log: Mutex<VecDeque<String>>,
+    /// The agent's effort level for each turn ("" = the model's own).
+    effort: String,
 }
 
 /// The sandbox each turn runs in: writes inside the project, no network. A
@@ -344,11 +346,13 @@ impl Codex {
         };
         match active {
             Some(running) => self.rpc.request_then("turn/steer", json!({ "threadId": thread, "input": turn_input(turn), "expectedTurnId": running }), report),
-            None => self.rpc.request_then(
-                "turn/start",
-                json!({ "threadId": thread, "input": turn_input(turn), "approvalPolicy": APPROVAL_POLICY, "sandboxPolicy": sandbox() }),
-                report,
-            ),
+            None => {
+                let mut params = json!({ "threadId": thread, "input": turn_input(turn), "approvalPolicy": APPROVAL_POLICY, "sandboxPolicy": sandbox() });
+                if !self.effort.is_empty() {
+                    params["effort"] = json!(self.effort);
+                }
+                self.rpc.request_then("turn/start", params, report)
+            }
         }
     }
 }
@@ -372,6 +376,7 @@ fn connect(app: &tauri::AppHandle, launch: &Launch, sink: Sink, gen: Option<u64>
         rpc: Rpc::new(stdin),
         turns: Mutex::new(Turns::default()),
         log: Mutex::new(VecDeque::new()),
+        effort: launch.effort.trim().to_string(),
     });
     // Codex logs to stderr; it's read continuously (a full pipe would stall it) and the tail kept.
     if let Some(stderr) = stderr {
@@ -465,8 +470,13 @@ pub(crate) fn list_models(program: &str) -> Result<Vec<crate::providers::ModelCh
     })();
     let _ = child.kill();
     let _ = child.wait();
-    let models = listed?;
-    Ok(models["data"]
+    Ok(parse_model_list(&listed?))
+}
+
+/// Codex's `model/list` answer: each visible model with the reasoning efforts it takes and its
+/// own default. Codex lists its newest first, so all but the first few go under "More models".
+pub(crate) fn parse_model_list(models: &Value) -> Vec<crate::providers::ModelChoice> {
+    models["data"]
         .as_array()
         .map(|all| {
             all.iter()
@@ -474,11 +484,32 @@ pub(crate) fn list_models(program: &str) -> Result<Vec<crate::providers::ModelCh
                 .filter_map(|m| {
                     let id = m["model"].as_str()?.to_string();
                     let name = m["displayName"].as_str().filter(|n| !n.is_empty()).unwrap_or(&id).to_string();
-                    Some(crate::providers::ModelChoice { id, name, default: m["isDefault"] == true })
+                    let mut efforts: Vec<String> = m["supportedReasoningEfforts"]
+                        .as_array()
+                        .map(|levels| {
+                            levels
+                                .iter()
+                                .filter_map(|l| l["reasoningEffort"].as_str().or_else(|| l.as_str()).map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    crate::providers::sort_efforts(&mut efforts);
+                    let default_effort = m["defaultReasoningEffort"].as_str().filter(|d| efforts.iter().any(|e| e == d)).map(str::to_string);
+                    Some(crate::providers::ModelChoice {
+                        id,
+                        name,
+                        default: m["isDefault"] == true,
+                        description: m["description"].as_str().unwrap_or("").to_string(),
+                        efforts,
+                        default_effort,
+                        older: false,
+                    })
                 })
+                .enumerate()
+                .map(|(i, model)| crate::providers::ModelChoice { older: i >= crate::providers::MAIN_MODELS, ..model })
                 .collect()
         })
-        .unwrap_or_default())
+        .unwrap_or_default()
 }
 
 /// An agent's chat session on Codex.
@@ -529,6 +560,23 @@ pub(crate) fn run_once(app: &tauri::AppHandle, launch: &Launch, task: &str, sink
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn lists_models_with_the_efforts_each_one_takes() {
+        let reply = json!({ "data": [
+            { "model": "gpt-new", "displayName": "GPT New", "isDefault": true, "description": "Latest.", "defaultReasoningEffort": "low",
+              "supportedReasoningEfforts": [{ "reasoningEffort": "ultra" }, { "reasoningEffort": "low" }, { "reasoningEffort": "high" }] },
+            { "model": "gpt-hidden", "hidden": true },
+            { "model": "gpt-a" }, { "model": "gpt-b" }, { "model": "gpt-c" }, { "model": "gpt-old", "defaultReasoningEffort": "medium" }
+        ] });
+        let models = parse_model_list(&reply);
+        assert_eq!(models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), vec!["gpt-new", "gpt-a", "gpt-b", "gpt-c", "gpt-old"]);
+        assert_eq!(models[0].efforts, vec!["low", "high", "ultra"]);
+        assert_eq!(models[0].default_effort.as_deref(), Some("low"));
+        assert!(models[0].default && models[0].description == "Latest.");
+        assert!(models[4].older && !models[3].older, "the first few up front, the rest under More models");
+        assert_eq!(models[4].default_effort, None, "a default it doesn't list isn't offered");
+    }
 
     #[test]
     fn plans_become_the_task_engines_todo_list() {
@@ -590,6 +638,7 @@ pub(crate) mod tests {
             node: chat::resolve_program("node").unwrap_or_else(|| "node".into()),
             helpers: false,
             helper_model: String::new(),
+            effort: String::new(),
             shared_dir: String::new(),
         }
     }

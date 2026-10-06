@@ -114,6 +114,19 @@ const CAPABILITIES: ProviderCapabilities[] = [
   },
 ];
 
+const EVERY_EFFORT = ["low", "medium", "high", "xhigh", "max"];
+
+/** A Claude model as the backend lists it. */
+const claudeModel = (id: string, name: string, description: string, efforts: string[], defaultEffort: string | null, older = false): ModelChoice => ({
+  id,
+  name,
+  default: false,
+  description,
+  efforts,
+  default_effort: defaultEffort,
+  older,
+});
+
 const APP = "/Users/dev/code/checkout-web";
 const API = "/Users/dev/code/payments-api";
 
@@ -634,9 +647,12 @@ export function defaultScenario(): Scenario {
     capabilities: CAPABILITIES,
     models: {
       "claude-code": [
-        { id: "opus", name: "Opus, the most capable", default: false },
-        { id: "sonnet", name: "Sonnet, fast and capable", default: false },
-        { id: "haiku", name: "Haiku, the quickest", default: false },
+        claudeModel("claude-opus-5-5", "Opus 5.5", "The current Opus: deep, careful work", EVERY_EFFORT, "medium"),
+        claudeModel("claude-fable-5-1", "Fable 5.1", "The most capable, for the hardest, longest work", EVERY_EFFORT, "high"),
+        claudeModel("claude-sonnet-5-5", "Sonnet 5.5", "Fast and capable for everyday work", EVERY_EFFORT, "high"),
+        claudeModel("claude-haiku-4-5", "Haiku 4.5", "The quickest, for simple tasks", [], null),
+        claudeModel("claude-sonnet-5", "Sonnet 5", "The previous Sonnet", EVERY_EFFORT, "xhigh", true),
+        claudeModel("claude-opus-4-6", "Opus 4.6", "An earlier Opus", ["low", "medium", "high", "max"], "high", true),
       ],
     },
   };

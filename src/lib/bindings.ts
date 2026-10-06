@@ -575,6 +575,10 @@ engine?: string;
  */
 model?: string; 
 /**
+ * How hard the model thinks: one of the levels it takes ("" = the model's own default).
+ */
+effort?: string; 
+/**
  * Editable character/system prompt.
  */
 personality?: string; home_x: number; home_y: number; enabled?: boolean; 
@@ -783,13 +787,29 @@ export type LedgerEntry = { id: number; ts: number; agent_id: string; kind: stri
  */
 export type ModelChoice = { 
 /**
- * What the provider is told ("gpt-5.6-sol", "anthropic/claude-sonnet-4-5", "sonnet").
+ * What the provider is told ("gpt-5.6-sol", "anthropic/claude-sonnet-4-5", "claude-opus-5-5").
  */
 id: string; name: string; 
 /**
  * The provider's own default.
  */
-default: boolean }
+default: boolean; 
+/**
+ * What it's for, in the provider's words ("" when it doesn't say).
+ */
+description: string; 
+/**
+ * The effort levels it takes, lowest first; empty when it has none to choose.
+ */
+efforts: string[]; 
+/**
+ * The level it runs at when the agent doesn't choose one, where the provider says.
+ */
+default_effort: string | null; 
+/**
+ * An older or less common model: offered under "More models" rather than up front.
+ */
+older: boolean }
 /**
  * Something that needed or may interest the developer, kept until they archive it.
  */
