@@ -159,6 +159,18 @@ function install(scenario: Scenario) {
     emit("notifications://changed", null);
   };
 
+  let nextTerminal = state.terminals.length;
+  const terminalChannels = new Map<string, { callback: number; index: number }>();
+  const terminalOutput = (id: string, text: string, exit_code: number | null = null) => {
+    const terminal = state.terminals.find((t) => t.id === id);
+    if (!terminal) return;
+    const data = Array.from(new TextEncoder().encode(text));
+    terminal.output = [...terminal.output, ...data].slice(-256 * 1024);
+    terminal.offset += data.length;
+    const channel = terminalChannels.get(id);
+    if (channel) callbacks.get(channel.callback)?.({ index: channel.index++, message: { data, offset: terminal.offset, exit_code } });
+  };
+
   const commands: Record<string, (args: Json) => unknown> = {
     "plugin:event|listen": (args) => {
       const event = String(args.event);
@@ -177,6 +189,44 @@ function install(scenario: Scenario) {
     "plugin:window|close": () => null,
     "plugin:window|set_fullscreen": () => null,
     "plugin:window|is_fullscreen": () => false,
+    terminal_list: () => state.terminals.map((t) => ({ id: t.id, folder: t.folder, title: t.title, shell: t.shell, alive: t.alive, exit_code: t.exit_code, program_running: t.program_running, note: t.note })),
+    terminal_open: (args) => {
+      const id = `terminal-${nextTerminal++}`;
+      const info = { id, folder: String(args.folder || "/Users/dev"), title: "zsh", shell: "zsh", alive: true, exit_code: null, program_running: false, note: args.folder ? null : "No project folder was selected. This terminal opened in your home folder." };
+      state.terminals.push({ ...info, output: Array.from(new TextEncoder().encode("$ ")), offset: 2, input: "" });
+      return info;
+    },
+    terminal_attach: (args) => {
+      const id = String(args.id);
+      const channel = args.channel as { id: number };
+      terminalChannels.set(id, { callback: channel.id, index: 0 });
+      const terminal = state.terminals.find((t) => t.id === id)!;
+      return { data: terminal.output, offset: terminal.offset, exit_code: terminal.exit_code };
+    },
+    terminal_write: (args) => {
+      const terminal = state.terminals.find((t) => t.id === args.id)!;
+      for (const char of String(args.data)) {
+        if (char === "\r" || char === "\n") {
+          const command = terminal.input;
+          terminal.input = "";
+          if (command === "exit") {
+            terminal.alive = false; terminal.exit_code = 0;
+            terminalOutput(terminal.id, "\r\n", 0);
+          } else if (command === "npm run dev") {
+            terminal.program_running = true; terminal.title = command;
+            terminalOutput(terminal.id, "\r\n\x1b]0;npm run dev\x07Server ready at http://localhost:5173\r\n");
+          } else {
+            terminalOutput(terminal.id, `\r\n${command.startsWith("echo ") ? command.slice(5) + "\r\n" : ""}$ `);
+          }
+        } else if (char === "\x7f") {
+          terminal.input = terminal.input.slice(0, -1); terminalOutput(terminal.id, "\b \b");
+        } else { terminal.input += char; terminalOutput(terminal.id, char); }
+      }
+      return null;
+    },
+    terminal_resize: () => null,
+    terminal_title: (args) => { const terminal = state.terminals.find((t) => t.id === args.id); if (terminal) terminal.title = String(args.title); return null; },
+    terminal_close: (args) => { state.terminals = state.terminals.filter((t) => t.id !== args.id); terminalChannels.delete(String(args.id)); return null; },
     list_agents: () => roster(),
     get_config: () => state.config,
     list_projects: () => state.projects,

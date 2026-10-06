@@ -329,3 +329,13 @@ export async function pickFiles(title: string): Promise<string[]> {
   if (Array.isArray(chosen)) return chosen;
   return typeof chosen === "string" ? [chosen] : [];
 }
+
+// ---- Developer terminals ----
+export const terminalOpen = (folder: string, cols: number, rows: number) => ok(commands.terminalOpen(folder, cols, rows));
+export const terminalWrite = (id: string, data: string) => ok(commands.terminalWrite(id, data));
+export const terminalResize = (id: string, cols: number, rows: number) => ok(commands.terminalResize(id, cols, rows));
+export const terminalClose = (id: string) => ok(commands.terminalClose(id));
+export const terminalList = () => commands.terminalList();
+export const terminalAttach = (id: string, channel: Parameters<typeof commands.terminalAttach>[1]) => ok(commands.terminalAttach(id, channel));
+
+export const terminalTitle = (id: string, title: string) => ok(commands.terminalTitle(id, title));

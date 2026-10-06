@@ -31,6 +31,7 @@ mod simulator;
 #[cfg(target_os = "macos")]
 mod snapshot;
 mod tasks;
+mod terminal;
 mod tone;
 mod update;
 
@@ -46,6 +47,7 @@ use tauri::{Emitter, Manager};
 /// Shared application state, managed by Tauri.
 pub struct AppState {
     pub pty: PtyManager,
+    pub terminals: terminal::TerminalManager,
     pub chat: chat::ChatManager,
     pub ledger: Ledger,
     pub roster: Mutex<Vec<Agent>>,
@@ -1385,6 +1387,75 @@ fn spawn_agent(
 
 #[tauri::command]
 #[specta::specta]
+async fn terminal_open(
+    state: tauri::State<'_, AppState>,
+    folder: String,
+    cols: u16,
+    rows: u16,
+) -> Result<terminal::TerminalInfo, String> {
+    let manager = state.terminals.clone();
+    tauri::async_runtime::spawn_blocking(move || manager.open(&folder, cols, rows))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn terminal_write(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    data: String,
+) -> Result<(), String> {
+    let manager = state.terminals.clone();
+    tauri::async_runtime::spawn_blocking(move || manager.write(&id, &data))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+#[specta::specta]
+fn terminal_resize(
+    state: tauri::State<AppState>,
+    id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    state.terminals.resize(&id, cols, rows)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn terminal_close(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    let manager = state.terminals.clone();
+    tauri::async_runtime::spawn_blocking(move || manager.close(&id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+#[specta::specta]
+fn terminal_list(state: tauri::State<AppState>) -> Vec<terminal::TerminalInfo> {
+    state.terminals.list()
+}
+
+#[tauri::command]
+#[specta::specta]
+fn terminal_title(state: tauri::State<AppState>, id: String, title: String) -> Result<(), String> {
+    state.terminals.title(&id, title)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn terminal_attach(
+    state: tauri::State<AppState>,
+    id: String,
+    channel: tauri::ipc::Channel<terminal::TerminalOutput>,
+) -> Result<terminal::TerminalOutput, String> {
+    state.terminals.attach(&id, channel)
+}
+
+#[tauri::command]
+#[specta::specta]
 fn pty_write(app: tauri::AppHandle, agent_id: String, data: String) -> Result<(), String> {
     pty::write_bytes(&app, &agent_id, data.as_bytes())
 }
@@ -1605,6 +1676,13 @@ fn specta_builder() -> tauri_specta::Builder {
             add_project,
             remove_project,
             spawn_agent,
+            terminal_open,
+            terminal_write,
+            terminal_resize,
+            terminal_close,
+            terminal_list,
+            terminal_attach,
+            terminal_title,
             pty_write,
             pty_resize,
             kill_agent,
@@ -1710,6 +1788,7 @@ pub fn run() {
             app.manage(browser::Browser::default());
             app.manage(AppState {
                 pty: PtyManager::default(),
+                terminals: terminal::TerminalManager::default(),
                 chat: chat::ChatManager::default(),
                 ledger,
                 roster: Mutex::new(roster),

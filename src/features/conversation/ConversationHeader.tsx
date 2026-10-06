@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, FolderOpen, MessageSquarePlus, PanelRight } from "lucide-react";
+import { ArrowLeft, FolderOpen, MessageSquarePlus, PanelRight, SquareTerminal } from "lucide-react";
 import { Button, IconButton, Portrait, SelectField, StatusPill } from "../../design";
 import { errorMessage } from "../../lib/errors";
 import { formatCost, formatTokens } from "../../lib/format";
@@ -9,6 +9,7 @@ import { selectThread, useChats } from "../../stores/chats";
 import { useConfig } from "../../stores/config";
 import { useNavigation } from "../../stores/navigation";
 import { usePreview } from "../../stores/preview";
+import { useTerminal } from "../../stores/terminal";
 import { useUsage } from "../../stores/usage";
 import { useWorkspace } from "../../stores/workspace";
 import { engineLabel } from "../agents/display";
@@ -25,6 +26,8 @@ export default function ConversationHeader({ agent }: { agent: Agent }) {
   const usage = useUsage((s) => s.byAgent[agent.id]);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const terminalOpen = useTerminal((s) => s.open);
+  const toggleTerminal = useTerminal((s) => s.toggle);
   const previewing = usePreview((s) => s.open);
   const togglePreview = usePreview((s) => s.toggle);
   const status = AGENT_STATUS[agent.status];
@@ -78,6 +81,7 @@ export default function ConversationHeader({ agent }: { agent: Agent }) {
         <Button icon={MessageSquarePlus} disabled={starting} onClick={newChat}>
           New chat
         </Button>
+        <IconButton icon={SquareTerminal} label="Terminal" aria-pressed={terminalOpen} onClick={toggleTerminal} />
         <IconButton icon={PanelRight} label={previewing ? "Hide the browser and simulator" : "Show the browser and simulator"} aria-pressed={previewing} onClick={togglePreview} />
       </div>
     </header>

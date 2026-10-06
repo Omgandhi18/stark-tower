@@ -1,6 +1,7 @@
 // What the fake backend starts with in end-to-end tests: the default roster,
 // two projects, work in every state, and one of each kind of request.
 // Test fixture only; the app itself never shows this data.
+import type { TerminalInfo } from "../src/lib/bindings";
 import type {
   AgentConfig,
   AgentStatus,
@@ -76,6 +77,7 @@ export interface Scenario {
   reminders: Reminder[];
   /** The built-in browser's page. */
   browser: BrowserPage;
+  terminals: Array<TerminalInfo & { output: number[]; offset: number; input: string }>;
   /** Xcode's simulators, and a screenshot standing in for every frame. */
   simulator: SimulatorStatus & { frame: string };
 }
@@ -656,6 +658,7 @@ export function defaultScenario(): Scenario {
     ],
     ...automations(),
     reminders: reminders(),
+    terminals: [],
     browser: { url: "", title: "", loading: false },
     simulator: {
       available: true,

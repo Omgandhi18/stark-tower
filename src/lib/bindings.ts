@@ -505,6 +505,57 @@ async spawnAgent(agentId: string, cols: number, rows: number) : Promise<Result<n
     else return { status: "error", error: e  as any };
 }
 },
+async terminalOpen(folder: string, cols: number, rows: number) : Promise<Result<TerminalInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("terminal_open", { folder, cols, rows }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async terminalWrite(id: string, data: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("terminal_write", { id, data }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async terminalResize(id: string, cols: number, rows: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("terminal_resize", { id, cols, rows }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async terminalClose(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("terminal_close", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async terminalList() : Promise<TerminalInfo[]> {
+    return await TAURI_INVOKE("terminal_list");
+},
+async terminalAttach(id: string, channel: TAURI_CHANNEL<TerminalOutput>) : Promise<Result<TerminalOutput, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("terminal_attach", { id, channel }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async terminalTitle(id: string, title: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("terminal_title", { id, title }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async ptyWrite(agentId: string, data: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("pty_write", { agentId, data }) };
@@ -1304,6 +1355,7 @@ export type Support = "yes" |
  * Works in part (no built-in provider is limited today, but the interface shows it).
  */
 "limited" | "no"
+export type TAURI_CHANNEL<TSend> = null
 /**
  * A unit of work with an accountable owner. The developer starts one from Work;
  * a delegation starts a child of the delegating agent's task. It is durable, so
@@ -1382,6 +1434,8 @@ summary: string;
  * Kind-specific details as JSON ("" when there are none).
  */
 data: string }
+export type TerminalInfo = { id: string; folder: string; title: string; shell: string; alive: boolean; exit_code: number | null; program_running: boolean; note: string | null }
+export type TerminalOutput = { data: number[]; offset: number; exit_code: number | null }
 export type Tone = { 
 /**
  * Serious (0) to playful.
