@@ -404,8 +404,10 @@ impl TerminalManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// How long a login shell may take to start and answer: a busy test machine runs many at once.
+    const SHELL_START: Duration = Duration::from_secs(20);
     fn wait_for(manager: &TerminalManager, id: &str, text: &str) {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + SHELL_START;
         loop {
             let output = manager
                 .sessions
@@ -443,6 +445,8 @@ mod tests {
         let folder =
             std::env::temp_dir().join(format!("starkline-terminal-{}", std::process::id()));
         std::fs::create_dir_all(&folder).unwrap();
+        // The shell reports the real path, and macOS keeps its temp folder behind a symlink.
+        let folder = folder.canonicalize().unwrap();
         let info = manager
             .spawn(folder.to_str().unwrap(), "/bin/bash", 80, 24)
             .unwrap();
@@ -465,7 +469,7 @@ mod tests {
             100
         );
         manager.write(&info.id, "sleep 30\n").unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + SHELL_START;
         while !manager.list()[0].program_running {
             assert!(Instant::now() < deadline, "foreground job wasn't detected");
             std::thread::sleep(FRAME);
@@ -486,7 +490,7 @@ mod tests {
             .write(&info.id, "printf 'retained-output\\n'; exit 7\n")
             .unwrap();
         wait_for(&manager, &info.id, "retained-output");
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + SHELL_START;
         while manager.list()[0].alive {
             assert!(Instant::now() < deadline);
             std::thread::sleep(FRAME);
@@ -522,7 +526,7 @@ mod tests {
         manager
             .write(&info.id, "printf '\\360\\237\\232\\200\\n'\n")
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + SHELL_START;
         while !String::from_utf8_lossy(&bytes).contains('🚀') {
             let json = rx
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
@@ -553,7 +557,7 @@ mod tests {
             )
             .unwrap();
         let pattern = regex::Regex::new("background-pid-([0-9]+)").unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + SHELL_START;
         let pid = loop {
             let output = manager.sessions.lock().unwrap()[&info.id]
                 .output
