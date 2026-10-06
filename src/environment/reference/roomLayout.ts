@@ -1,10 +1,10 @@
 // What the Environment's UI needs to know about a room beyond its pixels: the
-// world it spans, its stations, who can walk, whose helpers the bots are, and
-// where the agent card goes.
+// world it spans, its stations, how tall each character stands when up and
+// about, whose helpers the bots are, and where the agent card goes.
 import type { CSSProperties } from "react";
 import type { Agent } from "../../lib/types";
 import type { Point, Size } from "./camera";
-import { CHARACTERS } from "./characterAssets";
+import { characterArt } from "../life/characters";
 import { rectHeight, rectWidth } from "./referenceAssets";
 import type { CardJson, Room } from "./rooms";
 import { slotsOf, type Slot } from "./slots";
@@ -13,8 +13,8 @@ export interface RoomLayout {
   world: Size;
   slots: readonly Slot[];
   orchestratorSlot?: string;
-  /** The station whose character can get up and walk, and how tall they stand. */
-  mobile: { slot: string; height: number } | null;
+  /** How tall each station's character stands when up and about (px), so they can be clicked while they walk. */
+  heights: Readonly<Record<string, number>>;
   /** Whose helpers the bots stand for; null for everyone's. */
   helperSlot: string | null;
   /** Every painted helper (and the "+1" badge where one is painted): the mockup's state. */
@@ -26,12 +26,16 @@ export interface RoomLayout {
 
 export function layoutOf(room: Room): RoomLayout {
   const slots = slotsOf(room);
-  const [mobileSlot, actor] = Object.entries(room.scene.actors ?? {})[0] ?? [];
+  const heights: Record<string, number> = {};
+  for (const slot of slots) {
+    const art = characterArt(room.folder, slot.figure);
+    if (art) heights[slot.id] = art.json.height;
+  }
   return {
     world: { width: rectWidth(room.rect), height: rectHeight(room.rect) },
     slots,
     orchestratorSlot: room.scene.orchestratorSlot,
-    mobile: mobileSlot && actor ? { slot: mobileSlot, height: CHARACTERS[actor.character].height } : null,
+    heights,
     helperSlot: room.scene.helperSlot ?? null,
     referenceHelpers: room.scene.helpers.length,
     referenceSlot: slots.find((s) => s.id === room.scene.card.slot) ?? slots[0],

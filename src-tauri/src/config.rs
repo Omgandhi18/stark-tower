@@ -15,7 +15,7 @@ fn yes() -> bool {
     true
 }
 fn cfg_version() -> u32 {
-    9
+    10
 }
 
 /// v4→v5: the floor became a full facility with a desk bullpen; seat the built-in
@@ -537,6 +537,16 @@ pub fn load(path: &std::path::Path) -> AppConfig {
         }
         cfg.version = 9;
     }
+    // v9 → v10: DUM-E gets a face of its own (a helper bot) instead of sharing VERONICA's.
+    // Only a maintenance agent still on the old shared look changes.
+    if cfg.version < 10 {
+        for a in cfg.agents.iter_mut() {
+            if a.kind == AgentKind::Maintenance && a.figure == "operative" {
+                a.figure = "helperbot".into();
+            }
+        }
+        cfg.version = 10;
+    }
     // Backfill personalities that were left empty, and tone dials (new in v9).
     for a in cfg.agents.iter_mut() {
         if a.personality.trim().is_empty() {
@@ -675,6 +685,29 @@ mod tests {
         assert!(c.engine("claude-code").is_some());
         assert!(c.agents.iter().any(|a| a.kind == AgentKind::Orchestrator));
         assert_eq!(c.roster().len(), c.agents.iter().filter(|a| a.enabled).count());
+    }
+
+    #[test]
+    fn dum_e_gets_its_own_face_unless_you_chose_one() {
+        let dir = tmp_dir("dume-face");
+        let path = dir.join("config.json");
+        let mut old = default_config();
+        old.version = 9;
+        for a in old.agents.iter_mut().filter(|a| a.kind == AgentKind::Maintenance) {
+            a.figure = "operative".into();
+        }
+        std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
+        let loaded = load(&path);
+        assert_eq!(loaded.agent("dum-e").unwrap().figure, "helperbot");
+        assert_eq!(loaded.agent("veronica").unwrap().figure, "operative", "VERONICA keeps her look");
+
+        let mut chosen = default_config();
+        chosen.version = 9;
+        for a in chosen.agents.iter_mut().filter(|a| a.kind == AgentKind::Maintenance) {
+            a.figure = "recon".into();
+        }
+        std::fs::write(&path, serde_json::to_string(&chosen).unwrap()).unwrap();
+        assert_eq!(load(&path).agent("dum-e").unwrap().figure, "recon", "a look you picked stays");
     }
 
     #[test]

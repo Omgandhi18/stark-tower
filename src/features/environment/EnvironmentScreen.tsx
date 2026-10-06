@@ -5,6 +5,7 @@ import { useActivity } from "../../stores/activity";
 import { useAgents } from "../../stores/agents";
 import { useAttention } from "../../stores/attention";
 import { useNavigation } from "../../stores/navigation";
+import { useWorkspace } from "../../stores/workspace";
 import EnvironmentView, { type DisplayMode } from "./EnvironmentView";
 
 interface EnvironmentScreenProps {
@@ -16,6 +17,7 @@ interface EnvironmentScreenProps {
 export default function EnvironmentScreen({ comparing = false }: EnvironmentScreenProps) {
   const agents = useAgents((s) => s.agents);
   const helpers = useActivity((s) => s.helpers);
+  const tasks = useWorkspace((s) => s.tasks);
   const pending = useAttention((s) => s.pending);
   const waitingOnYou = useMemo(() => new Set(pending.map((r) => r.agentId)), [pending]);
   const focusId = useNavigation((s) => s.agentId);
@@ -45,6 +47,7 @@ export default function EnvironmentScreen({ comparing = false }: EnvironmentScre
       agents={agents}
       helpers={helpers}
       waitingOnYou={waitingOnYou}
+      tasks={tasks}
       awaitingYou={pending.length}
       mode={comparing ? "reference" : mode}
       focusId={focusId}

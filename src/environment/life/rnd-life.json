@@ -1,0 +1,42 @@
+{
+  "$comment": "How After Hours R&D's team lives in the room (mockup px). 'nodes' and 'edges' are where people can walk; 'cast' is each station: where its agent stands when up ('node'), which way they face there, whether the cut-out sits ('seated', getting up at 'rise'), where a colleague stands to talk to them ('visit'), and the head and hand boxes (cut-out px) their in-place animation moves. 'spots' are things to do around the room; 'occluders' are furniture drawn over anyone standing behind it ('baseY' is where it meets the floor).",
+  "nodes": {
+    "deck": [770, 282], "deckL": [650, 278], "deckR": [940, 280],
+    "stairTop": [760, 296], "stairBot": [760, 366],
+    "floorN": [760, 412], "shelf": [712, 452], "floorC": [800, 488],
+    "screenL": [905, 525], "vision": [940, 582], "review": [1030, 560],
+    "walkMid": [1060, 655], "rightFloor": [1150, 735], "karen": [1232, 740], "pedestal": [1320, 800],
+    "pillarGap": [812, 590], "bayStrip": [745, 662], "bayMid": [560, 658], "friday": [506, 645],
+    "balcony1": [1030, 268], "balcony2": [1160, 300], "balcony3": [1290, 345], "edith": [1372, 372],
+    "veronica": [858, 978], "glassCase": [968, 976]
+  },
+  "edges": [
+    ["deckL", "deck"], ["deck", "deckR"], ["deck", "stairTop"], ["stairTop", "stairBot"], ["stairBot", "floorN"],
+    ["floorN", "shelf"], ["floorN", "floorC"], ["shelf", "floorC"], ["floorC", "screenL"], ["screenL", "vision"],
+    ["screenL", "review"], ["vision", "review"], ["vision", "walkMid"], ["review", "walkMid"], ["walkMid", "rightFloor"],
+    ["rightFloor", "karen"], ["karen", "pedestal"], ["rightFloor", "pedestal"],
+    ["floorC", "pillarGap"], ["pillarGap", "bayStrip"], ["bayStrip", "bayMid"], ["bayMid", "friday"],
+    ["deckR", "balcony1"], ["balcony1", "balcony2"], ["balcony2", "balcony3"], ["balcony3", "edith"],
+    ["veronica", "glassCase"]
+  ],
+  "cast": {
+    "commandDeck": { "node": "deck", "face": "SW", "visit": "deckR", "parts": { "head": [8, 4, 48, 47] } },
+    "buildBay": { "node": "friday", "face": "NE", "seated": true, "rise": [500, 632], "visit": "bayMid", "parts": { "head": [33, 5, 88, 58], "hands": [[82, 69, 99, 84], [89, 69, 99, 84]] } },
+    "reviewWall": { "node": "vision", "face": "SW", "visit": "screenL", "parts": { "head": [20, 5, 60, 50] } },
+    "rightDesk": { "node": "karen", "face": "NW", "visit": "rightFloor", "parts": { "head": [20, 5, 65, 45], "hands": [[0, 68, 25, 82]] } },
+    "rightPod": { "node": "edith", "face": "SE", "seated": true, "rise": [1392, 364], "visit": "balcony3", "parts": { "head": [15, 5, 55, 50], "hands": [[40, 45, 62, 65]] } },
+    "bottomDesk": { "node": "veronica", "face": "NE", "seated": true, "rise": [800, 972], "parts": { "head": [40, 5, 90, 55], "hands": [[80, 62, 100, 78], [88, 62, 104, 78]] } }
+  },
+  "spots": [
+    { "id": "books", "node": "shelf", "face": "NW", "poses": ["read", "think"], "kind": "errand", "dwell": [7, 13] },
+    { "id": "reviewScreen", "node": "review", "face": "NE", "poses": ["reach", "think", "listen"], "kind": "think", "dwell": [7, 12] },
+    { "id": "globe", "node": "deckL", "face": "NE", "poses": ["reach", "think"], "kind": "think", "dwell": [6, 10] },
+    { "id": "cityView", "node": "balcony2", "face": "NE", "poses": ["coffee", "stretch", "coffee"], "kind": "errand", "dwell": [8, 14] },
+    { "id": "deckRail", "node": "deckR", "face": "NE", "poses": ["coffee", "stand"], "kind": "errand", "dwell": [6, 11] },
+    { "id": "bots", "node": "bayMid", "face": "SW", "poses": ["think", "listen"], "kind": "think", "dwell": [5, 9] },
+    { "id": "glassCase", "node": "glassCase", "face": "NE", "poses": ["think", "reach"], "kind": "errand", "dwell": [6, 10] },
+    { "id": "launchPad", "node": "pedestal", "face": "NE", "poses": ["reach", "folder"], "kind": "review", "dwell": [3, 4] }
+  ],
+  "meets": [["floorN", "floorC"], ["walkMid", "rightFloor"], ["screenL", "review"]],
+  "occluders": []
+}

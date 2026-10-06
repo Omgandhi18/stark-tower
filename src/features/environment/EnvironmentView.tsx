@@ -5,7 +5,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, t
 import { Button, cx } from "../../design";
 import { toggleFullscreen } from "../../lib/fullscreen";
 import { AGENT_STATUS } from "../../lib/status";
-import type { Agent } from "../../lib/types";
+import type { Agent, Task } from "../../lib/types";
+import type { CastMember } from "../../environment/life/director";
+import type { Activity } from "../../environment/life/types";
+import { lifeEvents, type TaskMark } from "../../environment/life/events";
 import {
   FOCUS_ZOOM,
   MAX_ZOOM,
@@ -41,7 +44,6 @@ export type DisplayMode = "live" | "reference";
 const DRAG_THRESHOLD = 3;
 /** Half-width of the click target around a walking character. */
 const WALKER_HALF_WIDTH = 28;
-const BUSY: readonly string[] = ["working", "thinking"];
 const CARD_SIZE: Size = { width: SCENE_CARD_WIDTH, height: SCENE_CARD_HEIGHT };
 const PINCH_SENSITIVITY = 0.01;
 const ZOOM_EPSILON = 1e-3;
@@ -55,6 +57,8 @@ interface EnvironmentViewProps {
   helpers: Readonly<Record<string, number>>;
   /** Agents with a question, approval or review waiting on the developer. */
   waitingOnYou: ReadonlySet<string>;
+  /** Task cards: hand-overs between agents and finished work send people across the room. */
+  tasks: readonly Task[];
   /** Questions, approvals and reviews waiting on the developer, all told. */
   awaitingYou: number;
   mode: DisplayMode;
@@ -71,25 +75,33 @@ interface Drag {
   moved: boolean;
 }
 
-/** Click target and head of a station's character, following them when they walk. */
-function placeOf(slot: Slot, walkerHead: Point | null, mobile: RoomLayout["mobile"]) {
-  if (mobile && slot.id === mobile.slot && walkerHead) {
-    const hit = [walkerHead.x - WALKER_HALF_WIDTH, walkerHead.y, walkerHead.x + WALKER_HALF_WIDTH, walkerHead.y + mobile.height] as const;
-    return { hit, head: walkerHead };
+/** Click target and head of a station's character, following them when they're up and about. */
+function placeOf(slot: Slot, heads: Readonly<Record<string, Point>>, layout: RoomLayout) {
+  const head = heads[slot.id];
+  const height = layout.heights[slot.id];
+  if (head && height) {
+    const hit = [head.x - WALKER_HALF_WIDTH, head.y, head.x + WALKER_HALF_WIDTH, head.y + height] as const;
+    return { hit, head };
   }
   return { hit: slot.hit, head: slot.head };
 }
 
+/** What the room shows an agent doing: waiting on you outranks working, as the station light does. */
+function activityOf(agent: Agent, waiting: boolean): Activity {
+  if (waiting || agent.status === "blocked") return "waiting";
+  return agent.status;
+}
+
 const centerOf = (hit: readonly number[]) => ({ x: (hit[0] + hit[2]) / 2, y: (hit[1] + hit[3]) / 2 });
 
-export default function EnvironmentView({ room, agents, helpers, waitingOnYou, awaitingYou, mode, focusId, onSelectAgent, notice }: EnvironmentViewProps) {
+export default function EnvironmentView({ room, agents, helpers, waitingOnYou, tasks, awaitingYou, mode, focusId, onSelectAgent, notice }: EnvironmentViewProps) {
   const layout = useMemo(() => layoutOf(room), [room]);
   const { frame, board, tags } = room.scene;
   const tagPlaces = useMemo<NameTagPlace[]>(
     () => Object.entries(tags ?? {}).map(([slotId, at]) => ({ slotId, at: { x: at[0] - room.rect[0], y: at[1] - room.rect[1] } })),
     [tags, room.rect],
   );
-  const { world, slots, mobile } = layout;
+  const { world, slots } = layout;
   const rootRef = useRef<HTMLDivElement>(null);
   const canvasHostRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLDivElement>(null);
@@ -100,37 +112,39 @@ export default function EnvironmentView({ room, agents, helpers, waitingOnYou, a
   const [hoverSlotId, setHoverSlotId] = useState<string | null>(null);
   const [panning, setPanning] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
-  /** Head of the walking character while away from the seat (world px). */
-  const [walkerHead, setWalkerHead] = useState<Point | null>(null);
-  const walkerHeadRef = useRef(walkerHead);
+  /** Heads of everyone up and about, away from their station (world px). */
+  const [heads, setHeads] = useState<Readonly<Record<string, Point>>>({});
+  const headsRef = useRef(heads);
   const viewRef = useRef(view);
   const cameraRef = useRef(camera);
   useEffect(() => {
-    walkerHeadRef.current = walkerHead;
+    headsRef.current = heads;
     viewRef.current = view;
     cameraRef.current = camera;
     worldRef.current = world;
   });
 
   const seats = useMemo(() => assignSlots(agents, slots, layout.orchestratorSlot), [agents, slots, layout.orchestratorSlot]);
-  const mobileAgent = mobile ? seats.get(mobile.slot) : undefined;
   const sceneState = useMemo<SceneState>(() => {
-    // The mockup's own state: everyone in place, every helper out, nothing lit beyond what it paints.
+    // The mockup's own state: everyone in place and still, every helper out, nothing lit beyond what it paints.
     if (mode === "reference") {
-      return { helpers: layout.referenceHelpers, occupied: Object.fromEntries(slots.map((s) => [s.id, !s.added])), buildBayTyping: false, lights: {} };
+      return { helpers: layout.referenceHelpers, occupied: Object.fromEntries(slots.map((s) => [s.id, !s.added])), lights: {}, cast: [] };
     }
     const lights: Record<string, StationLight> = {};
+    const cast: CastMember[] = [];
     for (const [slotId, agent] of seats) {
-      const light = lightFor(agent, waitingOnYou.has(agent.id));
+      const waiting = waitingOnYou.has(agent.id);
+      const light = lightFor(agent, waiting);
       if (light) lights[slotId] = light;
+      cast.push({ slotId, agentId: agent.id, activity: activityOf(agent, waiting) });
     }
     return {
       helpers: helpersShown(layout.helperSlot, seats, helpers),
       occupied: Object.fromEntries(slots.map((s) => [s.id, seats.has(s.id)])),
-      buildBayTyping: Boolean(mobileAgent && BUSY.includes(mobileAgent.status)),
       lights,
+      cast,
     };
-  }, [mode, seats, mobileAgent, helpers, waitingOnYou, layout, slots]);
+  }, [mode, seats, helpers, waitingOnYou, layout, slots]);
   const sceneStateRef = useRef(sceneState);
   useEffect(() => {
     sceneStateRef.current = sceneState;
@@ -154,7 +168,14 @@ export default function EnvironmentView({ room, agents, helpers, waitingOnYou, a
   }, [mode, seats, focusId, layout, slots]);
 
   const { rendererRef, error: renderError } = useReferenceRenderer(canvasHostRef, world, room, {
-    onActorMove: (_slot, head) => setWalkerHead(head),
+    onActorMove: (slotId, head) =>
+      setHeads((current) => {
+        if (head) return { ...current, [slotId]: head };
+        if (!(slotId in current)) return current;
+        const rest = { ...current };
+        delete rest[slotId];
+        return rest;
+      }),
     onReady: (renderer) => {
       renderer.resize(viewRef.current);
       renderer.setCamera(cameraRef.current);
@@ -196,28 +217,36 @@ export default function EnvironmentView({ room, agents, helpers, waitingOnYou, a
     if (mode === "reference") rendererRef.current?.resetActors();
   }, [mode, rendererRef]);
 
-  const startVisit = useCallback(() => {
-    rendererRef.current?.startVisit();
+  // Hand-overs between agents, report-backs and finished work: each sends someone across the room.
+  const marksRef = useRef<ReadonlyMap<string, TaskMark> | null>(null);
+  useEffect(() => {
+    const { events, marks } = lifeEvents(marksRef.current, tasks, agents);
+    marksRef.current = marks;
+    if (events.length && mode === "live") rendererRef.current?.push(events);
+  }, [tasks, agents, mode, rendererRef]);
+
+  const liven = useCallback(() => {
+    rendererRef.current?.liven();
   }, [rendererRef]);
 
-  // Dev builds: ⌥W sends the walking character (After Hours R&D's FRIDAY) to visit a colleague and back.
+  // Dev builds: ⌥W sends someone idle off on a pastime right away.
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const onKey = (e: KeyboardEvent) => {
       if (!e.altKey || e.code !== "KeyW") return;
       e.preventDefault();
-      startVisit();
+      liven();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [startVisit]);
+  }, [liven]);
 
   // While the conversation panel narrows the scene, keep its agent in view.
   useEffect(() => {
     if (!chatOpen || !focusedSlot) return;
-    const center = centerOf(placeOf(focusedSlot, walkerHeadRef.current, mobile).hit);
+    const center = centerOf(placeOf(focusedSlot, headsRef.current, layout).hit);
     setCamera((c) => clampCamera({ ...c, cx: center.x, cy: center.y }, view, world));
-  }, [chatOpen, focusedSlot, view, mobile, world]);
+  }, [chatOpen, focusedSlot, view, layout, world]);
 
   useEffect(() => {
     if (!chatOpen) return;
@@ -282,10 +311,10 @@ export default function EnvironmentView({ room, agents, helpers, waitingOnYou, a
     setCamera((c) => {
       const home = fitCamera(viewRef.current, world);
       if (c.zoom > home.zoom + ZOOM_EPSILON || !focusedSlot) return home;
-      const center = centerOf(placeOf(focusedSlot, walkerHeadRef.current, mobile).hit);
+      const center = centerOf(placeOf(focusedSlot, headsRef.current, layout).hit);
       return clampCamera({ zoom: Math.max(FOCUS_ZOOM, home.zoom), cx: center.x, cy: center.y }, viewRef.current, world);
     });
-  }, [focusedSlot, mobile, world]);
+  }, [focusedSlot, layout, world]);
 
   const onZoom = useCallback(
     (direction: 1 | -1) => {
@@ -304,7 +333,7 @@ export default function EnvironmentView({ room, agents, helpers, waitingOnYou, a
   const cardSlot = slots.find((s) => s.id === (hoverSlotId ?? focusedSlot?.id ?? null));
   const cardAgent = cardSlot ? seats.get(cardSlot.id) : undefined;
   const cardStyle =
-    cardSlot && cardAgent ? cardPlacement(layout.card, worldToScreen(placeOf(cardSlot, walkerHead, mobile).head, camera, view), view, CARD_SIZE) : null;
+    cardSlot && cardAgent ? cardPlacement(layout.card, worldToScreen(placeOf(cardSlot, heads, layout).head, camera, view), view, CARD_SIZE) : null;
 
   const focusName = (focusedSlot && seats.get(focusedSlot.id)?.name) ?? null;
 
@@ -331,7 +360,7 @@ export default function EnvironmentView({ room, agents, helpers, waitingOnYou, a
             {slots.map((slot) => {
               const agent = seats.get(slot.id);
               if (!agent) return null;
-              const { hit } = placeOf(slot, walkerHead, mobile);
+              const { hit } = placeOf(slot, heads, layout);
               const a = worldToScreen({ x: hit[0], y: hit[1] }, camera, view);
               const b = worldToScreen({ x: hit[2], y: hit[3] }, camera, view);
               return (
@@ -355,7 +384,7 @@ export default function EnvironmentView({ room, agents, helpers, waitingOnYou, a
             })}
           </div>
 
-          <SceneNameTags places={tagPlaces} seats={seats} waitingOnYou={waitingOnYou} camera={camera} view={view} />
+          <SceneNameTags places={tagPlaces} seats={seats} away={heads} waitingOnYou={waitingOnYou} camera={camera} view={view} />
 
           {cardAgent && cardStyle && <SceneAgentCard agent={cardAgent} placement={cardStyle} docked={layout.card.anchor !== "head"} />}
 
@@ -368,9 +397,9 @@ export default function EnvironmentView({ room, agents, helpers, waitingOnYou, a
             </p>
           )}
 
-          {import.meta.env.DEV && mode === "live" && mobileAgent && (
-            <Button className="env-dev-action" size="sm" variant="secondary" onClick={startVisit} title="⌥W">
-              Send {mobileAgent.name} on a visit
+          {import.meta.env.DEV && mode === "live" && (
+            <Button className="env-dev-action" size="sm" variant="secondary" onClick={liven} title="⌥W">
+              Send someone on a break
             </Button>
           )}
 
