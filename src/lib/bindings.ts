@@ -169,6 +169,28 @@ async setLoginItem(enabled: boolean) : Promise<Result<boolean, string>> {
 async getTaskDetail(id: string) : Promise<TaskDetail | null> {
     return await TAURI_INVOKE("get_task_detail", { id });
 },
+async listWorktrees() : Promise<Worktree[]> {
+    return await TAURI_INVOKE("list_worktrees");
+},
+async setWorktreesEnabled(enabled: boolean) : Promise<AppConfig> {
+    return await TAURI_INVOKE("set_worktrees_enabled", { enabled });
+},
+async saveWorktreeSetup(project: string, setup: WorktreeSetup) : Promise<Result<AppConfig, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_worktree_setup", { project, setup }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async removeWorktree(id: string, force: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_worktree", { id, force }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * The readable diff of one changed file in a task's folder.
  */
@@ -895,7 +917,7 @@ standup_minutes?: number;
 /**
  * The developer allows Starkline to keep this Mac awake while agents work.
  */
-keep_awake?: boolean; budget?: Budget; 
+keep_awake?: boolean; budget?: Budget; worktrees_enabled?: boolean; worktree_setup?: Partial<{ [key in string]: WorktreeSetup }>; 
 /**
  * How Starkline looks: one of [`THEMES`]. Tasks, permissions and providers don't change with it.
  */
@@ -1031,7 +1053,7 @@ export type Conversation = { id: number; agent_id: string; title: string; cwd: s
 /**
  * A teammate's delegation ran here, not a chat the developer had.
  */
-delegated: boolean }
+delegated: boolean; project_folder: string; branch: string }
 export type ConversationSpend = { total: SpendTotal; context_tokens: number }
 export type DispatchResult = { agent_id: string; name: string; spawned: boolean }
 /**
@@ -1070,6 +1092,7 @@ export type FileChange = { path: string;
  * added | modified | deleted | renamed | untracked
  */
 status: string; added: number | null; removed: number | null }
+export type FileClaim = { workspace: string; path: string; agent_id: string; task_id: string | null; reason: string; exclusive: boolean }
 export type LedgerEntry = { id: number; ts: number; agent_id: string; kind: string; detail: string; load: number }
 /**
  * A model an agent can run on.
@@ -1456,7 +1479,7 @@ started: number | null; finished: number | null;
 /**
  * The owner's own plan, as steps done out of steps total (from its to-do list).
  */
-plan_done: number | null; plan_total: number | null }
+plan_done: number | null; plan_total: number | null; workspace_kind: string; project_folder: string }
 /**
  * Everything the task screen shows.
  */
@@ -1472,7 +1495,7 @@ branch: string | null;
 /**
  * The task's part of its owner's chat.
  */
-messages: StoredMessage[] }
+messages: StoredMessage[]; workspace: WorkspaceInfo; claims: FileClaim[] }
 /**
  * One thing that happened in a task, in order. Append-only.
  */
@@ -1512,6 +1535,9 @@ enthusiasm: number;
  * Brief (0) to thorough.
  */
 detail: number }
+export type WorkspaceInfo = { kind: string; path: string; project: string; branch: string; base: string; base_commit: string; decision: string; ahead: number; changes: FileChange[]; unmerged: string[]; removed: boolean; removable: boolean }
+export type Worktree = { path: string; project: string; branch: string; base: string; base_commit: string; task_id: string; created: number; removed: number | null }
+export type WorktreeSetup = { copy: string[]; command: string }
 
 /** tauri-specta globals **/
 

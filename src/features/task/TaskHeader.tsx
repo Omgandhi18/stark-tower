@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, CheckCheck, Clock, Folder, FolderOpen, GitBranch, MessageSquareText, Play, ShieldCheck, Square, SquareTerminal, X } from "lucide-react";
+import { ArrowLeft, CheckCheck, Clock, Folder, FolderOpen, MessageSquareText, Play, ShieldCheck, Square, SquareTerminal, X } from "lucide-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Button, IconButton, OverflowMenu, Portrait, StatusPill, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
 import { chatStop, closeTask, resumeTask, reviewTask } from "../../lib/api";
@@ -12,6 +12,7 @@ import { folderName } from "../../stores/workspace";
 import { providerLabel } from "../agents/display";
 import { useTerminal } from "../../stores/terminal";
 import ContextButton from "../context/ContextButton";
+import WorkspaceChip from "./WorkspaceChip";
 import RemindMeButton from "../reminders/RemindMeButton";
 import type { StateTone } from "../../lib/status";
 
@@ -33,7 +34,6 @@ export default function TaskHeader({ detail, owner, requester, state, now }: Tas
   const navigate = useNavigation((s) => s.navigate);
   const openConversation = useNavigation((s) => s.openConversation);
   const { task } = detail;
-  const branch = detail.branch ?? (task.branch || null);
   const started = task.started ?? task.ts;
   const elapsed = formatElapsed((task.finished ?? now) - started);
   const name = owner?.name ?? task.assignee;
@@ -120,19 +120,11 @@ export default function TaskHeader({ detail, owner, requester, state, now }: Tas
             <dt>Project</dt>
             <dd title={task.cwd}>
               <Folder aria-hidden size={ICON_SIZE.sm} strokeWidth={ICON_STROKE} />
-              {folderName(task.cwd)}
+              {folderName(task.project_folder || task.cwd)}
             </dd>
           </div>
         )}
-        {branch && (
-          <div className="task-fact">
-            <dt>Branch</dt>
-            <dd>
-              <GitBranch aria-hidden size={ICON_SIZE.sm} strokeWidth={ICON_STROKE} />
-              <span className="mono">{branch}</span>
-            </dd>
-          </div>
-        )}
+        <div className="task-fact"><dt>Workspace</dt><dd><WorkspaceChip detail={detail} /></dd></div>
         <div className="task-fact">
           <dt>{task.finished ? "Took" : "Elapsed"}</dt>
           <dd>

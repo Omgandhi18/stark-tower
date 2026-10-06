@@ -71,7 +71,7 @@ export default function AttentionCard({ review, now }: AttentionCardProps) {
       {review.cwd && (
         <p className="attention-meta" title={review.cwd}>
           <FolderOpen aria-hidden size={ICON_SIZE.sm} strokeWidth={ICON_STROKE} />
-          {folderName(review.cwd)}
+          {folderName(review.project || review.cwd)}
         </p>
       )}
 

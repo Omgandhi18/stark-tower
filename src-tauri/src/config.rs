@@ -205,6 +205,10 @@ pub struct AppConfig {
     pub keep_awake: bool,
     #[serde(default)]
     pub budget: crate::spend::Budget,
+    #[serde(default = "yes")]
+    pub worktrees_enabled: bool,
+    #[serde(default)]
+    pub worktree_setup: BTreeMap<String, crate::workspaces::WorktreeSetup>,
     /// How Starkline looks: one of [`THEMES`]. Tasks, permissions and providers don't change with it.
     #[serde(default = "default_theme")]
     pub theme: String,
@@ -418,6 +422,8 @@ pub fn default_config() -> AppConfig {
         version: cfg_version(),
         onboarded: false,
         lighting: default_lighting(),
+        worktrees_enabled: true,
+        worktree_setup: BTreeMap::new(),
         standup_minutes: 0,
         keep_awake: false,
         theme: default_theme(),

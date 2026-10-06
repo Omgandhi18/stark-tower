@@ -1191,6 +1191,10 @@ pub fn send(
             content.text = format!("{ctx}\n\n{}", turn.text);
         }
     }
+    let workspace = crate::prompts::workspace_context(app, agent_id, cwd);
+    if !workspace.is_empty() {
+        content.text = format!("{workspace}\n\n{}", content.text);
+    }
     let state = app.state::<crate::AppState>();
     let mut map = state.chat.sessions.lock().unwrap();
     let s = map
@@ -1245,6 +1249,7 @@ pub fn run_task_blocking(
     let Some((child, conversation)) = crate::tasks::begin_child(app, from, agent_id, task, cwd) else {
         return Err("The delegated task couldn't be recorded.".into());
     };
+    let cwd = child.cwd.as_str();
     let sink = Sink::task(conversation, child.id.clone());
     let from_name = crate::tasks::requester_name(app, from);
     let origin = if from == crate::tasks::BY_DEVELOPER { "Started by you".to_string() } else { format!("Delegated by {from_name}") };
@@ -1258,7 +1263,9 @@ pub fn run_task_blocking(
     }
     crate::pty::emit_status(app, agent_id, AgentStatus::Thinking);
 
-    let outcome = run_worker(app, agent_id, task, cwd, &sink);
+    let context = crate::prompts::workspace_context(app, agent_id, cwd);
+    let request = if context.is_empty() { task.to_string() } else { format!("{context}\n\n{task}") };
+    let outcome = run_worker(app, agent_id, &request, cwd, &sink);
     crate::tasks::end_child(app, &child.id, agent_id, &outcome);
     let status = if matches!(&outcome, Ok(r) if !r.trim().is_empty()) { "done" } else { "blocked" };
     floor_log(app, agent_id, &format!("task-{status}"), &truncate(task, 80));

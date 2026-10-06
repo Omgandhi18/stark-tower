@@ -25,6 +25,7 @@ import {
   onReviewRequest,
   onReviewResolved,
   onTasksChanged,
+  onWorkspacesChanged,
   onUpdateStatus,
 } from "../lib/api";
 import { errorMessage } from "../lib/errors";
@@ -96,6 +97,7 @@ export function useBackendSync() {
     first("spending", useSpend.getState().refresh);
     first("projects", workspace.refreshProjects);
     first("saved chats", workspace.refreshConversations);
+    first("worktrees", workspace.refreshWorktrees);
     first("tasks", workspace.refreshTasks);
     first("bugs", workspace.refreshBugs);
     first("pending reviews", useAttention.getState().refresh);
@@ -122,6 +124,7 @@ export function useBackendSync() {
       }),
       onChatSwitched((s) => useChats.getState().switchTo(s.agentId, s.conversationId)),
       onSpendChanged(() => useSpend.getState().changed().catch(report("spending"))),
+      onWorkspacesChanged(() => useWorkspace.getState().refreshWorktrees().catch(report("worktrees"))),
       onTasksChanged(() => useWorkspace.getState().refreshTasks().catch(report("tasks"))),
       onConversationsChanged(() => useWorkspace.getState().refreshConversations().catch(report("saved chats"))),
       onBugsChanged(() => useWorkspace.getState().refreshBugs().catch(report("bugs"))),

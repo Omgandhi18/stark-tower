@@ -297,6 +297,7 @@ pub fn requester_name(app: &tauri::AppHandle, from: &str) -> String {
 
 /// A task stopped for good (finished, blocked or closed): an automation's run gets its result.
 fn settled(app: &tauri::AppHandle, task_id: &str) {
+    crate::claims::end_task_tree(app, task_id);
     crate::automations::task_settled(app, task_id);
 }
 
@@ -350,6 +351,7 @@ pub fn recover(app: &tauri::AppHandle) {
 pub fn resume(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     let state = engine(app).ok_or("Starkline isn't ready yet.")?;
     let task = state.ledger.task(id).ok_or("That task doesn't exist.")?;
+    if !Path::new(&task.cwd).is_dir() { return Err("The task's workspace is no longer here. Restore the folder before continuing this task.".into()); }
     let conversation = task.conversation_id.ok_or("This task has no conversation to continue.")?;
     if task.parent_id.is_some() {
         return Err("A delegated task continues through the agent that delegated it.".into());
@@ -439,6 +441,8 @@ pub fn start_for(
 /// its session until the developer starts a new one. The first request there opens one.
 fn begin(app: &tauri::AppHandle, task: &Task) -> Result<(), String> {
     let state = engine(app).ok_or("Starkline isn't ready yet.")?;
+    let prepared = crate::workspaces::prepare(app, task)?;
+    let task = &prepared;
     let agent = task.assignee.as_str();
     let conversation = match state.ledger.chat_in(agent, &task.cwd) {
         Some(chat) if state.ledger.current_conversation(agent) == Some(chat) => chat,
@@ -537,6 +541,7 @@ pub enum Ended {
 /// The owner's session went away. A task still running is blocked, with the reason.
 pub fn session_ended(app: &tauri::AppHandle, agent_id: &str, why: Ended) {
     let Some(state) = engine(app) else { return };
+    crate::claims::ended(app, agent_id, None);
     let current = state.tasks.current.lock().unwrap().remove(agent_id);
     if let Some(task) = current.and_then(|id| state.ledger.task(&id)) {
         if task.status == "doing" {
@@ -622,6 +627,8 @@ pub fn time_out(app: &tauri::AppHandle, id: &str, minutes: i64) {
 pub fn begin_child(app: &tauri::AppHandle, from: &str, worker: &str, prompt: &str, cwd: &str) -> Option<(Task, i64)> {
     let state = engine(app)?;
     let parent = current(app, from);
+    let inherited = parent.as_deref().and_then(|id| state.ledger.task(id)).map(|t| t.cwd);
+    let cwd = inherited.as_deref().unwrap_or(cwd);
     let id = crate::chat::next_task_id();
     let title = title_from(prompt);
     state.ledger.create_task(&NewTask {
@@ -634,6 +641,9 @@ pub fn begin_child(app: &tauri::AppHandle, from: &str, worker: &str, prompt: &st
         requested_by: from,
         prompt,
     })?;
+    let prepared = crate::workspaces::for_child(app, &id, parent.as_deref())?;
+    let cwd = prepared.cwd.as_str();
+    state.workdirs.lock().unwrap().insert(worker.into(), cwd.into());
     let conversation = state.ledger.create_conversation(worker, cwd, &title);
     state.ledger.begin_task(&id, Some(conversation), &current_branch(cwd).unwrap_or_default());
     let worker_name = crate::prompts::agent_name(app, worker);
@@ -655,6 +665,7 @@ pub fn end_child(app: &tauri::AppHandle, id: &str, worker: &str, outcome: &Resul
         Err(e) => ("blocked", crate::chat::truncate(e, 200), format!("Couldn't finish: {}", crate::chat::truncate(e, 80))),
     };
     state.ledger.set_task_status(id, status, Some(&detail));
+    crate::claims::ended(app, worker, Some(id));
     event(app, id, worker, "status", &summary, "");
     emit_changed(app);
 }
@@ -668,6 +679,7 @@ pub fn tool_use(app: &tauri::AppHandle, agent_id: &str, task_id: Option<&str>, t
     match name {
         "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => {
             let path = [text("file_path"), text("notebook_path")].into_iter().find(|p| !p.is_empty()).unwrap_or_default();
+            if crate::prompts::agent_engine(app, agent_id).kind == "codex" { crate::claims::after_edit(app, agent_id, name, input); }
             let shown = relative(&path, &cwd);
             let verb = if name == "Write" { "Wrote" } else { "Edited" };
             event(app, task_id, agent_id, "file", &format!("{verb} {shown}"), &serde_json::json!({ "path": shown, "action": verb.to_lowercase() }).to_string());
@@ -711,7 +723,7 @@ pub fn active_task_for(app: &tauri::AppHandle, agent_id: &str) -> Option<String>
         .ledger
         .tasks(EVENT_LIMIT)
         .into_iter()
-        .find(|t| t.assignee == agent_id && t.status == "doing" && t.parent_id.is_some())
+        .find(|t| t.assignee == agent_id && t.status == "doing")
         .map(|t| t.id)
 }
 
@@ -790,6 +802,8 @@ pub struct TaskDetail {
     pub branch: Option<String>,
     /// The task's part of its owner's chat.
     pub messages: Vec<StoredMessage>,
+    pub workspace: crate::workspaces::WorkspaceInfo,
+    pub claims: Vec<crate::claims::FileClaim>,
 }
 
 fn latest_checks(events: &[TaskEvent]) -> Vec<CheckRun> {
@@ -814,7 +828,11 @@ pub fn detail(app: &tauri::AppHandle, id: &str) -> Option<TaskDetail> {
     let state = engine(app)?;
     let task = state.ledger.task(id)?;
     let children = state.ledger.child_tasks(id);
-    let events = state.ledger.task_events(id, EVENT_LIMIT);
+    let mut events = state.ledger.task_events(id, EVENT_LIMIT);
+    for child in &children {
+        events.extend(state.ledger.task_events(&child.id, EVENT_LIMIT).into_iter().filter(|e| matches!(e.kind.as_str(), "claim_refused" | "claim_overlap")));
+    }
+    events.sort_by_key(|e| e.ts);
     let plan = events
         .iter()
         .rev()
@@ -823,7 +841,10 @@ pub fn detail(app: &tauri::AppHandle, id: &str) -> Option<TaskDetail> {
         .unwrap_or_default();
     let checks = latest_checks(&events);
     let messages = state.ledger.task_messages(&task, MESSAGE_LIMIT);
+    let claims = state.claims.lock().unwrap().list(&task.cwd);
     Some(TaskDetail {
+        workspace: crate::workspaces::info(&state.ledger, &task),
+        claims,
         changes: changes(&task.cwd),
         branch: current_branch(&task.cwd),
         task,

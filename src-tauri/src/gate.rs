@@ -281,6 +281,11 @@ pub fn risky_commands(command: &str, ctx: &Context) -> Vec<String> {
         .collect()
 }
 
+/// Parsed command words for collaboration checks; the permission policy still assesses the whole call.
+pub(crate) fn command_words(command: &str) -> Vec<Vec<String>> {
+    parse(command).map(|commands| commands.iter().map(|c| texts(&c.words)).collect()).unwrap_or_default()
+}
+
 // ---- Shell parsing ---------------------------------------------------------
 
 /// One simple command: its words with quotes removed, and the files it redirects from and to.

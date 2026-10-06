@@ -148,6 +148,7 @@ pub fn spawn_session(
         if map.get(&id).map(|s| s.gen) == Some(gen) {
             map.remove(&id);
             drop(map);
+            crate::claims::ended(&app2, &id, None);
             emit_status(&app2, &id, AgentStatus::Offline);
         }
     });
@@ -237,6 +238,7 @@ pub fn kill(app: &tauri::AppHandle, agent_id: &str) -> Result<(), String> {
         }
         let _ = s.child.kill();
     }
+    crate::claims::ended(app, agent_id, None);
     emit_status(app, agent_id, AgentStatus::Offline);
     Ok(())
 }

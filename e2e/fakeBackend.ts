@@ -120,6 +120,8 @@ function install(scenario: Scenario) {
         created: Date.now(),
         updated: Date.now(),
         delegated: false,
+        project_folder: cwd,
+        branch: "",
       });
       state.transcripts[id] = [];
       emit("conversations://changed", null);
@@ -292,6 +294,23 @@ function install(scenario: Scenario) {
     conversation_spend: (args) => state.conversationSpend[Number(args.conversationId)] ?? {
       total: { cost_usd: 0, input_tokens: 0, output_tokens: 0, context_tokens: 0, turns: 0, unpriced_turns: 0 }, context_tokens: 0,
     },
+    list_worktrees: () => state.worktrees,
+    set_worktrees_enabled: (args) => { state.config.worktrees_enabled = Boolean(args.enabled); return commitConfig(); },
+    save_worktree_setup: (args) => {
+      state.config.worktree_setup = { ...state.config.worktree_setup, [String(args.project)]: args.setup as NonNullable<Scenario["config"]["worktree_setup"]>[string] };
+      return commitConfig();
+    },
+    remove_worktree: (args) => {
+      const task = state.tasks.find((t) => t.id === args.id);
+      const tree = state.worktrees.find((w) => w.path === task?.cwd);
+      if (!task || !tree || tree.removed !== null) throw "This worktree has already been removed.";
+      if (!["done", "reviewed", "closed"].includes(task.status)) throw "Finish, review or close the task first.";
+      if ((state.changes[tree.path]?.length ?? 0) && !args.force) throw "Review the changes and choose Remove anyway.";
+      tree.removed = Date.now();
+      state.claims = state.claims.filter((c) => c.workspace !== tree.path);
+      emit("workspaces://changed", null);
+      emit("tasks://changed", null);
+    },
     list_projects: () => state.projects,
     add_project: (args) => {
       const path = String(args.path);
@@ -334,6 +353,8 @@ function install(scenario: Scenario) {
         finished: null,
         plan_done: null,
         plan_total: null,
+        workspace_kind: "checkout",
+        project_folder: cwd,
       };
       state.tasks.unshift(task);
       if (!busy) {
@@ -344,7 +365,7 @@ function install(scenario: Scenario) {
         const chat = open && inFolder(open) ? open : [...state.conversations].filter(inFolder).sort((a, b) => b.updated - a.updated)[0];
         const conversationId = chat?.id ?? nextConversation++;
         if (!chat) {
-          state.conversations.unshift({ id: conversationId, agent_id: agentId, title: task.title, cwd, created: now, updated: now, delegated: false });
+          state.conversations.unshift({ id: conversationId, agent_id: agentId, title: task.title, cwd, created: now, updated: now, delegated: false, project_folder: cwd, branch: "" });
           state.transcripts[conversationId] = [];
         }
         state.current[agentId] = conversationId;
@@ -360,7 +381,17 @@ function install(scenario: Scenario) {
       const id = String(args.id);
       const task = state.tasks.find((t) => t.id === id);
       if (!task) return null;
+      const tree = state.worktrees.find((w) => w.path === task.cwd);
+      const workspace = {
+        kind: task.workspace_kind || "checkout", path: task.cwd, project: task.project_folder || task.cwd,
+        branch: state.branches[task.cwd] ?? task.branch, base: tree?.base ?? "", base_commit: tree?.base_commit ?? "",
+        decision: state.taskEvents[id]?.filter((e) => e.kind === "workspace").at(-1)?.summary ?? "This task is using the current checkout because no other task is editing it.",
+        ahead: tree ? 1 : 0, changes: state.changes[task.cwd] ?? [], unmerged: [], removed: tree?.removed !== null && tree?.removed !== undefined,
+        removable: Boolean(tree && ["done", "reviewed", "closed"].includes(task.status)),
+      };
       return {
+        workspace,
+        claims: state.claims.filter((c) => c.workspace === task.cwd),
         task,
         children: state.tasks.filter((t) => t.parent_id === id),
         events: state.taskEvents[id] ?? [],
@@ -542,6 +573,8 @@ function install(scenario: Scenario) {
         conversation_id: null,
         parent_id: null,
         requested_by: `automation:${a.id}`,
+        workspace_kind: "checkout",
+        project_folder: a.cwd,
         prompt: a.instruction,
         branch: state.branches[a.cwd] ?? "",
         started: now,
@@ -582,7 +615,7 @@ function install(scenario: Scenario) {
       const agentId = String(args.agentId);
       const id = nextConversation++;
       const cwd = typeof args.cwd === "string" && args.cwd ? args.cwd : (conversationOf(agentId)?.cwd ?? state.projects.active);
-      state.conversations.unshift({ id, agent_id: agentId, title: "", cwd, created: Date.now(), updated: Date.now(), delegated: false });
+      state.conversations.unshift({ id, agent_id: agentId, title: "", cwd, created: Date.now(), updated: Date.now(), delegated: false, project_folder: cwd, branch: "" });
       state.transcripts[id] = [];
       state.current[agentId] = id;
       setStatus(agentId, "offline");
@@ -604,7 +637,7 @@ function install(scenario: Scenario) {
       state.tasks = state.tasks.map((t) => (t.conversation_id === id ? { ...t, conversation_id: null } : t));
       if (wasOpen) {
         const fresh = nextConversation++;
-        state.conversations.unshift({ id: fresh, agent_id: agentId, title: "", cwd: chat.cwd, created: Date.now(), updated: Date.now(), delegated: false });
+        state.conversations.unshift({ id: fresh, agent_id: agentId, title: "", cwd: chat.cwd, created: Date.now(), updated: Date.now(), delegated: false, project_folder: chat.project_folder, branch: "" });
         state.transcripts[fresh] = [];
         state.current[agentId] = fresh;
         emit("chat://switched", { agentId, conversationId: fresh });

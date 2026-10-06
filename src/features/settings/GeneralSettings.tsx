@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ExternalLink, RefreshCw, RotateCcw, TriangleAlert, Wand2 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button, Dialog, Toggle } from "../../design";
-import { checkUpdate, loginItemEnabled, resetConfig, setLoginItem, setOnboarded } from "../../lib/api";
+import { checkUpdate, loginItemEnabled, resetConfig, setLoginItem, setOnboarded, setWorktreesEnabled } from "../../lib/api";
 import { IS_TAURI } from "../../lib/platform";
 import { errorMessage } from "../../lib/errors";
 import type { UpdateStatus } from "../../lib/types";
@@ -18,6 +18,7 @@ function updateLine(update: UpdateStatus | null): string {
 
 /** Version and updates, the setup guide, and starting over. */
 export default function GeneralSettings() {
+  const config = useConfig((s) => s.config);
   const update = useSystem((s) => s.update);
   const apply = useConfig((s) => s.apply);
   const [checking, setChecking] = useState(false);
@@ -60,6 +61,11 @@ export default function GeneralSettings() {
       <header className="screen-header">
         <h1 className="screen-title">General</h1>
       </header>
+
+      <section className="settings-card">
+        <h2 className="settings-card-title">Task workspaces</h2>
+        <Toggle label="Give a task its own worktree when another agent is already working in the project" checked={config?.worktrees_enabled ?? true} onChange={(enabled) => run(async () => apply(await setWorktreesEnabled(enabled)), "The worktree setting couldn't be changed.")} description="The first writer uses the current checkout. Other tasks start from its last commit in their own folder." />
+      </section>
 
       <section className="settings-card">
         <h2 className="settings-card-title">Running in the background</h2>

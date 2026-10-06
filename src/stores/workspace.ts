@@ -1,8 +1,8 @@
 // Projects (folders agents work in), saved chats, task cards and reported bugs:
 // durable records owned by the backend, cached here for every screen.
 import { create } from "zustand";
-import { getBugs, getTasks, listConversations, listProjects } from "../lib/api";
-import type { Bug, Conversation, ProjectInfo, ProjectsState, Task } from "../lib/types";
+import { getBugs, getTasks, listConversations, listProjects, listWorktrees } from "../lib/api";
+import type { Bug, Conversation, ProjectInfo, ProjectsState, Task, Worktree } from "../lib/types";
 
 interface WorkspaceState {
   projects: ProjectInfo[];
@@ -10,6 +10,8 @@ interface WorkspaceState {
   conversations: Conversation[];
   tasks: Task[];
   bugs: Bug[];
+  worktrees: Worktree[];
+  refreshWorktrees: () => Promise<void>;
   loaded: { projects: boolean; conversations: boolean; tasks: boolean; bugs: boolean };
   applyProjects: (s: ProjectsState) => void;
   refreshProjects: () => Promise<void>;
@@ -26,6 +28,8 @@ export const useWorkspace = create<WorkspaceState>((set) => ({
   conversations: [],
   tasks: [],
   bugs: [],
+  worktrees: [],
+  refreshWorktrees: async () => { set({ worktrees: await listWorktrees() }); },
   loaded: { projects: false, conversations: false, tasks: false, bugs: false },
   applyProjects: (s) => set((st) => ({ projects: s.projects, activeProject: s.active, loaded: { ...st.loaded, projects: true } })),
   refreshProjects: async () => {

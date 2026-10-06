@@ -5,6 +5,7 @@ import { addProject, pickFolder, removeProject, setProject } from "../../lib/api
 import { errorMessage } from "../../lib/errors";
 import { useNavigation } from "../../stores/navigation";
 import { useWorkspace } from "../../stores/workspace";
+import WorktreeSetupDialog from "../workspaces/WorktreeSetupDialog";
 import ProjectChats from "./ProjectChats";
 
 /** Work's places, nested under it in the sidebar: all work, each project (with its chats while it's open), adding one. */
@@ -14,6 +15,7 @@ export default function ProjectNav() {
   const applyProjects = useWorkspace((s) => s.applyProjects);
   const selected = useNavigation((s) => s.workProject);
   const showProject = useNavigation((s) => s.showProject);
+  const [setupProject, setSetupProject] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const run = async (action: () => Promise<void>, failure: string) => {
@@ -65,6 +67,7 @@ export default function ProjectNav() {
               label={`More actions for ${p.name}`}
               align="start"
               items={[
+                { id: "setup", label: "Worktree setup…", onSelect: () => setSetupProject(p.path) },
                 {
                   id: "default",
                   label: "Use as default",
@@ -95,6 +98,7 @@ export default function ProjectNav() {
           <span className="nav-sub-label">Add project</span>
         </button>
       </li>
+      {setupProject && <li><WorktreeSetupDialog key={setupProject} project={setupProject} onClose={() => setSetupProject(null)} /></li>}
       {error && (
         <li>
           <p className="nav-sub-error" role="alert">

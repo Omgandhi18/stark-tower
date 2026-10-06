@@ -33,6 +33,8 @@ const task = (id: string, assignee: string, status: string, updated: number, cwd
   finished: null,
   plan_done: null,
   plan_total: null,
+  workspace_kind: "checkout",
+  project_folder: cwd,
   ...over,
 });
 
@@ -44,6 +46,8 @@ const chat = (agentId: string, title: string, updated: number, cwd = "/w/app"): 
   created: updated,
   updated,
   delegated: false,
+  project_folder: cwd,
+  branch: "",
 });
 
 const review = (agentId: string): ReviewRequest => ({
@@ -180,4 +184,9 @@ describe("buildBoard", () => {
     const board = buildBoard({ ...base, agents: [agent("a", "idle"), agent("dum-e", "idle", "maintenance")] });
     expect(board.team.map((a) => a.id)).toEqual(["a"]);
   });
+});
+
+it("filters a worktree task by its main project", () => {
+  const board = buildBoard({ ...base, tasks: [task("worktree", "a", "doing", 1, "/home/dev/.starkline/worktrees/app/fix", { project_folder: "/w/app", workspace_kind: "worktree" })], agents: [agent("a", "working")], project: "/w/app" });
+  expect(board.running).toHaveLength(1);
 });

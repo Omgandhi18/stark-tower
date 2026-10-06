@@ -16,9 +16,11 @@ interface NodeProps {
   current?: boolean;
   onOpen?: () => void;
   tone: string;
+  claims?: string[];
+  refusal?: string;
 }
 
-function Node({ agent, agentId, role, line, files, current, onOpen, tone }: NodeProps) {
+function Node({ agent, agentId, role, line, files, current, onOpen, tone, claims = [], refusal }: NodeProps) {
   const name = agent?.name ?? agentId;
   const body = (
     <>
@@ -42,6 +44,8 @@ function Node({ agent, agentId, role, line, files, current, onOpen, tone }: Node
       ) : (
         <div className="execution-button">{body}</div>
       )}
+      {claims.length > 0 && <details className="execution-claims" open={claims.length <= 3}><summary>{claims.length} claimed {claims.length === 1 ? "file" : "files"}</summary><ul>{claims.map((path) => <li key={path}>{path}</li>)}</ul></details>}
+      {refusal && <p className="execution-claims execution-refusal">{refusal}</p>}
     </li>
   );
 }
@@ -54,6 +58,8 @@ export default function ExecutionTree({ detail, waitingOnYou }: { detail: TaskDe
   const { task, children, events } = detail;
   const files = filesByAgent(events);
   const helpers = helpersOf(events);
+  const claimsFor = (id: string) => detail.claims.filter((c) => c.agent_id === id).map((c) => `${c.path || "Whole workspace"} (${c.reason})`);
+  const refusalFor = (id: string) => events.filter((e) => e.agent_id === id && ["claim_refused", "claim_overlap"].includes(e.kind)).slice(-1)[0]?.summary;
   const find = (id: string) => agents.find((a) => a.id === id);
   const owner = find(task.assignee);
   const ownerState = taskState(task, owner, children, waitingOnYou);
@@ -69,7 +75,7 @@ export default function ExecutionTree({ detail, waitingOnYou }: { detail: TaskDe
     <nav className="execution" aria-label="Who's working on this task">
       <SectionHeader title="Execution" count={members} />
       <ul className="execution-list">
-        <Node agent={owner} agentId={task.assignee} role="Owner" line={ownerLine} files={files[task.assignee] ?? 0} current tone={ownerState.tone} />
+        <Node agent={owner} agentId={task.assignee} role="Owner" line={ownerLine} files={files[task.assignee] ?? 0} claims={claimsFor(task.assignee)} refusal={refusalFor(task.assignee)} current tone={ownerState.tone} />
         {children.map((child) => {
           const agent = find(child.assignee);
           return (
@@ -80,6 +86,8 @@ export default function ExecutionTree({ detail, waitingOnYou }: { detail: TaskDe
               role="Delegated"
               line={childLine(child)}
               files={files[child.assignee] ?? 0}
+              claims={claimsFor(child.assignee)}
+              refusal={refusalFor(child.assignee)}
               tone={taskState(child, agent, [], waitingOnYou).tone}
               onOpen={() => openTask(child.id)}
             />

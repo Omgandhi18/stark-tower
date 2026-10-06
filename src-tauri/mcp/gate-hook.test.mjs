@@ -63,3 +63,13 @@ test("fails closed when Starkline can't be reached", async () => {
   const { out } = await runHook(join(tmpdir(), "missing-starkline.sock"), { tool_name: "Read", tool_input: { file_path: "/etc/hosts" } });
   assert.equal(JSON.parse(out).hookSpecificOutput.permissionDecision, "ask");
 });
+
+test("refuses a claim conflict immediately without asking the developer", async () => {
+  const app = await fakeApp(() => ({ tier: "refused", rule: "File ownership", reason: "KAREN has claimed Form.tsx (Settings UI). Ask KAREN to release it." }));
+  try {
+    const { out } = await runHook(app.sock, { tool_name: "Edit", tool_input: { file_path: "Form.tsx" } });
+    const output = JSON.parse(out).hookSpecificOutput;
+    assert.equal(output.permissionDecision, "deny");
+    assert.match(output.permissionDecisionReason, /KAREN has claimed/);
+  } finally { app.close(); }
+});

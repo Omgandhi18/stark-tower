@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { MessageSquarePlus, Trash2 } from "lucide-react";
-import { OverflowMenu, Portrait, cx, ICON_SIZE, ICON_STROKE } from "../../design";
+import { OverflowMenu, Portrait, Tag, cx, ICON_SIZE, ICON_STROKE } from "../../design";
 import { errorMessage } from "../../lib/errors";
 import { AGENT_STATUS } from "../../lib/status";
 import { formatRelative } from "../../lib/time";
@@ -33,7 +33,7 @@ export default function ProjectChats({ path, name }: { path: string; name: strin
   const [deleting, setDeleting] = useState<Conversation | null>(null);
   const now = useNow(CLOCK_MS);
   // Delegations run in chats of their own; those belong to the task that asked for them.
-  const chats = conversations.filter((c) => !c.delegated && sameFolder(c.cwd, path));
+  const chats = conversations.filter((c) => !c.delegated && sameFolder(c.project_folder || c.cwd, path));
   const shown = showAll ? chats : chats.slice(0, SHOWN_CHATS);
   const lead = agents.find((a) => a.kind === "orchestrator") ?? agents.find((a) => a.kind !== "maintenance");
   const openChatId = (agentId: string) => selectThread(agentId)(useChats.getState()).conversationId;
@@ -84,6 +84,7 @@ export default function ProjectChats({ path, name }: { path: string; name: strin
             >
               <Portrait name={who} figure={agent?.figure} accent={agent?.accent} size={20} />
               <span className="nav-sub-label">{title}</span>
+              {chat.branch && <Tag>{chat.branch}</Tag>}
             </button>
             <OverflowMenu
               label={`More actions for ${title}`}

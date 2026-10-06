@@ -302,6 +302,42 @@ pub(crate) fn orchestrator_turn_context(app: &tauri::AppHandle, agent_id: &str) 
     s
 }
 
+/// How much of a failed worktree setup's output an agent is shown: its last lines.
+const SETUP_TAIL: usize = 1_500;
+
+/// Workspace and collaboration facts, sent with a request only when they matter: the agent
+/// is in a separate worktree, or shares its folder with teammates. Empty otherwise.
+pub(crate) fn workspace_context(app: &tauri::AppHandle, agent: &str, cwd: &str) -> String {
+    let state = app.state::<crate::AppState>();
+    let mut lines: Vec<String> = Vec::new();
+    if let Some(w) = state.ledger.worktrees().into_iter().find(|w| w.path == cwd && w.removed.is_none()) {
+        lines.push(format!(
+            "You're working in a separate git worktree of {} at {cwd}, on branch {} (from {}). Don't switch branches. Commits are the developer's to make.",
+            crate::chat::base_name(&w.project),
+            w.branch,
+            w.base
+        ));
+        // A setup that went wrong is worth knowing about; a successful one's output isn't.
+        let task = crate::tasks::active_task_for(app, agent).and_then(|id| state.ledger.task(&id));
+        if let Some(task) = task {
+            let events = state.ledger.task_events(&task.id, 400);
+            for e in events.iter().filter(|e| e.kind == "workspace" && !e.data.is_empty() && !e.summary.ends_with("finished")) {
+                let start = e.data.len().saturating_sub(SETUP_TAIL);
+                let start = (start..e.data.len()).find(|i| e.data.is_char_boundary(*i)).unwrap_or(e.data.len());
+                lines.push(format!("{}\n{}", e.summary, &e.data[start..]));
+            }
+        }
+    }
+    if crate::claims::shared(app, cwd, agent) {
+        let names: Vec<String> = crate::claims::peers(app, cwd, agent).iter().map(|id| agent_name(app, id)).collect();
+        lines.push(format!(
+            "You're sharing this folder with {}. Use claim_files before editing; lockfiles, migrations, generated output and shared contracts need an explicit exclusive claim. Overlapping claims are refused. Coordinate with the task owner and release_files when done. Only the task owner runs git commands that change repository state.",
+            names.join(", ")
+        ));
+    }
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

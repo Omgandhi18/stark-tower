@@ -14,7 +14,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { StateTone } from "../../lib/status";
-import type { Notification } from "../../lib/types";
+import type { Notification, Worktree } from "../../lib/types";
+import { projectFolder } from "../workspaces/workspacesModel";
 import { needsYou } from "../../stores/notifications";
 
 export type NotificationView = "needs-you" | "updates" | "history";
@@ -47,6 +48,7 @@ const KINDS: Record<string, KindPresentation> = {
   automation_missed: { label: "Missed run", verb: "missed a scheduled run", tone: "attention", icon: CalendarX2 },
   automation_failed: { label: "Run didn't start", verb: "couldn't start a scheduled run", tone: "danger", icon: CalendarX2 },
   budget: { label: "Budget", verb: "reports a budget warning", tone: "attention", icon: Wallet },
+  claim_refused: { label: "File claim", verb: "couldn't change a shared file", tone: "attention", icon: FileSearch },
   reminder: { label: "Reminder", verb: "reminds you", tone: "attention", icon: AlarmClock },
 };
 
@@ -71,11 +73,12 @@ export function visibleNotifications(
   filters: NotificationFilters,
   query: string,
   sort: NotificationSort,
+  worktrees: readonly Worktree[] = [],
 ): Notification[] {
   const shown = items.filter(
     (n) =>
       inView(n, view) &&
-      inProject(n.cwd, filters.project) &&
+      inProject(projectFolder(n.cwd, worktrees), filters.project) &&
       (!filters.agent || n.agent_id === filters.agent) &&
       (!filters.kind || n.kind === filters.kind) &&
       matches(n, query),

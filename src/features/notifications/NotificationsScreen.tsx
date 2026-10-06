@@ -24,6 +24,7 @@ export default function NotificationsScreen() {
   const markAllRead = useNotifications((s) => s.markAllRead);
   const pending = useAttention((s) => s.pending);
   const agents = useAgents((s) => s.agents);
+  const worktrees = useWorkspace((s) => s.worktrees);
   const projects = useWorkspace((s) => s.projects);
   const reviewId = useNavigation((s) => s.reviewId);
   const notificationId = useNavigation((s) => s.notificationId);
@@ -34,7 +35,7 @@ export default function NotificationsScreen() {
   const [sort, setSort] = useState<NotificationSort>("newest");
   const now = useNow(CLOCK_MS);
 
-  const visible = useMemo(() => visibleNotifications(items, view, filters, query, sort), [items, view, filters, query, sort]);
+  const visible = useMemo(() => visibleNotifications(items, view, filters, query, sort, worktrees), [items, view, filters, query, sort, worktrees]);
   const counts = useMemo(() => viewCounts(items), [items]);
   // A review opened from elsewhere (Work, a task) selects its notification.
   const requested = reviewId ? items.find((n) => n.review_id === reviewId) : items.find((n) => n.id === notificationId);
