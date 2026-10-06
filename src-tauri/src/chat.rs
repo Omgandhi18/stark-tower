@@ -191,6 +191,7 @@ pub struct ChatEvent {
 /// Where a session's output belongs.
 #[derive(Clone, Debug, Default)]
 pub struct Sink {
+    pub(crate) usage_session: Option<crate::spend::Session>,
     /// The conversation messages are saved in; None means the agent's active one.
     pub conversation: Option<i64>,
     /// The task it belongs to; None means whatever task the agent's chat session is on.
@@ -201,22 +202,26 @@ pub struct Sink {
 }
 
 impl Sink {
+    pub(crate) fn launched(&self, launch: &Launch) -> Self {
+        Self { usage_session: Some(crate::spend::Session::launched(launch)), ..self.clone() }
+    }
+
     /// The agent's ongoing chat session.
     pub fn chat() -> Sink {
-        Sink { conversation: None, task: None, persistent: true }
+        Sink { conversation: None, task: None, persistent: true, ..Default::default() }
     }
 
     /// A one-shot run for a delegated task, in that task's own conversation.
     pub fn task(conversation: i64, task: String) -> Sink {
-        Sink { conversation: Some(conversation), task: Some(task), persistent: false }
+        Sink { conversation: Some(conversation), task: Some(task), persistent: false, ..Default::default() }
     }
 
-    fn conversation_for(&self, app: &tauri::AppHandle, agent_id: &str) -> Option<i64> {
+    pub(crate) fn conversation_for(&self, app: &tauri::AppHandle, agent_id: &str) -> Option<i64> {
         self.conversation
             .or_else(|| app.try_state::<crate::AppState>().map(|s| s.ledger.active_conversation(agent_id)))
     }
 
-    fn task_for(&self, app: &tauri::AppHandle, agent_id: &str) -> Option<String> {
+    pub(crate) fn task_for(&self, app: &tauri::AppHandle, agent_id: &str) -> Option<String> {
         self.task.clone().or_else(|| crate::tasks::current(app, agent_id))
     }
 }
@@ -859,11 +864,15 @@ pub(crate) fn tool_returned(app: &tauri::AppHandle, tool_use_id: &str, is_error:
 pub(crate) struct TurnUsage {
     pub cost_usd: Option<f64>,
     pub context_tokens: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub running_total: Option<f64>,
 }
 
 /// The agent's turn ended: the transcript, the HUD, the loop guard, delegation
 /// and the task engine all hear about it.
 pub(crate) fn turn_finished(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, text: Option<String>, usage: TurnUsage) {
+    let usage = crate::spend::record(app, sink, agent_id, usage);
     let (made, more) = crate::outputs::finished(agent_id);
     // Only files the agent may read without asking: nothing reaches the chat past the gate.
     let made: Vec<_> = made.into_iter().filter(|p| crate::bridge::may_read_freely(app, agent_id, p)).collect();
@@ -1000,10 +1009,17 @@ fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, si
             // The context-window fill from the usage block (input + cache + output ≈ conversation size sent).
             let u = |k: &str| v.pointer("/usage").and_then(|x| x.get(k)).and_then(|n| n.as_u64()).unwrap_or(0);
             let usage = TurnUsage {
-                cost_usd: v.get("total_cost_usd").and_then(|c| c.as_f64()),
+                cost_usd: None,
+                running_total: v.get("total_cost_usd").and_then(|c| c.as_f64()),
+                input_tokens: u("input_tokens"),
+                output_tokens: u("output_tokens"),
                 context_tokens: u("input_tokens") + u("cache_read_input_tokens") + u("cache_creation_input_tokens") + u("output_tokens"),
             };
-            turn_finished(app, sink, agent_id, text, usage);
+            let mut sink = sink.clone();
+            if let Some(session) = &mut sink.usage_session {
+                if let Some(id) = v.get("session_id").and_then(|v| v.as_str()) { session.session_id = Some(id.into()); }
+            }
+            turn_finished(app, &sink, agent_id, text, usage);
         }
         _ => {}
     }
@@ -1107,6 +1123,7 @@ fn start_claude(app: &tauri::AppHandle, launch: &Launch, gen: u64) -> Result<(Ch
     }
     let (app2, id2) = (app.clone(), launch.agent_id.clone());
     let (resumed, orchestrator) = (launch.resume.is_some(), launch.orchestrator);
+    let mut sink = Sink::chat().launched(launch);
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
         let mut saw_init = false;
@@ -1116,7 +1133,10 @@ fn start_claude(app: &tauri::AppHandle, launch: &Launch, gen: u64) -> Result<(Ch
             }
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                 let init = is_init(&v);
-                handle_line(&app2, &id2, &v, &Sink::chat(), init && !saw_init);
+                if let Some(id) = v.get("session_id").and_then(|v| v.as_str()) {
+                    sink.usage_session.as_mut().unwrap().session_id = Some(id.into());
+                }
+                handle_line(&app2, &id2, &v, &sink, init && !saw_init);
                 saw_init |= init;
             }
         }
@@ -1264,7 +1284,7 @@ fn run_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, cwd: &str, sin
     if let Some(state) = app.try_state::<crate::AppState>() {
         state.oneshot_pids.lock().unwrap().insert(pid);
     }
-    let outcome = drive_worker(app, agent_id, task, &mut child, sink);
+    let outcome = drive_worker(app, agent_id, task, &mut child, &sink.launched(&launch));
     if outcome.is_err() {
         let _ = child.kill();
     }
@@ -1277,6 +1297,7 @@ fn run_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, cwd: &str, sin
 
 /// Feed a spawned worker its task, stream its output, and return its result text.
 fn drive_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, child: &mut Child, sink: &Sink) -> Result<String, String> {
+    let mut sink = sink.clone();
     let mut stdin = child.stdin.take().ok_or("The worker has no input stream.")?;
     let stdout = child.stdout.take().ok_or("The worker has no output stream.")?;
     if let Some(stderr) = child.stderr.take() {
@@ -1301,7 +1322,10 @@ fn drive_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, child: &mut 
         }
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
             // A one-shot worker runs a single turn, so its only `init` starts its session.
-            handle_line(app, agent_id, &v, sink, true);
+            if let Some(session) = &mut sink.usage_session {
+                if let Some(id) = v.get("session_id").and_then(|v| v.as_str()) { session.session_id = Some(id.into()); }
+            }
+            handle_line(app, agent_id, &v, &sink, true);
             if v.get("type").and_then(|t| t.as_str()) == Some("result") {
                 // A failed run is the delegation's failure, not its answer.
                 result = match failed_result(&v) {

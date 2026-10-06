@@ -1,16 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, FolderOpen, MessageSquarePlus, PanelRight, SquareTerminal } from "lucide-react";
 import { Button, IconButton, Portrait, SelectField, StatusPill } from "../../design";
 import { errorMessage } from "../../lib/errors";
-import { formatCost, formatTokens } from "../../lib/format";
+import { formatTokens } from "../../lib/format";
 import { AGENT_STATUS } from "../../lib/status";
 import type { Agent } from "../../lib/types";
 import { selectThread, useChats } from "../../stores/chats";
 import { useConfig } from "../../stores/config";
 import { useNavigation } from "../../stores/navigation";
 import { usePreview } from "../../stores/preview";
+import { useSpend } from "../../stores/spend";
 import { useTerminal } from "../../stores/terminal";
-import { useUsage } from "../../stores/usage";
+import { reportedCost } from "../spend/spendModel";
 import { useWorkspace } from "../../stores/workspace";
 import { engineLabel } from "../agents/display";
 import { startNewChat } from "./chatActions";
@@ -24,7 +25,12 @@ export default function ConversationHeader({ agent }: { agent: Agent }) {
   const projects = useWorkspace((s) => s.projects);
   const activeProject = useWorkspace((s) => s.activeProject);
   const chatFolder = useChats((s) => selectThread(agent.id)(s).folder);
-  const usage = useUsage((s) => s.byAgent[agent.id]);
+  const conversationId = useChats((s) => selectThread(agent.id)(s).conversationId);
+  const usage = useSpend((s) => conversationId === null ? undefined : s.chats[conversationId]);
+  const revision = useSpend((s) => s.revision);
+  useEffect(() => {
+    if (conversationId !== null) void useSpend.getState().refreshChat(conversationId).catch(() => {});
+  }, [conversationId, revision]);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const terminalOpen = useTerminal((s) => s.open);
@@ -65,9 +71,9 @@ export default function ConversationHeader({ agent }: { agent: Agent }) {
             {error}
           </span>
         )}
-        {usage && (
-          <span className="conversation-usage" title="Reported by the provider after the last reply">
-            {formatCost(usage.costUsd)} spent, {formatTokens(usage.contextTokens)} context
+        {usage && usage.total.turns > 0 && (
+          <span className="conversation-usage" title="This conversation’s recorded cost and the latest context fill">
+            {reportedCost(usage.total)} this chat, {formatTokens(usage.context_tokens)} context
           </span>
         )}
         <SelectField

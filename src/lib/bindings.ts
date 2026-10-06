@@ -6,6 +6,30 @@
 
 
 export const commands = {
+async spendSummary() : Promise<Result<SpendSummary, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("spend_summary") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setBudget(budget: Budget) : Promise<Result<SpendSummary, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_budget", { budget }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async conversationSpend(conversationId: number) : Promise<Result<ConversationSpend, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("conversation_spend", { conversationId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listAgents() : Promise<Agent[]> {
     return await TAURI_INVOKE("list_agents");
 },
@@ -871,7 +895,7 @@ standup_minutes?: number;
 /**
  * The developer allows Starkline to keep this Mac awake while agents work.
  */
-keep_awake?: boolean; 
+keep_awake?: boolean; budget?: Budget; 
 /**
  * How Starkline looks: one of [`THEMES`]. Tasks, permissions and providers don't change with it.
  */
@@ -980,6 +1004,8 @@ export type BrowserPage = {
  * "" before anything has been opened.
  */
 url: string; title: string; loading: boolean }
+export type Budget = { period: BudgetPeriod; limit_usd: number; warn_percent: number }
+export type BudgetPeriod = "day" | "week" | "month"
 /**
  * A bug in the app, reported by an agent for the maintenance agent to fix.
  */
@@ -1006,6 +1032,7 @@ export type Conversation = { id: number; agent_id: string; title: string; cwd: s
  * A teammate's delegation ran here, not a chat the developer had.
  */
 delegated: boolean }
+export type ConversationSpend = { total: SpendTotal; context_tokens: number }
 export type DispatchResult = { agent_id: string; name: string; spawned: boolean }
 /**
  * A backend an agent can run on. `kind` selects the adapter (how we build the
@@ -1366,6 +1393,10 @@ problem: string | null; devices: SimDevice[];
  * AXe or idb is installed, so taps, swipes and typing go through from Starkline.
  */
 touch: boolean }
+export type SpendDay = { date: string; total: SpendTotal }
+export type SpendGroup = { key: string; total: SpendTotal }
+export type SpendSummary = { today: SpendTotal; week: SpendTotal; month: SpendTotal; budget: Budget; budget_spend: number; days: SpendDay[]; agents: SpendGroup[]; projects: SpendGroup[]; models: SpendGroup[]; first_date: string | null; has_spend: boolean }
+export type SpendTotal = { cost_usd: number; input_tokens: number; output_tokens: number; context_tokens: number; turns: number; unpriced_turns: number }
 /**
  * One persisted chat turn — enough to rebuild the transcript UI on reopen.
  */

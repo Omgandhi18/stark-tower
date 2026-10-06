@@ -19,6 +19,7 @@ interface NotificationSummaryProps {
 
 /** A notification with nothing left to decide: what happened, and where to go from here. */
 export default function NotificationSummary({ notification: n, agent, now }: NotificationSummaryProps) {
+  const openSettings = useNavigation((s) => s.openSettings);
   const openTask = useNavigation((s) => s.openTask);
   const openAutomation = useNavigation((s) => s.openAutomation);
   const navigate = useNavigation((s) => s.navigate);
@@ -96,6 +97,11 @@ export default function NotificationSummary({ notification: n, agent, now }: Not
         <p className="review-detail-error" role="alert">
           {error}
         </p>
+      )}
+      {n.kind === "budget" && (
+        <div className="notification-actions">
+          <Button onClick={() => openSettings("spend")}>Review budget</Button>
+        </div>
       )}
       {n.reminder_id !== null && (
         <div className="notification-actions">

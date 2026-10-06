@@ -31,6 +31,7 @@ mod secrets;
 mod simulator;
 #[cfg(target_os = "macos")]
 mod snapshot;
+mod spend;
 mod tasks;
 mod terminal;
 mod tone;
@@ -1021,6 +1022,40 @@ fn review_respond(state: tauri::State<AppState>, id: String, decision: String) {
     }
 }
 
+#[tauri::command]
+#[specta::specta]
+fn spend_summary(state: tauri::State<AppState>) -> Result<spend::SpendSummary, String> {
+    let budget = state.config.lock().unwrap().budget.clone();
+    state.ledger.spend_summary(budget)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_budget(app: tauri::AppHandle, state: tauri::State<AppState>, budget: spend::Budget) -> Result<spend::SpendSummary, String> {
+    budget.validate()?;
+    let updated = {
+        let mut config = state.config.lock().unwrap();
+        let mut updated = config.clone();
+        updated.budget = budget.clone();
+        config::save_checked(std::path::Path::new(&state.config_file), &updated)?;
+        *config = updated.clone();
+        updated
+    };
+    let _ = app.emit("config://changed", updated);
+    if state.ledger.settle_budget_notices() > 0 {
+        let _ = app.emit("notifications://changed", ());
+    }
+    let summary = state.ledger.spend_summary(budget)?;
+    let _ = app.emit("spend://changed", ());
+    Ok(summary)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn conversation_spend(state: tauri::State<AppState>, conversation_id: i64) -> Result<spend::ConversationSpend, String> {
+    state.ledger.conversation_spend(conversation_id)
+}
+
 // ---- configuration (engines + roster) --------------------------------------
 
 /// Persist config, refresh the derived roster, and notify the UI.
@@ -1637,6 +1672,9 @@ fn request_assist(
 fn specta_builder() -> tauri_specta::Builder {
     tauri_specta::Builder::<tauri::Wry>::new().commands(
         tauri_specta::collect_commands![
+            spend_summary,
+            set_budget,
+            conversation_spend,
             list_agents,
             get_ledger,
             get_tasks,

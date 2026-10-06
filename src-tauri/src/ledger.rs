@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// abstract "reactor draw" figure (Claude Max is flat-rate, so this tracks
 /// activity, not dollars).
 pub struct Ledger {
-    conn: Mutex<Connection>,
+    pub(crate) conn: Mutex<Connection>,
     /// The conversation each agent is currently talking in (agent id → conv id).
     active: Mutex<HashMap<String, i64>>,
 }
@@ -676,6 +676,7 @@ impl Ledger {
             )",
             [],
         )?;
+        conn.execute_batch(crate::spend::SCHEMA)?;
         Ok(Ledger {
             conn: Mutex::new(conn),
             active: Mutex::new(HashMap::new()),

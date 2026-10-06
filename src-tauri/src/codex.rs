@@ -196,6 +196,7 @@ impl Codex {
                 turns.active = turn;
                 turns.said.clear();
                 turns.errored = false;
+                turns.usage = TurnUsage::default();
                 crate::pty::emit_status(app, agent, crate::agents::AgentStatus::Thinking);
             }
             "item/started" => {
@@ -267,7 +268,7 @@ impl Codex {
             }
             "thread/tokenUsage/updated" => {
                 let last = |k: &str| params.pointer(&format!("/tokenUsage/last/{k}")).and_then(Value::as_u64).unwrap_or(0);
-                self.turns.lock().unwrap().usage = TurnUsage { cost_usd: None, context_tokens: last("inputTokens") + last("outputTokens") };
+                self.turns.lock().unwrap().usage = TurnUsage { input_tokens: last("inputTokens"), output_tokens: last("outputTokens"), context_tokens: last("inputTokens") + last("outputTokens"), ..Default::default() };
             }
             "error" if params.get("willRetry").and_then(Value::as_bool) != Some(true) => {
                 let message = params.pointer("/error/message").and_then(Value::as_str).unwrap_or("Codex reported an error.");
@@ -287,7 +288,9 @@ impl Codex {
                 if let (Some(message), false) = (&failure, errored) {
                     chat::failed(app, sink, agent, message);
                 }
-                chat::turn_finished(app, sink, agent, (!said.is_empty()).then(|| said.clone()), usage);
+                let mut sink = sink.clone();
+                if let Some(session) = &mut sink.usage_session { session.session_id = self.turns.lock().unwrap().thread.clone(); }
+                chat::turn_finished(app, &sink, agent, (!said.is_empty()).then(|| said.clone()), usage);
                 if let Some(waiter) = waiter {
                     let _ = waiter.send(match failure {
                         Some(message) if said.is_empty() => Err(message),
@@ -372,7 +375,7 @@ fn connect(app: &tauri::AppHandle, launch: &Launch, sink: Sink, gen: Option<u64>
         app: app.clone(),
         agent_id: launch.agent_id.clone(),
         cwd: launch.cwd.clone(),
-        sink,
+        sink: sink.launched(launch),
         rpc: Rpc::new(stdin),
         turns: Mutex::new(Turns::default()),
         log: Mutex::new(VecDeque::new()),

@@ -276,6 +276,22 @@ function install(scenario: Scenario) {
     },
     open_context_file: () => null,
     get_config: () => state.config,
+    spend_summary: () => state.spend,
+    set_budget: (args) => {
+      const budget = args.budget as Scenario["spend"]["budget"];
+      if (!Number.isFinite(budget.limit_usd) || budget.limit_usd < 0 || budget.warn_percent < 50 || budget.warn_percent > 95) throw "Choose a valid budget amount and warning percentage.";
+      state.notifications = state.notifications.map((n) => n.kind === "budget" && n.handled === null ? { ...n, handled: Date.now(), outcome: "Budget reviewed", read: true } : n);
+      emit("notifications://changed", null);
+      state.config.budget = budget;
+      state.spend.budget = budget;
+      state.spend.budget_spend = state.spend[budget.period === "day" ? "today" : budget.period].cost_usd;
+      commitConfig();
+      emit("spend://changed", null);
+      return state.spend;
+    },
+    conversation_spend: (args) => state.conversationSpend[Number(args.conversationId)] ?? {
+      total: { cost_usd: 0, input_tokens: 0, output_tokens: 0, context_tokens: 0, turns: 0, unpriced_turns: 0 }, context_tokens: 0,
+    },
     list_projects: () => state.projects,
     add_project: (args) => {
       const path = String(args.path);

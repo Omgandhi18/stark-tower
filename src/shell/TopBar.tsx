@@ -6,6 +6,10 @@ import { useNavigation } from "../stores/navigation";
 import { useMemo } from "react";
 import { useConfig } from "../stores/config";
 import { runtimeStatus, useSystem } from "../stores/system";
+import { budgetMeter } from "../features/spend/spendModel";
+import { formatCost } from "../lib/format";
+import { useSpend } from "../stores/spend";
+import "../features/spend/spend.css";
 
 /** Brand, runtime status, the attention bell and Keep Awake. Drags the window. */
 export default function TopBar() {
@@ -14,6 +18,9 @@ export default function TopBar() {
   const health = useSystem((s) => s.health);
   const power = useSystem((s) => s.power);
   const toggleKeepAwake = useSystem((s) => s.toggleKeepAwake);
+  const spend = useSpend((s) => s.summary);
+  const spendTone = spend ? budgetMeter(spend.budget, spend.budget_spend).tone : "quiet";
+  const spendTitle = spendTone === "danger" ? "Budget used up. Open Spend settings." : spendTone === "attention" ? "Budget warning reached. Open Spend settings." : "Open Spend settings";
   const pending = useNotifications(selectNeedsYouCount);
   const navigate = useNavigation((s) => s.navigate);
   const openSettings = useNavigation((s) => s.openSettings);
@@ -35,6 +42,12 @@ export default function TopBar() {
       </div>
 
       <div className="topbar-spacer" data-tauri-drag-region />
+
+      {spend?.has_spend && (
+        <button type="button" className={cx("spend-chip", `spend-tone-${spendTone}`)} onClick={() => openSettings("spend")} title={spendTitle}>
+          {formatCost(spend.today.cost_usd)} today
+        </button>
+      )}
 
       <button
         type="button"

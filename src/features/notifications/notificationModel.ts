@@ -10,6 +10,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   TriangleAlert,
+  Wallet,
   type LucideIcon,
 } from "lucide-react";
 import type { StateTone } from "../../lib/status";
@@ -45,6 +46,7 @@ const KINDS: Record<string, KindPresentation> = {
   rule_used: { label: "Allowed by a rule", verb: "went ahead under your rule", tone: "success", icon: ShieldCheck },
   automation_missed: { label: "Missed run", verb: "missed a scheduled run", tone: "attention", icon: CalendarX2 },
   automation_failed: { label: "Run didn't start", verb: "couldn't start a scheduled run", tone: "danger", icon: CalendarX2 },
+  budget: { label: "Budget", verb: "reports a budget warning", tone: "attention", icon: Wallet },
   reminder: { label: "Reminder", verb: "reminds you", tone: "attention", icon: AlarmClock },
 };
 

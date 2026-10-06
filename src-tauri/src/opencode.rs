@@ -59,9 +59,12 @@ struct Turn {
     /// The latest thing the agent said in this turn: a delegated task's result.
     said: String,
     context_tokens: u64,
+    input_tokens: u64,
+    output_tokens: u64,
     /// OpenCode reports the session's total cost; a turn's is the difference.
     cost_total: Option<f64>,
     cost_before: f64,
+    cost_reported: bool,
     finished: Option<mpsc::Sender<Result<String, String>>>,
 }
 
@@ -72,6 +75,11 @@ struct OpenCode {
     sink: Sink,
     rpc: Rpc,
     turn: Mutex<Turn>,
+}
+
+fn usage_tokens(usage: &Value) -> (u64, u64) {
+    let token = |key| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
+    (token("inputTokens"), token("outputTokens"))
 }
 
 fn str_of<'a>(v: &'a Value, key: &str) -> &'a str {
@@ -274,8 +282,11 @@ impl OpenCode {
             }
             "usage_update" => {
                 turn.context_tokens = update.get("used").and_then(Value::as_u64).unwrap_or(turn.context_tokens);
+                turn.input_tokens = update.get("inputTokens").and_then(Value::as_u64).unwrap_or(turn.input_tokens);
+                turn.output_tokens = update.get("outputTokens").and_then(Value::as_u64).unwrap_or(turn.output_tokens);
                 if let Some(total) = update.pointer("/cost/amount").and_then(Value::as_f64) {
                     turn.cost_total = Some(total);
+                    turn.cost_reported = true;
                 }
             }
             _ => {}
@@ -324,6 +335,10 @@ impl OpenCode {
             turn.busy = true;
             turn.said.clear();
             turn.cost_before = turn.cost_total.unwrap_or(0.0);
+            turn.cost_reported = false;
+            turn.input_tokens = 0;
+            turn.output_tokens = 0;
+            turn.context_tokens = 0;
             session
         };
         let me = self.clone();
@@ -346,14 +361,24 @@ impl OpenCode {
                 Ok(r) => r.pointer("/usage/totalTokens").and_then(Value::as_u64).filter(|_| turn.context_tokens == 0).unwrap_or(turn.context_tokens),
                 Err(_) => turn.context_tokens,
             };
-            let cost = turn.cost_total.map(|total| (total - turn.cost_before).max(0.0));
-            (std::mem::take(&mut turn.said), TurnUsage { cost_usd: cost, context_tokens: context }, turn.finished.take(), turn.queued.pop_front())
+            if let Ok(response) = &reply {
+                if let Some(usage) = response.get("usage") {
+                    let (input, output) = usage_tokens(usage);
+                    turn.input_tokens = input;
+                    turn.output_tokens = output;
+                }
+            }
+            let running_total = turn.cost_total.filter(|_| turn.cost_reported);
+            let cost = running_total.map(|total| crate::spend::cost_delta(total, turn.cost_before));
+            (std::mem::take(&mut turn.said), TurnUsage { cost_usd: cost, context_tokens: context, input_tokens: turn.input_tokens, output_tokens: turn.output_tokens, running_total }, turn.finished.take(), turn.queued.pop_front())
         };
         let failure = reply.err().map(|e| readable(&e.message));
         if let Some(message) = &failure {
             chat::failed(app, sink, agent, message);
         }
-        chat::turn_finished(app, sink, agent, (!said.is_empty()).then(|| said.clone()), usage);
+        let mut sink = sink.clone();
+        if let Some(session) = &mut sink.usage_session { session.session_id = self.turn.lock().unwrap().session.clone(); }
+        chat::turn_finished(app, &sink, agent, (!said.is_empty()).then(|| said.clone()), usage);
         if let Some(waiter) = waiter {
             let _ = waiter.send(match failure {
                 Some(message) if said.is_empty() => Err(message),
@@ -362,7 +387,7 @@ impl OpenCode {
         }
         if let Some(next) = next {
             if let Err(e) = self.send(&next) {
-                chat::failed(app, sink, agent, &e);
+                chat::failed(app, &sink, agent, &e);
             }
         }
     }
@@ -423,7 +448,7 @@ fn connect(app: &tauri::AppHandle, launch: &Launch, sink: Sink, gen: Option<u64>
         app: app.clone(),
         agent_id: launch.agent_id.clone(),
         cwd: launch.cwd.clone(),
-        sink,
+        sink: sink.launched(launch),
         rpc: Rpc::new(stdin),
         turn: Mutex::new(Turn::default()),
     });
@@ -543,6 +568,12 @@ pub(crate) fn run_once(app: &tauri::AppHandle, launch: &Launch, task: &str, sink
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prompt_usage_keeps_the_reported_input_and_output_counts() {
+        assert_eq!(usage_tokens(&json!({ "inputTokens": 100, "outputTokens": 20, "cachedReadTokens": 30, "cachedWriteTokens": 10 })), (100, 20));
+        assert_eq!(usage_tokens(&json!({})), (0, 0));
+    }
 
     #[test]
     fn messages_that_look_like_commands_stay_messages() {

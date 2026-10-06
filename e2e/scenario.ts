@@ -1,7 +1,7 @@
 // What the fake backend starts with in end-to-end tests: the default roster,
 // two projects, work in every state, and one of each kind of request.
 // Test fixture only; the app itself never shows this data.
-import type { TerminalInfo } from "../src/lib/bindings";
+import type { ConversationSpend, SpendSummary, SpendTotal, TerminalInfo } from "../src/lib/bindings";
 import type {
   AgentConfig,
   AgentStatus,
@@ -40,6 +40,8 @@ const MINUTE = 60_000;
 const ago = (minutes: number) => NOW - minutes * MINUTE;
 
 export interface Scenario {
+  spend: SpendSummary;
+  conversationSpend: Record<number, ConversationSpend>;
   /** How long after the page loads the backend starts answering (the launch race); by default at once. */
   backendReadyAfterMs?: number;
   config: AppConfig;
@@ -296,6 +298,8 @@ const message = (id: number, role: string, fields: Partial<StoredMessage>): Stor
 
 export function defaultScenario(): Scenario {
   return {
+    spend: emptySpend(),
+    conversationSpend: {},
     config,
     statuses: { jarvis: "idle", vision: "thinking", friday: "working", edith: "idle", karen: "working", veronica: "blocked", "dum-e": "offline" },
     projects: {
@@ -873,4 +877,35 @@ function automations(): Pick<Scenario, "automations" | "automationRuns"> {
       run(5, on(-7, 9), "succeeded", 18, "No known vulnerabilities. Two packages are a major version behind."),
     ],
   };
+}
+
+function emptyTotal(): SpendTotal {
+  return { cost_usd: 0, input_tokens: 0, output_tokens: 0, context_tokens: 0, turns: 0, unpriced_turns: 0 };
+}
+
+function emptySpend(): SpendSummary {
+  return {
+    today: emptyTotal(), week: emptyTotal(), month: emptyTotal(),
+    budget: { period: "month", limit_usd: 0, warn_percent: 80 }, budget_spend: 0,
+    days: Array.from({ length: 30 }, (_, n) => ({ date: new Date(Date.UTC(2026, 9, 5 - 29 + n)).toISOString().slice(0, 10), total: emptyTotal() })),
+    agents: [], projects: [], models: [], first_date: null, has_spend: false,
+  };
+}
+
+/** A small record of priced Claude work and token-only Codex work. */
+export function spendScenario(): Scenario {
+  const scenario = defaultScenario();
+  const total = (cost_usd: number, turns: number, unpriced_turns = 0): SpendTotal => ({ cost_usd, turns, unpriced_turns, input_tokens: turns * 1200, output_tokens: turns * 200, context_tokens: turns * 1800 });
+  scenario.spend = {
+    ...emptySpend(), today: total(3.2, 3, 1), week: total(3.2, 3, 1), month: total(8.5, 7, 2),
+    budget: { period: "month", limit_usd: 10, warn_percent: 80 }, budget_spend: 8.5, first_date: "2026-10-04", has_spend: true,
+    agents: [{ key: "friday", total: total(8.5, 5) }, { key: "vision", total: total(0, 2, 2) }],
+    projects: [{ key: APP, total: total(8.5, 7, 2) }],
+    models: [{ key: "sonnet", total: total(8.5, 5) }, { key: "gpt-5.4", total: total(0, 2, 2) }],
+  };
+  scenario.spend.days[28].total = total(5.3, 4, 1);
+  scenario.spend.days[29].total = total(3.2, 3, 1);
+  scenario.config = { ...scenario.config, budget: scenario.spend.budget };
+  scenario.conversationSpend = { 20: { total: total(1.24, 2), context_tokens: 3200 } };
+  return scenario;
 }
