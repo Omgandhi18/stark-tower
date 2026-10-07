@@ -66,18 +66,19 @@ test("before any turns, Spend explains how to start and the chip stays hidden", 
   await expect(page.getByText("Budget is off.")).toBeVisible();
 });
 
-test("the chat header loads this conversation's total and refreshes it", async ({ page }) => {
+test("the chat's header loads this conversation's total and refreshes it", async ({ page }) => {
   await openApp(page, spendScenario());
   await page
     .getByRole("region", { name: "Team" })
     .getByRole("button", { name: /JARVIS/ })
     .click();
-  await expect(page.getByText("$1.24 this chat, 3k context")).toBeVisible();
+  const cost = page.locator(".task-fact", { hasText: "Chat cost" });
+  await expect(cost.getByRole("definition")).toHaveText("$1.24, 3k context");
   await page.evaluate(() => {
     (window as unknown as { __fake: { state: Scenario } }).__fake.state.conversationSpend[20].total.cost_usd = 2.5;
   });
   await fakeEmit(page, "spend://changed", null);
-  await expect(page.getByText("$2.50 this chat, 3k context")).toBeVisible();
+  await expect(cost.getByRole("definition")).toHaveText("$2.50, 3k context");
 });
 
 test("a budget notification opens Spend and saving acknowledges it", async ({ page }) => {

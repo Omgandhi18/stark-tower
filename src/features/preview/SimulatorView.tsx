@@ -23,6 +23,7 @@ import SimulatorTools from "./SimulatorTools";
 import { addPoint, markedFrame } from "./pointComposer";
 import { simulatorPointText } from "./pointModel";
 import { usePreview } from "../../stores/preview";
+import "./preview.css";
 
 /** A pause between screenshots: a few frames a second, without keeping the Mac busy. */
 const FRAME_GAP_MS = 250;
@@ -36,14 +37,22 @@ function onImage(img: HTMLImageElement, clientX: number, clientY: number): [numb
   return [((clientX - box.left) / box.width) * img.naturalWidth, ((clientY - box.top) / box.height) * img.naturalHeight];
 }
 
+interface SimulatorViewProps {
+  /** Its screen is the one showing, so the device's screen is read. */
+  active: boolean;
+  /** Whose chat "Point at something" adds to; null while there's no chat to talk in beside it. */
+  agentId: string | null;
+}
+
 /**
  * The iOS Simulator: pick a device, boot it, and watch its screen, refreshed while the
  * panel shows it. Click to tap, drag to swipe, and type in the box below (with AXe or idb).
  */
-export default function SimulatorView({ active }: { active: boolean }) {
-  const agentId = useNavigation(s => s.agentId);
+export default function SimulatorView({ active, agentId }: SimulatorViewProps) {
   const question = useAttention(selectQuestionFor(agentId ?? ""));
-  const [picking, setPicking] = useState(false);
+  // Pointing is for one agent's chat while this screen shows: another agent or screen ends it.
+  const [pickingFor, setPickingFor] = useState<string | null>(null);
+  const picking = active && agentId !== null && pickingFor === agentId;
   const chosen = usePreview((s) => s.simulator);
   const choose = usePreview((s) => s.showSimulator);
   const [status, setStatus] = useState<SimulatorStatus | null>(null);
@@ -116,7 +125,7 @@ export default function SimulatorView({ active }: { active: boolean }) {
       if (!picking || !start.chat) return;
       const chat = start.chat;
       const conversationId = useChats.getState().threads[chat]?.conversationId ?? null;
-      setPicking(false);
+      setPickingFor(null);
       act(async () => {
         const png = markedFrame(img, start.at[0], start.at[1]);
         const [point, attachment] = await Promise.all([
@@ -138,16 +147,16 @@ export default function SimulatorView({ active }: { active: boolean }) {
   };
 
   useEffect(() => useAttention.subscribe(state => {
-    if (agentId && selectQuestionFor(agentId)(state)) setPicking(false);
+    if (agentId && selectQuestionFor(agentId)(state)) setPickingFor(null);
   }), [agentId]);
 
   useEffect(() => useNavigation.subscribe((next, previous) => {
-    if (next.agentId !== previous.agentId || next.route !== "conversation") { setPicking(false); press.current = null; }
+    if (next.route !== previous.route) { setPickingFor(null); press.current = null; }
   }), []);
 
   useEffect(() => {
     if (!picking) return;
-    const escape = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") setPicking(false); };
+    const escape = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") setPickingFor(null); };
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
   }, [picking]);
@@ -180,13 +189,13 @@ export default function SimulatorView({ active }: { active: boolean }) {
           value={device.udid}
           options={devices.map((d) => ({ value: d.udid, label: `${d.name} · ${d.runtime}${d.booted ? " · running" : ""}` }))}
           onChange={(udid) => {
-            setPicking(false);
+            setPickingFor(null);
             setFrame(null);
             choose(udid);
           }}
           className="simulator-device"
         />
-        <IconButton icon={MousePointerClick} label="Point at something" size="sm" aria-pressed={picking} disabled={!running || !frame || busy || !agentId || Boolean(question)} title={!running ? "Boot this simulator first" : question ? "Answer the agent’s question first, then point at the screen." : undefined} onClick={() => setPicking(on => !on)} />
+        <IconButton icon={MousePointerClick} label="Point at something" size="sm" aria-pressed={picking} disabled={!running || !frame || busy || !agentId || Boolean(question)} title={!running ? "Boot this simulator first" : question ? "Answer the agent’s question first, then point at the screen." : undefined} onClick={() => setPickingFor(picking ? null : agentId)} />
         {running ? (
           <>
             <IconButton icon={Circle} label="Home" size="sm" disabled={busy || !status.touch} onClick={() => act(() => simulatorHome(device.udid), "Home didn't go through.")} />

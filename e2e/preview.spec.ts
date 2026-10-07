@@ -1,5 +1,5 @@
 import { fakeCalls, fakeEmit } from "./fakeBackend";
-import { expect, goTo, openApp, test } from "./fixtures";
+import { expect, goTo, openApp, showInSidePanel, sidePanel, test } from "./fixtures";
 import { defaultScenario, withDueReminder } from "./scenario";
 
 const openFriday = async (page: import("@playwright/test").Page, scenario = defaultScenario()) => {
@@ -14,9 +14,7 @@ const calls = async (page: import("@playwright/test").Page, cmd: string) => (awa
 test.describe("preview: browser", () => {
   test("opens a page beside the chat and keeps the browser over its panel", async ({ page }) => {
     await openFriday(page);
-    await page.getByRole("button", { name: "Show the browser and simulator" }).click();
-    const preview = page.getByRole("complementary", { name: "Preview" });
-    await expect(preview.getByRole("tab", { name: "Browser", selected: true })).toBeVisible();
+    const preview = await showInSidePanel(page, "Browser");
     await expect(preview.getByText("Open a page")).toBeVisible();
 
     const address = preview.getByRole("textbox", { name: "Address" });
@@ -36,7 +34,7 @@ test.describe("preview: browser", () => {
     await preview.getByRole("button", { name: "Back" }).click();
     expect((await calls(page, "browser_go")).pop()?.args).toEqual({ action: "back" });
 
-    // Leaving the conversation takes the browser off screen.
+    // Leaving the chat takes the browser off screen.
     const hidden = (await calls(page, "browser_hide")).length;
     await goTo(page, "Work");
     await expect.poll(async () => (await calls(page, "browser_hide")).length).toBeGreaterThan(hidden);
@@ -44,7 +42,7 @@ test.describe("preview: browser", () => {
 
   test("steps aside while a reminder pops up over it", async ({ page }) => {
     await openFriday(page, withDueReminder(defaultScenario()));
-    await page.getByRole("button", { name: "Show the browser and simulator" }).click();
+    await showInSidePanel(page, "Browser");
     await page.getByRole("textbox", { name: "Address" }).fill("localhost:5173");
     await page.getByRole("textbox", { name: "Address" }).press("Enter");
     await expect.poll(async () => (await calls(page, "browser_show")).length).toBeGreaterThan(0);
@@ -56,18 +54,18 @@ test.describe("preview: browser", () => {
 
   test("comes into view when an agent opens a page", async ({ page }) => {
     await openFriday(page);
-    await expect(page.getByRole("complementary", { name: "Preview" })).toHaveCount(0);
+    const panel = sidePanel(page);
+    await expect(panel.getByRole("tab", { name: "Browser", exact: true, selected: true })).toHaveCount(0);
     await fakeEmit(page, "browser://reveal", { agentId: "friday" });
-    await expect(page.getByRole("complementary", { name: "Preview" }).getByRole("tab", { name: "Browser", selected: true })).toBeVisible();
+    await expect(panel.getByRole("tab", { name: "Browser", exact: true, selected: true })).toBeVisible();
+    await expect(panel.getByRole("textbox", { name: "Address" })).toBeVisible();
   });
 });
 
 test.describe("preview: simulator", () => {
   test("shows the running simulator, taps it and types on it", async ({ page }) => {
     await openFriday(page);
-    await page.getByRole("button", { name: "Show the browser and simulator" }).click();
-    const preview = page.getByRole("complementary", { name: "Preview" });
-    await preview.getByRole("tab", { name: "Simulator" }).click();
+    const preview = await showInSidePanel(page, "Simulator");
     await expect(preview.getByRole("combobox", { name: "Simulator" })).toHaveValue("SIM-17PRO");
     const screen = preview.getByRole("img", { name: "iPhone 17 Pro's screen" });
     await expect(screen).toBeVisible();
@@ -108,9 +106,7 @@ test.describe("preview: simulator", () => {
       const fake = (window as unknown as { __fake: { state: { simulator: { frame: string } } } }).__fake;
       fake.state.simulator.frame = canvas.toDataURL("image/jpeg", 0.4).split(",")[1];
     });
-    await page.getByRole("button", { name: "Show the browser and simulator" }).click();
-    const preview = page.getByRole("complementary", { name: "Preview" });
-    await preview.getByRole("tab", { name: "Simulator" }).click();
+    const preview = await showInSidePanel(page, "Simulator");
     const screen = preview.getByRole("img", { name: "iPhone 17 Pro's screen" });
     await expect(screen).toBeVisible();
     await expect.poll(() => screen.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1206);
@@ -126,9 +122,7 @@ test.describe("preview: simulator", () => {
   test("says how to tap from here when nothing can send taps", async ({ page }) => {
     const scenario = defaultScenario();
     await openFriday(page, { ...scenario, simulator: { ...scenario.simulator, touch: false } });
-    await page.getByRole("button", { name: "Show the browser and simulator" }).click();
-    const preview = page.getByRole("complementary", { name: "Preview" });
-    await preview.getByRole("tab", { name: "Simulator" }).click();
+    const preview = await showInSidePanel(page, "Simulator");
     const note = preview.getByRole("note");
     await expect(note.locator("code")).toHaveText("brew install cameroncooke/axe/axe");
     await expect(preview.getByRole("textbox", { name: "Type on the simulator" })).toHaveCount(0);
@@ -139,9 +133,7 @@ test.describe("preview: simulator", () => {
 
   test("boots a simulator that isn't running", async ({ page }) => {
     await openFriday(page);
-    await page.getByRole("button", { name: "Show the browser and simulator" }).click();
-    const preview = page.getByRole("complementary", { name: "Preview" });
-    await preview.getByRole("tab", { name: "Simulator" }).click();
+    const preview = await showInSidePanel(page, "Simulator");
     await preview.getByRole("combobox", { name: "Simulator" }).selectOption("SIM-16E");
     await expect(preview.getByText("iPhone 16e isn't running")).toBeVisible();
     await preview.getByRole("button", { name: "Boot" }).click();

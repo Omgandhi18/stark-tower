@@ -13,10 +13,10 @@ import { localTerminalLink, unseenOutput } from "./terminalModel";
 const runtimes = new Map<string, { terminal: Terminal; fit: FitAddon; element: HTMLDivElement; observer: MutationObserver }>();
 const fail = () => useTerminal.getState().report("The terminal couldn't connect. Close this tab and open a new terminal to try again.");
 
-/** A local page opens in the browser beside the chat; anything else (or from a task page) in the default browser. */
+/** A local page opens in the built-in browser beside the chat; anything else (or from elsewhere) in the default browser. */
 function openLink(uri: string) {
   const report = (message: string) => () => useTerminal.getState().report(message);
-  if (localTerminalLink(uri) && useNavigation.getState().route === "conversation") {
+  if (localTerminalLink(uri) && useNavigation.getState().route === "task") {
     usePreview.getState().show("browser");
     void browserNavigate(uri).catch(report("Couldn't open this page. Try the address in the browser panel."));
   } else {

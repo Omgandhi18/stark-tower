@@ -1,22 +1,27 @@
 import { useEffect, useState } from "react";
-import { ClipboardList } from "lucide-react";
-import { EmptyState, SkeletonRows, Tabs, type TabItem } from "../../design";
+import { ClipboardList, MessagesSquare } from "lucide-react";
+import { EmptyState, SkeletonRows, Tabs, cx, type TabItem } from "../../design";
 import { requesterName } from "../../lib/requester";
+import type { TaskDetail } from "../../lib/types";
 import { useNow } from "../../lib/useNow";
 import { useAgents } from "../../stores/agents";
 import { useAttention } from "../../stores/attention";
 import { useAutomations } from "../../stores/automations";
 import { useNavigation } from "../../stores/navigation";
+import { usePreview } from "../../stores/preview";
 import { useWorkspace } from "../../stores/workspace";
 import TerminalDrawer from "../terminal/TerminalDrawer";
 import { taskState } from "../work/board";
 import ActivityList from "./ActivityList";
 import ChangesList from "./ChangesList";
+import EarlierChats from "./EarlierChats";
 import ExecutionTree from "./ExecutionTree";
 import PlanList from "./PlanList";
 import TaskConversation from "./TaskConversation";
 import TaskHeader from "./TaskHeader";
 import TaskSideRail from "./TaskSideRail";
+import { useLiveChat } from "./liveChat";
+import { useChatOpening } from "./useChatOpening";
 import { useTaskDetail } from "./useTaskDetail";
 import "./task.css";
 
@@ -24,17 +29,19 @@ type CenterTab = "conversation" | "plan" | "files" | "activity";
 
 const CLOCK_MS = 15_000;
 
-/** One task in full: who's on it, the conversation, its plan, changes and history. */
+/**
+ * Every chat, as the task it runs: who's on it, the conversation, its plan, changes and
+ * history, with the browser, simulator and terminal beside it.
+ */
 export default function TaskScreen() {
   const route = useNavigation((s) => s.route);
   const taskId = useNavigation((s) => s.taskId);
+  const chatAgent = useNavigation((s) => s.chatAgent);
   const navigate = useNavigation((s) => s.navigate);
   const openTask = useNavigation((s) => s.openTask);
   const agents = useAgents((s) => s.agents);
-  const pending = useAttention((s) => s.pending);
-  const automations = useAutomations((s) => s.items);
+  const opening = useChatOpening(chatAgent);
   const { state } = useTaskDetail(taskId);
-  const [tab, setTab] = useState<CenterTab>("conversation");
   const now = useNow(CLOCK_MS);
   // A chat carries on into newer work (more asked after a review, a new request from Work): once
   // this task has nothing left running or waiting for review, the page follows the chat there.
@@ -48,6 +55,27 @@ export default function TaskScreen() {
     if (newer && route === "task") openTask(newer);
   }, [newer, route, openTask]);
 
+  if (chatAgent) {
+    const name = agents.find((a) => a.id === chatAgent)?.name ?? chatAgent;
+    return (
+      <div className="task-screen is-empty">
+        {opening.error ? (
+          <EmptyState
+            icon={MessagesSquare}
+            title={`Your chat with ${name} couldn't be opened`}
+            body={opening.error}
+            action={
+              <button type="button" className="link-button" onClick={opening.retry}>
+                Try again
+              </button>
+            }
+          />
+        ) : (
+          <SkeletonRows rows={4} label={`Opening your chat with ${name}`} className="task-loading" />
+        )}
+      </div>
+    );
+  }
   if (!taskId || state.status === "missing") {
     return (
       <div className="task-screen is-empty">
@@ -78,10 +106,19 @@ export default function TaskScreen() {
       </div>
     );
   }
+  return <TaskWorkspace detail={state.detail} active={route === "task"} now={now} />;
+}
 
-  const { detail } = state;
+/** One task in full, with its chat live in the middle while it's the one its owner talks in. */
+function TaskWorkspace({ detail, active, now }: { detail: TaskDetail; active: boolean; now: number }) {
+  const agents = useAgents((s) => s.agents);
+  const pending = useAttention((s) => s.pending);
+  const automations = useAutomations((s) => s.items);
+  const previewing = usePreview((s) => s.open);
+  const [tab, setTab] = useState<CenterTab>("conversation");
   const { task } = detail;
   const owner = agents.find((a) => a.id === task.assignee);
+  const live = useLiveChat(task, owner);
   const waitingOnYou = new Set(pending.map((r) => r.agentId));
   const members = new Set([task.assignee, ...detail.children.map((c) => c.assignee)]);
   const reviews = pending.filter((r) => members.has(r.agentId));
@@ -95,10 +132,13 @@ export default function TaskScreen() {
   ];
 
   return (
-    <div className="task-screen">
-      <TaskHeader detail={detail} owner={owner} requester={requester} state={taskState(task, owner, detail.children, waitingOnYou)} now={now} />
+    <div className={cx("task-screen", previewing && "has-preview")}>
+      <TaskHeader detail={detail} owner={owner} live={live} requester={requester} state={taskState(task, owner, detail.children, waitingOnYou)} now={now} />
       <div className="task-body">
-        <ExecutionTree detail={detail} waitingOnYou={waitingOnYou} />
+        <div className="task-left">
+          <ExecutionTree detail={detail} waitingOnYou={waitingOnYou} />
+          <EarlierChats agentId={task.assignee} agent={owner} shownChat={task.conversation_id} />
+        </div>
         <section className="task-center" aria-label="Task">
           <Tabs tabs={tabs} value={tab} onChange={setTab} label="Task sections" idPrefix="task" className="task-tabs" />
           <div role="tabpanel" id={`task-panel-${tab}`} aria-labelledby={`task-tab-${tab}`} className="task-panel">
@@ -107,9 +147,20 @@ export default function TaskScreen() {
             {tab === "files" && <ChangesList taskId={task.id} changes={detail.changes} cwd={task.cwd} />}
             {tab === "activity" && <ActivityList events={detail.events} agents={agents} now={now} />}
           </div>
-          <TerminalDrawer folder={task.cwd} active={route === "task"} movable />
+          <TerminalDrawer folder={task.cwd} active={active} movable />
         </section>
-        <TaskSideRail taskId={task.id} folder={task.cwd} active={route === "task"} conversationId={task.conversation_id} reviews={reviews} changes={detail.changes} checks={detail.checks} now={now} onShowFiles={() => setTab("files")} />
+        <TaskSideRail
+          taskId={task.id}
+          folder={task.cwd}
+          active={active}
+          conversationId={task.conversation_id}
+          pointAgent={live ? task.assignee : null}
+          reviews={reviews}
+          changes={detail.changes}
+          checks={detail.checks}
+          now={now}
+          onShowFiles={() => setTab("files")}
+        />
       </div>
     </div>
   );

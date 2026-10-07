@@ -41,6 +41,10 @@
   gap: var(--space-2);
 }
 
+.task-chat-folder {
+  width: 200px;
+}
+
 .task-header-error {
   color: var(--state-danger);
   font-size: var(--text-sm);
@@ -103,11 +107,11 @@
   min-height: 0;
 }
 
-/* Who's working on it */
-.execution {
+/* Left column: who's working on it, then the owner's other chats */
+.task-left {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-5);
   width: 264px;
   flex: none;
   min-height: 0;
@@ -117,7 +121,14 @@
   overflow-y: auto;
 }
 
-.execution .section-header {
+.execution,
+.earlier-chats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.task-left .section-header {
   padding: 0 var(--space-2);
 }
 
@@ -202,6 +213,111 @@ button.execution-button:hover {
 .execution-files {
   color: var(--text-muted);
   font-size: var(--text-xs);
+}
+
+/* Earlier chats with the owner */
+.earlier-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.earlier-chat {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px var(--space-2);
+  width: 100%;
+  min-height: 44px;
+  padding: 6px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  text-align: left;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.earlier-chat:hover {
+  background: var(--surface-hover);
+}
+
+.earlier-chat[aria-current] {
+  background: var(--accent-soft);
+}
+
+.earlier-title {
+  font-weight: var(--weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.earlier-meta {
+  grid-column: 1;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.earlier-chat .tag {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+}
+
+/* A chat's actions show while it's hovered or focused, over its end. */
+.earlier-row {
+  position: relative;
+}
+
+.earlier-row > .menu-root {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.earlier-row > .earlier-chat:is(:hover, :focus-visible) ~ .menu-root,
+.earlier-row > .menu-root:is(:hover, :focus-within),
+.earlier-row > .menu-root:has([aria-expanded="true"]) {
+  opacity: 1;
+}
+
+.earlier-row > .earlier-chat:is(:hover, :focus-visible),
+.earlier-row:has(> .menu-root:is(:hover, :focus-within)) > .earlier-chat,
+.earlier-row:has(> .menu-root [aria-expanded="true"]) > .earlier-chat {
+  padding-right: 40px;
+}
+
+.earlier-more {
+  padding: 6px var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.earlier-more:hover {
+  color: var(--text);
+}
+
+.earlier-empty,
+.earlier-error {
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.earlier-empty {
+  color: var(--text-muted);
+}
+
+.earlier-error {
+  color: var(--state-danger);
 }
 
 /* Center */
@@ -473,17 +589,53 @@ button.execution-button:hover {
 
 /* ---- Right rail ---------------------------------------------------------------- */
 .task-rail {
+  position: relative;
   display: flex;
   flex-direction: column;
-  width: 340px;
+  width: 372px;
   flex: none;
   min-height: 0;
   border-left: 1px solid var(--border-subtle);
   background: var(--surface-sunken);
 }
 
-/* Four tabs share a narrow panel: they sit close, and scroll rather than widen the page if they still don't fit. */
-.task-rail .tabs {
+/* The browser and simulator take the width you drag the panel to (set inline), and give it
+   back before the chat goes under its floor (railModel's MIN_CHAT_WIDTH). */
+.task-rail.has-preview {
+  flex: 0 1 auto;
+  min-width: 360px;
+  background: var(--surface);
+}
+
+.task-screen.has-preview .task-center {
+  min-width: 400px;
+}
+
+.task-rail-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  z-index: 1;
+  width: 6px;
+  cursor: col-resize;
+}
+
+.task-rail-resize:hover,
+.task-rail-resize:focus-visible {
+  background: var(--accent-soft);
+}
+
+/* Beside the browser or simulator on a smaller window, the left column gives way to the chat. */
+@media (max-width: 1440px) {
+  .task-screen.has-preview .task-left {
+    display: none;
+  }
+}
+
+/* Six tabs share a narrow panel, so they sit close. The tools keep to the end of the row and never
+   hide: on a small window the status tabs' labels shorten first (and the row scrolls only past that). */
+.task-rail > .tabs {
   flex: none;
   gap: 0;
   padding: 0 var(--space-1);
@@ -491,10 +643,31 @@ button.execution-button:hover {
   scrollbar-width: none;
 }
 
-.task-rail .tab {
-  flex: none;
+.task-rail > .tabs > .tab {
+  flex: 0 1 auto;
+  min-width: 0;
   gap: 4px;
   padding: 0 var(--space-2);
+}
+
+.task-rail > .tabs .tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-rail > .tabs .count-badge {
+  flex: none;
+}
+
+.task-rail > .tabs > .tab.is-icon-only {
+  flex: none;
+  padding: 0 6px;
+}
+
+.task-rail > .tabs > .tab:not(.is-icon-only) + .tab.is-icon-only {
+  margin-left: auto;
 }
 
 /* A terminal needs columns: the panel widens while it's there. */
@@ -513,8 +686,8 @@ button.execution-button:hover {
   margin-bottom: var(--space-3);
 }
 
-/* The terminal fills the panel and scrolls itself. */
-.task-rail-body.is-terminal {
+/* A tool (the terminal, browser or simulator) fills the panel and scrolls itself. */
+.task-rail-body.is-tool {
   display: flex;
   flex-direction: column;
   padding: 0;
@@ -605,12 +778,12 @@ button.execution-button:hover {
 }
 
 @media (max-width: 1360px) {
-  .execution {
+  .task-left {
     width: 228px;
   }
 
   .task-rail {
-    width: 300px;
+    width: 340px;
   }
 
   .task-rail.has-terminal {

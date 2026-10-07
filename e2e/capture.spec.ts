@@ -1,7 +1,7 @@
 // Captures every screen for visual review: `npx playwright test e2e/capture.spec.ts`.
 // Images land in e2e/screenshots (ignored by git).
 import { fakeEmit } from "./fakeBackend";
-import { expect, goTo, openApp, test } from "./fixtures";
+import { expect, goTo, openApp, showInSidePanel, test } from "./fixtures";
 import { defaultScenario } from "./scenario";
 
 const shot = (name: string) => ({ path: `e2e/screenshots/${name}.png`, animations: "disabled" as const });
@@ -40,8 +40,9 @@ test("capture every screen", async ({ page }) => {
   await page.getByRole("tab", { name: /Files/ }).click();
   await page.getByRole("button", { name: /src\/pages\/Settings\.tsx/ }).click();
   await page.screenshot(shot("18-task-files"));
-  await page.getByRole("button", { name: "Talk to FRIDAY" }).click();
-  await expect(page.locator("pre code")).toBeVisible();
+  // The chat is the task's conversation: the same page, back on its Conversation tab.
+  await page.getByRole("tab", { name: "Conversation", exact: true }).click();
+  await expect(page.getByRole("log", { name: "Conversation with FRIDAY" }).locator("pre code").first()).toBeVisible();
   await page.screenshot(shot("02-conversation"));
   await page.getByRole("log", { name: "Conversation with FRIDAY" }).getByText("Made in this turn").scrollIntoViewIfNeeded();
   await page.waitForTimeout(300);
@@ -62,6 +63,15 @@ test("capture every screen", async ({ page }) => {
   }
   await page.getByRole("button", { name: "Remove mockup.png" }).click();
   await page.getByRole("button", { name: "Remove brief.md" }).click();
+  const panel = await showInSidePanel(page, "Browser");
+  await panel.getByRole("textbox", { name: "Address" }).fill("localhost:5173/settings");
+  await panel.getByRole("textbox", { name: "Address" }).press("Enter");
+  await expect(panel.getByRole("region", { name: "Checkout settings" })).toBeVisible();
+  await page.screenshot(shot("02e-chat-browser"));
+  await showInSidePanel(page, "Simulator");
+  await expect(panel.getByRole("img", { name: "iPhone 17 Pro's screen" })).toBeVisible();
+  await page.screenshot(shot("02f-chat-simulator"));
+  await panel.getByRole("tab", { name: /^Attention/ }).click();
 
   await goTo(page, "Environment");
   await expect(page.locator(".env-canvas canvas")).toBeVisible();

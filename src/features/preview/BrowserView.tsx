@@ -7,34 +7,41 @@ import { selectQuestionFor, useAttention } from "../../stores/attention";
 import { errorMessage } from "../../lib/errors";
 import { useNavigation } from "../../stores/navigation";
 import { useChats } from "../../stores/chats";
-import { useWorkspace } from "../../stores/workspace";
 import { addPoint } from "./pointComposer";
 import { browserPointText } from "./pointModel";
 import DevServerToolbar from "./DevServerToolbar";
 import DevServerOutput from "./DevServerOutput";
 import { BROWSER_SIZES, fitBrowser, type BrowserSize } from "./browserModel";
 import { usePreview } from "../../stores/preview";
+import "./preview.css";
 
 /** How often the browser checks it's still over its panel (things move without resizing it). */
 const TRACK_MS = 400;
 
 const report = (what: string) => (e: unknown) => console.error(`[browser] couldn't ${what}`, e);
 
+interface BrowserViewProps {
+  /** Its screen is the one showing, so the page is laid over it. */
+  active: boolean;
+  /** Whose chat "Point at something" adds to; null while there's no chat to talk in beside it. */
+  agentId: string | null;
+  /** The project whose dev server the toolbar runs. */
+  folder: string;
+}
+
 /**
  * The built-in browser: an address bar over a real browser view, which the backend lays over
  * this panel. It follows the panel as it moves and steps aside while anything is drawn over it.
  */
-export default function BrowserView({ active }: { active: boolean }) {
+export default function BrowserView({ active, agentId, folder }: BrowserViewProps) {
   const page = usePreview((s) => s.page);
   const size = usePreview((s) => s.size);
   const setSize = usePreview((s) => s.setSize);
-  const agentId = useNavigation((s) => s.agentId);
   const conversationId = useChats(s => agentId ? s.threads[agentId]?.conversationId ?? null : null);
-  const chatFolder = useChats((s) => agentId ? s.threads[agentId]?.folder : "");
-  const project = useWorkspace((s) => s.activeProject);
-  const folder = chatFolder || project;
   const question = useAttention(selectQuestionFor(agentId ?? ""));
-  const [picking, setPicking] = useState(false);
+  // Pointing is for one agent's chat while this screen shows: another agent or screen ends it.
+  const [pickingFor, setPickingFor] = useState<string | null>(null);
+  const picking = active && agentId !== null && pickingFor === agentId;
   const [outputOpen, setOutputOpen] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
   const [panel, setPanel] = useState({ x: 0, y: 0, width: 0, height: 0 });
@@ -93,15 +100,15 @@ export default function BrowserView({ active }: { active: boolean }) {
   }, [active, hasPage, fitted.zoom, size]);
 
   useEffect(() => useChats.subscribe((next, previous) => {
-    if (agentId && next.threads[agentId]?.conversationId !== previous.threads[agentId]?.conversationId) setPicking(false);
+    if (agentId && next.threads[agentId]?.conversationId !== previous.threads[agentId]?.conversationId) setPickingFor(null);
   }), [agentId]);
 
   useEffect(() => useAttention.subscribe(state => {
-    if (agentId && selectQuestionFor(agentId)(state)) setPicking(false);
+    if (agentId && selectQuestionFor(agentId)(state)) setPickingFor(null);
   }), [agentId]);
 
   useEffect(() => useNavigation.subscribe((next, previous) => {
-    if (next.agentId !== previous.agentId || next.route !== "conversation") setPicking(false);
+    if (next.route !== previous.route) setPickingFor(null);
   }), []);
 
   useEffect(() => {
@@ -113,12 +120,12 @@ export default function BrowserView({ active }: { active: boolean }) {
         const result = await browserPicker("poll");
         if (result.pick) addPoint(agentId, browserPointText(result.pick), result.attachment, conversationId);
         if (!live) return;
-        if (!result.active) { setPicking(false); return; }
+        if (!result.active) { setPickingFor(null); return; }
         timer = window.setTimeout(poll, 150);
-      } catch (e) { if (live) { setError(errorMessage(e, "The element couldn't be picked. Try again.")); setPicking(false); } }
+      } catch (e) { if (live) { setError(errorMessage(e, "The element couldn't be picked. Try again.")); setPickingFor(null); } }
     };
-    browserPicker("start").then(() => { if (live) void poll(); }).catch(e => { if (live) { setError(errorMessage(e, "The picker couldn't start.")); setPicking(false); } });
-    const escape = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") setPicking(false); };
+    browserPicker("start").then(() => { if (live) void poll(); }).catch(e => { if (live) { setError(errorMessage(e, "The picker couldn't start.")); setPickingFor(null); } });
+    const escape = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") setPickingFor(null); };
     window.addEventListener("keydown", escape);
     return () => { live = false; window.clearTimeout(timer); window.removeEventListener("keydown", escape); browserPicker("cancel").catch(report("cancel picking")); };
   }, [picking, active, agentId, conversationId]);
@@ -160,7 +167,7 @@ export default function BrowserView({ active }: { active: boolean }) {
           onFocus={(e) => e.currentTarget.select()}
           onKeyDown={onKeyDown}
         />
-        <IconButton icon={MousePointerClick} label="Point at something" size="sm" aria-pressed={picking} disabled={!hasPage || !agentId || Boolean(question)} title={question ? "Answer the agent’s question first, then point at the page." : undefined} onClick={() => { setError(null); setPicking(on => !on); }} />
+        <IconButton icon={MousePointerClick} label="Point at something" size="sm" aria-pressed={picking} disabled={!hasPage || !agentId || Boolean(question)} title={question ? "Answer the agent’s question first, then point at the page." : undefined} onClick={() => { setError(null); setPickingFor(picking ? null : agentId); }} />
         <IconButton icon={ExternalLink} label="Open in your browser" size="sm" disabled={!hasPage} onClick={() => openUrl(page.url).catch(report("open the page outside"))} />
         <span className={cx("browser-progress", page.loading && "is-loading")} aria-hidden />
       </div>

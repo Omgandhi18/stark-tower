@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { fakeCalls, fakeEmit } from "./fakeBackend";
-import { expect, openApp, test } from "./fixtures";
+import { expect, openApp, showInSidePanel, test } from "./fixtures";
 import { defaultScenario, withBrowserPick, withSimulatorControls, type Scenario } from "./scenario";
 
 async function openPreview(page: Page, simulator = false, scenario: Scenario = defaultScenario()) {
@@ -10,10 +10,7 @@ async function openPreview(page: Page, simulator = false, scenario: Scenario = d
     .getByRole("button", { name: /FRIDAY/ })
     .click();
   await page.getByRole("region", { name: "Question from FRIDAY" }).getByRole("button", { name: "Everything" }).click();
-  await page.getByRole("button", { name: "Show the browser and simulator" }).click();
-  const preview = page.getByRole("complementary", { name: "Preview" });
-  if (simulator) await preview.getByRole("tab", { name: "Simulator" }).click();
-  return preview;
+  return showInSidePanel(page, simulator ? "Simulator" : "Browser");
 }
 const extras = async (page: Page, action: string) => (await fakeCalls(page)).filter((c) => c.cmd === "simulator_extra" && c.args.action === action);
 async function menu(page: Page, name: string) {
@@ -43,16 +40,12 @@ test("browser picks insert at the caret, attach a picture and stay in the select
   await page.keyboard.press("Escape");
   await expect(preview.getByRole("button", { name: "Point at something" })).toHaveAttribute("aria-pressed", "false");
   const draft = await input.inputValue();
-  await page
-    .getByRole("navigation", { name: "Conversations" })
-    .getByRole("button", { name: /VERONICA/ })
-    .click();
+  await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: /^Work/ }).click();
+  await page.getByRole("region", { name: "Team" }).getByRole("button", { name: /VERONICA/ }).click();
   await expect(page.getByRole("textbox", { name: "Message VERONICA…" })).toHaveValue("");
   await expect(page.getByRole("list", { name: "Attached files" })).toHaveCount(0);
-  await page
-    .getByRole("navigation", { name: "Conversations" })
-    .getByRole("button", { name: /FRIDAY/ })
-    .click();
+  await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: /^Work/ }).click();
+  await page.getByRole("region", { name: "Team" }).getByRole("button", { name: /FRIDAY/ }).click();
   await expect(input).toHaveValue(draft);
   await input.press("Enter");
   const log = page.getByRole("log", { name: "Conversation with FRIDAY" });
@@ -169,11 +162,10 @@ test("asks for a pending question's answer before pointing or attaching a record
     .getByRole("region", { name: "Team" })
     .getByRole("button", { name: /FRIDAY/ })
     .click();
-  await page.getByRole("button", { name: "Show the browser and simulator" }).click();
-  const preview = page.getByRole("complementary", { name: "Preview" });
+  const preview = await showInSidePanel(page, "Browser");
   await expect(preview.getByRole("button", { name: "Point at something" })).toBeDisabled();
   await expect(preview.getByRole("button", { name: "Point at something" })).toHaveAttribute("title", /Answer the agent’s question first/);
-  await preview.getByRole("tab", { name: "Simulator" }).click();
+  await showInSidePanel(page, "Simulator");
   await expect(preview.getByRole("button", { name: "Point at something" })).toBeDisabled();
   await preview.getByRole("button", { name: "Record a video" }).click();
   await preview.getByRole("button", { name: "Stop recording" }).click();

@@ -63,7 +63,7 @@ export function Tabs<T extends string>({ tabs, value, onChange, label, idPrefix,
             onKeyDown={(e) => onKeyDown(e, i)}
           >
             {tab.icon && <tab.icon aria-hidden size={ICON_SIZE.md} strokeWidth={ICON_STROKE} />}
-            {tab.iconOnly ? <span className="visually-hidden">{tab.label}</span> : tab.label}
+            {tab.iconOnly ? <span className="visually-hidden">{tab.label}</span> : <span className="tab-label">{tab.label}</span>}
             {tab.count !== undefined && <CountBadge count={tab.count} label={tab.label} tone="neutral" />}
           </button>
         );

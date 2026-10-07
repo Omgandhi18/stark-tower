@@ -13,6 +13,7 @@ import ChatComposer from "./ChatComposer";
 import MessageList from "./MessageList";
 import QuestionCard from "./QuestionCard";
 import { answerQuestion, sendMessage, stopChat } from "./chatActions";
+import "./conversation.css";
 
 interface ChatPanelProps {
   agentId: string;

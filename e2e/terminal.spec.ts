@@ -1,6 +1,6 @@
 import { type Page } from "@playwright/test";
 import { fakeCalls } from "./fakeBackend";
-import { expect, openApp, test } from "./fixtures";
+import { expect, openApp, showInSidePanel, sidePanel, test } from "./fixtures";
 import { defaultScenario } from "./scenario";
 
 async function openFriday(page: Page) {
@@ -61,7 +61,9 @@ test("terminals survive chat and route switches, and drawer height persists", as
   await handle.focus();
   await handle.press("ArrowUp");
   await expect(handle).toHaveAttribute("aria-valuenow", "260");
-  await page.getByRole("navigation", { name: "Conversations" }).getByRole("button", { name: /^VISION/ }).click();
+  await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: /^Work/ }).click();
+  await page.getByRole("region", { name: "Team" }).getByRole("button", { name: /VISION/ }).click();
+  await expect(page.getByRole("log", { name: "Conversation with VISION" })).toBeVisible();
   await expect(page.locator(".terminal-drawer .xterm-rows")).toContainText("retained");
   await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: /^Work/ }).click();
   await page.getByRole("region", { name: "Team" }).getByRole("button", { name: /FRIDAY/ }).click();
@@ -103,7 +105,7 @@ test("the task page opens a terminal in the task folder", async ({ page }) => {
 test("on a task page the terminal moves between the bottom and the side panel, keeping its shell", async ({ page }) => {
   await openApp(page);
   await page.getByRole("region", { name: "Running" }).getByRole("button", { name: "Redesign the settings page", exact: true }).click();
-  const rail = page.getByRole("complementary", { name: "Task status" });
+  const rail = sidePanel(page);
   const sideTab = rail.getByRole("tab", { name: "Terminal" });
   const headerButton = page.getByRole("button", { name: "Terminal", exact: true });
 
@@ -134,17 +136,13 @@ test("on a task page the terminal moves between the bottom and the side panel, k
   await expect(sideTab).toHaveAttribute("aria-selected", "true");
   await expect(rail.locator(".xterm-rows")).toContainText("echo beside");
 
-  // A chat has no side panel, so there it opens at the bottom.
-  await page.getByRole("button", { name: "Talk to FRIDAY" }).click();
-  await expect(page.locator(".terminal-drawer:not(.is-side) .xterm-rows")).toContainText("echo beside");
   expect((await fakeCalls(page)).filter((c) => c.cmd === "terminal_open")).toHaveLength(1);
   expect((await fakeCalls(page)).filter((c) => c.cmd === "terminal_close")).toHaveLength(0);
 });
 
 test("dragging the terminal leaves the preview panel in place", async ({ page }) => {
   await openFriday(page);
-  await page.getByRole("button", { name: "Show the browser and simulator" }).click();
-  const preview = page.getByRole("complementary", { name: "Preview" });
+  const preview = await showInSidePanel(page, "Browser");
   const address = preview.getByRole("textbox", { name: "Address" });
   await address.fill("localhost:5173");
   await address.press("Enter");
@@ -178,18 +176,23 @@ async function clickServerLink(page: Page) {
 test("a local link opens in the built-in browser beside the chat", async ({ page }) => {
   await openFriday(page);
   await clickServerLink(page);
-  await expect(page.getByRole("complementary", { name: "Preview" })).toBeVisible();
+  await expect(sidePanel(page).getByRole("tab", { name: "Browser", exact: true, selected: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Address" })).toHaveValue("http://localhost:5173");
   await expect.poll(async () => (await fakeCalls(page)).filter((c) => c.cmd === "browser_show").length).toBeGreaterThan(0);
 });
 
-test("on a task page, links open in the default browser and the side rail stays", async ({ page }) => {
+test("a local link from the terminal in the side panel opens the browser in its place, and the shell keeps running", async ({ page }) => {
   await openApp(page);
   await page.getByRole("region", { name: "Running" }).getByRole("button", { name: "Redesign the settings page", exact: true }).click();
-  await page.getByRole("button", { name: "Terminal", exact: true }).click();
-  await page.getByRole("button", { name: "Open terminal", exact: true }).click();
+  const panel = await showInSidePanel(page, "Terminal");
+  await panel.getByRole("button", { name: "Open terminal", exact: true }).click();
   await clickServerLink(page);
-  await expect.poll(async () => (await fakeCalls(page)).find((c) => c.cmd === "plugin:opener|open_url")?.args.url).toBe("http://localhost:5173");
-  await expect(page.getByRole("complementary", { name: "Task status" })).toBeVisible();
-  await expect(page.getByRole("complementary", { name: "Preview" })).toHaveCount(0);
+  await expect(panel.getByRole("tab", { name: "Browser", exact: true, selected: true })).toBeVisible();
+  await expect(panel.getByRole("textbox", { name: "Address" })).toHaveValue("http://localhost:5173");
+  await expect(page.getByRole("button", { name: "Terminal", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await showInSidePanel(page, "Terminal");
+  await expect(panel.locator(".xterm-rows")).toContainText("Server ready");
+  const calls = await fakeCalls(page);
+  expect(calls.some((c) => c.cmd === "plugin:opener|open_url")).toBe(false);
+  expect(calls.filter((c) => c.cmd === "terminal_close")).toHaveLength(0);
 });

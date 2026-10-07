@@ -1,8 +1,10 @@
 import { fakeCalls } from "./fakeBackend";
 import { expect, openApp, test } from "./fixtures";
+import { defaultScenario, type Scenario } from "./scenario";
 
-const openFriday = async (page: import("@playwright/test").Page) => {
-  await openApp(page);
+// Talking to an agent opens the chat they're in now, as its task.
+const openFriday = async (page: import("@playwright/test").Page, scenario?: Scenario) => {
+  await openApp(page, scenario);
   await page
     .getByRole("region", { name: "Team" })
     .getByRole("button", { name: /FRIDAY/ })
@@ -18,7 +20,7 @@ test.describe("conversation", () => {
     await expect(log.getByText("src/pages/Settings.tsx").first()).toBeVisible();
     await expect(log.locator("strong", { hasText: "Account" })).toBeVisible();
     await expect(log.locator("pre code")).toContainText("sections.filter");
-    await expect(page.getByRole("heading", { name: "FRIDAY", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Redesign the settings page", level: 1 })).toBeVisible();
   });
 
   test("answers a pinned question with one of the agent's options", async ({ page }) => {
@@ -98,11 +100,22 @@ test.describe("conversation", () => {
   });
 
   test("starts a new chat and keeps the old one in the history", async ({ page }) => {
-    const log = await openFriday(page);
+    const scenario = defaultScenario();
+    scenario.statuses.friday = "idle";
+    const log = await openFriday(page, scenario);
+    await expect(log.getByText("Can you redesign the settings page?", { exact: false })).toBeVisible();
     await page.getByRole("button", { name: "New chat" }).click();
     await expect(log.getByText("Start a conversation with FRIDAY")).toBeVisible();
-    const earlier = page.getByRole("navigation", { name: "Conversations" });
+    const earlier = page.getByRole("region", { name: "Earlier with FRIDAY" });
     await earlier.getByRole("button", { name: /^Redesign the settings page/ }).click();
     await expect(log.getByText("Can you redesign the settings page?", { exact: false })).toBeVisible();
+    await expect(earlier.getByRole("button", { name: /^Redesign the settings page/ })).toHaveAttribute("aria-current", "page");
+  });
+
+  test("won't start a new chat while the agent works, since that would end their session", async ({ page }) => {
+    await openFriday(page);
+    await page.getByRole("button", { name: "New chat" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "FRIDAY is working right now. Start a new chat when they're done." })).toBeVisible();
+    expect((await fakeCalls(page)).some((c) => c.cmd === "new_chat")).toBe(false);
   });
 });

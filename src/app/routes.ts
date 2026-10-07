@@ -9,7 +9,7 @@ export interface NavItem {
   shortcut: string;
 }
 
-/** The sidebar, in order. The task and conversation screens live under Work. */
+/** The sidebar, in order. The task screen, where every chat opens, lives under Work. */
 export const NAV_ITEMS: readonly NavItem[] = [
   { route: "work", label: "Work", icon: LayoutGrid, shortcut: "1" },
   { route: "environment", label: "Environment", icon: Building2, shortcut: "2" },
@@ -20,5 +20,5 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { route: "settings", label: "Settings", icon: Settings, shortcut: "7" },
 ];
 
-/** Which sidebar item a route belongs to: a task and a conversation live under Work. */
-export const navRouteFor = (route: RouteId): RouteId => (route === "conversation" || route === "task" ? "work" : route);
+/** Which sidebar item a route belongs to: a task (and so every chat) lives under Work. */
+export const navRouteFor = (route: RouteId): RouteId => (route === "task" ? "work" : route);

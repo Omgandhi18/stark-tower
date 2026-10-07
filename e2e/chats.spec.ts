@@ -9,7 +9,7 @@ test.describe("Work's chats", () => {
     const chats = page.getByRole("list", { name: "Chats in checkout-web" });
     await chats.getByRole("button", { name: "Redesign the settings page", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Redesign the settings page", level: 1 })).toBeVisible();
-    await expect(page.getByRole("complementary", { name: "Task status" }).getByRole("switch", { name: "Auto mode" })).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "Task side panel" }).getByRole("switch", { name: "Auto mode" })).toBeVisible();
     await expect(page.locator(".task-facts").getByText("Permissions")).toBeVisible();
     expect(await fakeCalls(page)).toContainEqual({ cmd: "task_for_chat", args: { conversationId: 11 } });
     await expect(chats.getByRole("button", { name: "Redesign the settings page", exact: true })).toHaveClass(/is-current/);

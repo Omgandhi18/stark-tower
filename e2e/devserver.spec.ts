@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { fakeCalls, fakeEmit } from "./fakeBackend";
-import { expect, openApp, test } from "./fixtures";
+import { expect, openApp, showInSidePanel, sidePanel, test } from "./fixtures";
 import { defaultScenario, withDevCommands } from "./scenario";
 
 const folder = "/Users/dev/code/checkout-web";
@@ -11,8 +11,7 @@ const openPreview = async (page: Page, scenario = withDevCommands(defaultScenari
     .getByRole("region", { name: "Team" })
     .getByRole("button", { name: /FRIDAY/ })
     .click();
-  await page.getByRole("button", { name: "Show the browser and simulator" }).click();
-  return page.getByRole("complementary", { name: "Preview" });
+  return showInSidePanel(page, "Browser");
 };
 const running = (command = "npm run start", generation = 1) => ({
   folder,
@@ -59,8 +58,9 @@ test("chooses another command and remembers a custom command", async ({ page }) 
   expect((await commands(page, "devserver_select")).pop()?.args).toEqual({ folder, selected: "custom", custom: "pnpm run web" });
   expect((await commands(page, "devserver_start")).pop()?.args.option).toBe("custom");
   await preview.getByRole("button", { name: "Stop", exact: true }).click();
-  await preview.getByRole("button", { name: "Close the preview" }).click();
-  await page.getByRole("button", { name: "Show the browser and simulator" }).click();
+  // Another tab puts the browser away; coming back to it finds the command remembered.
+  await preview.getByRole("tab", { name: /^Checks/ }).click();
+  await showInSidePanel(page, "Browser");
   await preview.getByRole("button", { name: "Choose dev command" }).click();
   await expect(menu.getByRole("combobox", { name: "Dev command" })).toHaveValue("custom");
   await expect(menu.getByRole("option", { name: "Custom command — pnpm run web" })).toHaveCount(1);
@@ -121,7 +121,7 @@ test("an agent start reveals the browser and opens the ready address", async ({ 
     .click();
   await fakeEmit(page, "browser://reveal", { agentId: "friday" });
   await fakeEmit(page, "devserver://changed", running());
-  await expect(page.getByRole("complementary", { name: "Preview" }).getByRole("textbox", { name: "Address" })).toHaveValue("http://localhost:5173/");
+  await expect(sidePanel(page).getByRole("textbox", { name: "Address" })).toHaveValue("http://localhost:5173/");
 });
 
 test("device sizes send scaled native bounds and zoom, then restore Fit panel", async ({ page }) => {

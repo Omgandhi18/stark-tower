@@ -30,6 +30,17 @@ export async function openApp(page: Page, scenario: Scenario = defaultScenario()
 
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** The side panel beside a task (every chat opens as one): its status, the terminal, the browser and the simulator. */
+export const sidePanel = (page: Page) => page.getByRole("complementary", { name: "Task side panel" });
+
+/** Show one of the side panel's tools ("Browser", "Simulator" or "Terminal"); returns the panel. */
+export async function showInSidePanel(page: Page, tool: "Browser" | "Simulator" | "Terminal") {
+  const panel = sidePanel(page);
+  await panel.getByRole("tab", { name: tool, exact: true }).click();
+  await expect(panel.getByRole("tab", { name: tool, exact: true, selected: true })).toBeVisible();
+  return panel;
+}
+
 /** Go to a sidebar destination (by its own label: "Work", not the nested "All work"). */
 export async function goTo(page: Page, label: string) {
   await page

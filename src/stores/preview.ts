@@ -1,4 +1,4 @@
-// The preview beside a conversation: the built-in browser and the iOS Simulator.
+// The built-in browser and the iOS Simulator, shown in a task's side panel, which you and the agents share.
 import { create } from "zustand";
 import type { BrowserPage } from "../lib/types";
 
@@ -9,7 +9,7 @@ export type PreviewTab = "browser" | "simulator";
 const WIDTH_KEY = "starkline.preview.width";
 export const MIN_WIDTH = 360;
 const MAX_DEFAULT_WIDTH = 560;
-/** Until it's been dragged, the preview takes this share of the window. */
+/** Until it's been dragged, the side panel takes this share of the window while it shows one. */
 const DEFAULT_SHARE = 0.36;
 
 const defaultWidth = () => Math.max(MIN_WIDTH, Math.min(MAX_DEFAULT_WIDTH, Math.round(window.innerWidth * DEFAULT_SHARE)));
@@ -24,8 +24,10 @@ const savedWidth = () => {
 };
 
 interface PreviewState {
+  /** One of them is showing (in the side panel of the task on screen). */
   open: boolean;
   tab: PreviewTab;
+  /** The side panel's width while it shows one. */
   width: number;
   /** The browser's page, as the backend last reported it. */
   page: BrowserPage;
@@ -34,9 +36,7 @@ interface PreviewState {
   size: BrowserSize;
   setSize: (size: BrowserSize) => void;
   show: (tab: PreviewTab) => void;
-  toggle: () => void;
   close: () => void;
-  setTab: (tab: PreviewTab) => void;
   setWidth: (width: number) => void;
   applyPage: (page: BrowserPage) => void;
   showSimulator: (udid: string | null) => void;
@@ -51,9 +51,7 @@ export const usePreview = create<PreviewState>((set) => ({
   size: "fit",
   setSize: (size) => set({ size }),
   show: (tab) => set({ open: true, tab }),
-  toggle: () => set((s) => ({ open: !s.open })),
   close: () => set({ open: false }),
-  setTab: (tab) => set({ tab }),
   setWidth: (width) => {
     try {
       window.localStorage.setItem(WIDTH_KEY, String(Math.round(width)));

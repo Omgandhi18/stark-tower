@@ -17,6 +17,7 @@ import ContextButton from "../context/ContextButton";
 import MemoryButton from "../agents/MemoryButton";
 import WorkspaceChip from "./WorkspaceChip";
 import RemindMeButton from "../reminders/RemindMeButton";
+import { ChatCostFact, ChatFolderSelect, NewChatButton } from "./ChatControls";
 import type { StateTone } from "../../lib/status";
 
 const report = (what: string) => (e: unknown) => console.error(`[task] couldn't ${what}`, e);
@@ -26,13 +27,15 @@ const ASK_FIRST = "Project work runs on its own; installs, branches and files ou
 interface TaskHeaderProps {
   detail: TaskDetail;
   owner: Agent | undefined;
+  /** The task's chat is the one its owner talks in now, so you can talk in it here. */
+  live: boolean;
   requester: string;
   state: { label: string; tone: StateTone };
   now: number;
 }
 
-/** What the task is, who owns it, and where and how long it has been running. */
-export default function TaskHeader({ detail, owner, requester, state, now }: TaskHeaderProps) {
+/** What the task is, who owns it, and where and how long it has been running; and the chat it runs in. */
+export default function TaskHeader({ detail, owner, live, requester, state, now }: TaskHeaderProps) {
   const terminalOpen = useTerminal((s) => s.open);
   const toggleTerminal = useTerminal((s) => s.toggle);
   const config = useConfig((s) => s.config);
@@ -81,9 +84,14 @@ export default function TaskHeader({ detail, owner, requester, state, now }: Tas
           All work
         </Button>
         <div className="task-header-actions">
-          <Button icon={MessageSquareText} onClick={() => openConversation(task.assignee)}>
-            Talk to {name}
-          </Button>
+          {live && <ChatFolderSelect agentId={task.assignee} />}
+          {/* An older or delegated chat is read here; this goes to the one they talk in now. */}
+          {!live && (
+            <Button icon={MessageSquareText} onClick={() => openConversation(task.assignee)}>
+              Talk to {name}
+            </Button>
+          )}
+          {owner && !task.parent_id && <NewChatButton agent={owner} folder={task.project_folder || task.cwd} onError={setError} />}
           <IconButton icon={SquareTerminal} label="Terminal" aria-pressed={terminalOpen} onClick={toggleTerminal} />
           <ContextButton agentId={task.assignee} name={name} folder={task.cwd} taskId={task.id} />
           <MemoryButton agentId={task.assignee} name={name} />
@@ -140,6 +148,7 @@ export default function TaskHeader({ detail, owner, requester, state, now }: Tas
             <span className="tabular">{elapsed}</span>
           </dd>
         </div>
+        <ChatCostFact conversationId={task.conversation_id} />
         <div className="task-fact">
           <dt>Asked by</dt>
           <dd>{requester}</dd>

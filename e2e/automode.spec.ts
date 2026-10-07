@@ -18,7 +18,7 @@ async function openRefunds(page: Page) {
   await openApp(page, refundsScenario());
   await page.getByRole("button", { name: "Ship the refunds feature", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Ship the refunds feature", level: 1 })).toBeVisible();
-  return page.getByRole("complementary", { name: "Task status" });
+  return page.getByRole("complementary", { name: "Task side panel" });
 }
 
 test.describe("auto mode", () => {
@@ -59,7 +59,7 @@ test.describe("auto mode", () => {
     await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: /^Work\b/ }).click();
     await page.getByRole("region", { name: "Running" }).getByRole("button", { name: "Redesign the settings page", exact: true }).click();
     await expect(page.locator(".task-facts").getByText("Auto mode")).toBeVisible();
-    await expect(page.getByRole("complementary", { name: "Task status" }).getByRole("switch", { name: "Auto mode" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("complementary", { name: "Task side panel" }).getByRole("switch", { name: "Auto mode" })).toHaveAttribute("aria-checked", "true");
   });
 
   test("always allows from the task's approval card, for this task or wider", async ({ page }) => {

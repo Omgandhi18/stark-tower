@@ -28,7 +28,7 @@ test("draws, retries a theme, applies portraits to the list and chat, then remov
   await expect(dialog).not.toBeVisible();
   await expect(agent.locator("img")).toHaveAttribute("src", /helperbot/);
   await page.getByRole("button", { name: "Open conversation", exact: true }).click();
-  await expect(page.locator(".conversation-header img")).toHaveAttribute("src", /helperbot/);
+  await expect(page.locator(".task-fact", { hasText: "Owner" }).locator("img")).toHaveAttribute("src", /helperbot/);
   await goTo(page, "Agents");
   await page.getByRole("button", { name: "Open Character Studio", exact: true }).click();
   await dialog.getByRole("button", { name: "Use the figure's own look" }).click();

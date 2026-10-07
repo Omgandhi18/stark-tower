@@ -4,7 +4,6 @@ import { IS_TAURI } from "../lib/platform";
 import AgentsScreen from "../features/agents/AgentsScreen";
 import AutomationsScreen from "../features/automations/AutomationsScreen";
 import RemindersScreen from "../features/reminders/RemindersScreen";
-import ConversationScreen from "../features/conversation/ConversationScreen";
 import NotificationsScreen from "../features/notifications/NotificationsScreen";
 import Onboarding from "../features/onboarding/Onboarding";
 import SettingsScreen from "../features/settings/SettingsScreen";
@@ -26,7 +25,6 @@ const MockupCompare = import.meta.env.DEV ? lazy(() => import("../devtools/Mocku
 const ROUTE_LABEL: Record<RouteId, string> = {
   work: "Work",
   task: "Task",
-  conversation: "Conversation",
   environment: "Environment",
   agents: "Agents",
   automations: "Automations",
@@ -42,8 +40,6 @@ function screenFor(route: RouteId, comparing: boolean) {
       return <WorkScreen />;
     case "task":
       return <TaskScreen />;
-    case "conversation":
-      return <ConversationScreen />;
     case "environment":
       return (
         <Suspense fallback={<SkeletonRows rows={3} label="Loading the room" className="route-loading" />}>

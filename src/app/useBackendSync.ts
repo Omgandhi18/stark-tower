@@ -100,9 +100,7 @@ async function firstLoad(load: () => Promise<unknown>, onFailure: (error: unknow
 
 export function useBackendSync() {
   const route = useNavigation((s) => s.route);
-  const agentId = useNavigation((s) => s.agentId);
-  const otherVisibleAgent = useVoices((s) => route === "environment" || route === "task" ? s.viewing[route] ?? null : null);
-  const visibleAgent = route === "conversation" ? agentId : otherVisibleAgent;
+  const visibleAgent = useVoices((s) => route === "environment" || route === "task" ? s.viewing[route] ?? null : null);
   useEffect(() => {
     if (!IS_TAURI) return;
     let unmounted = false;

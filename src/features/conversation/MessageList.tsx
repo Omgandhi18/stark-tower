@@ -8,6 +8,7 @@ import type { ChatMessage, MessageRole } from "../../stores/chats";
 import ReadAloud from "../voices/ReadAloud";
 import { withoutOwnMemory } from "./ownMemory";
 import { useStickToBottom } from "./useStickToBottom";
+import "./conversation.css";
 
 /** Messages that come from the agent's side of the conversation. */
 const AGENT_SIDE: readonly MessageRole[] = ["agent", "tool", "thinking", "artifact"];
