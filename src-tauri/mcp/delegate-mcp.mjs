@@ -356,6 +356,7 @@ rl.on("line", async (raw) => {
       log("delegate ->", args.agent);
       const res = await bridge({
         type: "delegate",
+        agentId: AGENT_ID,
         agent: args.agent,
         task: args.task,
         directory: args.directory || "",

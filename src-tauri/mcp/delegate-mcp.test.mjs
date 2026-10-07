@@ -77,6 +77,17 @@ test("denies with the app's reason, for any tool", async () => {
   }
 });
 
+test("delegates as the agent running it, so the work is tied to that agent's task", async () => {
+  const app = await fakeApp(() => ({ result: "Dispatched KAREN — running in the background." }));
+  try {
+    const result = await callTool(app.sock, "delegate", { agent: "karen", task: "Check the contrast" });
+    assert.deepEqual(app.requests, [{ type: "delegate", agentId: "friday", agent: "karen", task: "Check the contrast", directory: "", token: TOKEN }]);
+    assert.match(result.content[0].text, /Dispatched KAREN/);
+  } finally {
+    app.close();
+  }
+});
+
 test("denies when the app can't be reached", async () => {
   const result = await callTool(join(tmpdir(), "no-such-starkline.sock"), "approve", { tool_name: "Bash", input: { command: "npm test" } });
   assert.equal(JSON.parse(result.content[0].text).behavior, "deny");
