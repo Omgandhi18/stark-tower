@@ -7,7 +7,7 @@
 use crate::agents::AgentStatus;
 use crate::ledger::{NewTask, StoredMessage, Task, TaskEvent};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Component, Path};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -40,6 +40,10 @@ pub struct TaskEngine {
     checks: Mutex<HashMap<String, PendingCheck>>,
     /// Each running task's latest round of work, to tell when it ends whether it changed anything.
     rounds: Mutex<HashMap<String, Round>>,
+    /// Delegated tasks running on a one-shot worker, and the worker's process: how one is stopped.
+    workers: Mutex<HashMap<String, u32>>,
+    /// Tasks you stopped whose worker hasn't reported back yet: its end reads as your stop.
+    stopped: Mutex<HashSet<String>>,
 }
 
 /// A round of work on a task: from the request (or follow-up) to the end of the agent's turn.
@@ -785,10 +789,14 @@ pub fn begin_child(app: &tauri::AppHandle, from: &str, worker: &str, prompt: &st
 }
 
 /// A delegated task finished: done with its result, or blocked with the reason.
-pub fn end_child(app: &tauri::AppHandle, id: &str, worker: &str, outcome: &Result<String, String>) {
-    let Some(state) = engine(app) else { return };
+/// A delegated task's worker came back with `outcome`. Returns whether you'd stopped it, in which
+/// case the task reads as stopped by you, whatever the worker managed before it ended.
+pub fn end_child(app: &tauri::AppHandle, id: &str, worker: &str, outcome: &Result<String, String>) -> bool {
+    let Some(state) = engine(app) else { return false };
+    let stopped = state.tasks.stopped.lock().unwrap().remove(id);
     let changed = state.ledger.task(id).is_some_and(|task| round_changed(app, &task));
     let (status, detail, summary) = match outcome {
+        _ if stopped => ("blocked", STOPPED_BY_YOU.to_string(), "Stopped by you".to_string()),
         Ok(result) if !result.trim().is_empty() && changed => ("done", crate::chat::truncate(result, 200), "Finished".to_string()),
         Ok(result) if !result.trim().is_empty() => ("idle", crate::chat::truncate(result, 200), "Finished, with nothing to review".to_string()),
         Ok(_) => ("blocked", "The agent finished without a result.".to_string(), "Stopped without a result".to_string()),
@@ -798,6 +806,95 @@ pub fn end_child(app: &tauri::AppHandle, id: &str, worker: &str, outcome: &Resul
     crate::claims::ended(app, worker, Some(id));
     event(app, id, worker, "status", &summary, "");
     emit_changed(app);
+    stopped
+}
+
+// ---- Stopping a task --------------------------------------------------------------
+
+/// Why a task you stopped is blocked, and what the agent that delegated it hears.
+pub const STOPPED_BY_YOU: &str = "You stopped the task before it finished.";
+
+/// A delegated task's one-shot worker is running, so stopping the task ends its process.
+pub fn worker_started(app: &tauri::AppHandle, task: &str, pid: u32) {
+    if let Some(state) = engine(app) {
+        state.tasks.workers.lock().unwrap().insert(task.into(), pid);
+    }
+}
+
+pub fn worker_finished(app: &tauri::AppHandle, task: &str) {
+    if let Some(state) = engine(app) {
+        state.tasks.workers.lock().unwrap().remove(task);
+    }
+}
+
+/// One running part of a task being stopped, and how it's stopped.
+#[derive(Debug, PartialEq, Eq)]
+enum Halt {
+    /// Delegated work on a one-shot worker: its process ends.
+    Worker { task: String, pid: u32 },
+    /// The owner's chat session is on it: the session ends, and the task is blocked.
+    Session { agent: String },
+    /// Marked running with nothing running it (Starkline restarted, say): only the record changes.
+    Mark { task: String },
+}
+
+/// What stopping `tree` (a task and everything delegated beneath it) takes: only parts still running count.
+fn halts(tree: &[Task], worker_of: impl Fn(&str) -> Option<u32>, session_task_of: impl Fn(&str) -> Option<String>) -> Vec<Halt> {
+    tree.iter()
+        .filter(|t| t.status == "doing")
+        .map(|t| {
+            if let Some(pid) = worker_of(&t.id) {
+                Halt::Worker { task: t.id.clone(), pid }
+            } else if session_task_of(&t.assignee).as_deref() == Some(t.id.as_str()) {
+                Halt::Session { agent: t.assignee.clone() }
+            } else {
+                Halt::Mark { task: t.id.clone() }
+            }
+        })
+        .collect()
+}
+
+/// Stop a task and everything still running beneath it: the owner's session if it's on the task,
+/// and the workers doing the work it delegated. Each part that stops is blocked, saying you stopped it.
+pub fn stop(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
+    let state = engine(app).ok_or("Starkline isn't ready yet.")?;
+    let root = state.ledger.task(id).ok_or("That task doesn't exist.")?;
+    let mut tree = Vec::new();
+    let mut pending = vec![root];
+    while let Some(task) = pending.pop() {
+        pending.extend(state.ledger.child_tasks(&task.id));
+        tree.push(task);
+    }
+    let workers = state.tasks.workers.lock().unwrap().clone();
+    let plan = halts(&tree, |task| workers.get(task).copied(), |agent| current(app, agent));
+    if plan.is_empty() {
+        return Err("Nothing in this task is running.".into());
+    }
+    for halt in plan {
+        match halt {
+            Halt::Worker { task, pid } => {
+                // Only while that worker still runs it. It reports back once its process ends, and its end reads as your stop.
+                let workers = state.tasks.workers.lock().unwrap();
+                if workers.get(&task) == Some(&pid) {
+                    state.tasks.stopped.lock().unwrap().insert(task);
+                    crate::proc::kill_tree(pid);
+                }
+            }
+            Halt::Session { agent } => {
+                session_ended(app, &agent, Ended::ByYou);
+                crate::chat::stop(app, &agent);
+            }
+            Halt::Mark { task } => {
+                state.ledger.set_task_status(&task, "blocked", Some(STOPPED_BY_YOU));
+                if let Some(t) = state.ledger.task(&task) {
+                    event(app, &task, &t.assignee, "status", "Stopped by you", "");
+                }
+                settled(app, &task);
+            }
+        }
+    }
+    emit_changed(app);
+    Ok(())
 }
 
 /// Something the owner's provider is about to do, as it bears on the task.
@@ -927,6 +1024,8 @@ pub struct TaskDetail {
     pub task: Task,
     /// The task this was delegated from, so a delegated task's page leads back to it.
     pub parent: Option<Task>,
+    /// The other tasks delegated from the same parent, oldest first (none for a task nobody delegated).
+    pub siblings: Vec<Task>,
     pub children: Vec<Task>,
     pub events: Vec<TaskEvent>,
     pub plan: Vec<PlanItem>,
@@ -978,6 +1077,10 @@ pub fn detail(app: &tauri::AppHandle, id: &str) -> Option<TaskDetail> {
     let messages = state.ledger.task_messages(&task, MESSAGE_LIMIT);
     let claims = state.claims.lock().unwrap().list(&task.cwd);
     let parent = task.parent_id.as_deref().and_then(|id| state.ledger.task(id));
+    let siblings = parent
+        .as_ref()
+        .map(|p| state.ledger.child_tasks(&p.id).into_iter().filter(|t| t.id != task.id).collect())
+        .unwrap_or_default();
     Some(TaskDetail {
         workspace: crate::workspaces::info(&state.ledger, &task),
         claims,
@@ -985,6 +1088,7 @@ pub fn detail(app: &tauri::AppHandle, id: &str) -> Option<TaskDetail> {
         branch: current_branch(&task.cwd),
         task,
         parent,
+        siblings,
         children,
         events,
         plan,
@@ -996,6 +1100,51 @@ pub fn detail(app: &tauri::AppHandle, id: &str) -> Option<TaskDetail> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn task(id: &str, assignee: &str, status: &str) -> Task {
+        Task {
+            id: id.into(),
+            ts: 0,
+            updated: 0,
+            title: id.into(),
+            assignee: assignee.into(),
+            status: status.into(),
+            detail: None,
+            cwd: "/work".into(),
+            conversation_id: None,
+            parent_id: None,
+            requested_by: "you".into(),
+            prompt: String::new(),
+            branch: String::new(),
+            request_url: None,
+            request_host: None,
+            request_number: None,
+            started: None,
+            finished: None,
+            plan_done: None,
+            plan_total: None,
+            workspace_kind: "checkout".into(),
+            project_folder: "/work".into(),
+        }
+    }
+
+    #[test]
+    fn stopping_ends_each_running_part_its_own_way() {
+        let tree = [task("owner", "jarvis", "doing"), task("worker", "friday", "doing"), task("finished", "karen", "done"), task("stale", "vision", "doing")];
+        let workers = |id: &str| (id == "worker").then_some(42);
+        let sessions = |agent: &str| (agent == "jarvis").then(|| "owner".to_string());
+        assert_eq!(
+            halts(&tree, workers, sessions),
+            [Halt::Session { agent: "jarvis".into() }, Halt::Worker { task: "worker".into(), pid: 42 }, Halt::Mark { task: "stale".into() }]
+        );
+    }
+
+    #[test]
+    fn stopping_leaves_an_agent_alone_once_they_have_moved_on() {
+        // JARVIS's session is on newer work now: stopping the old task mustn't end it.
+        assert_eq!(halts(&[task("old", "jarvis", "doing")], |_| None, |_| Some("newer".into())), [Halt::Mark { task: "old".into() }]);
+        assert!(halts(&[task("over", "jarvis", "done")], |_| None, |_| Some("over".into())).is_empty());
+    }
 
     #[test]
     fn only_a_round_that_changed_something_needs_a_review() {

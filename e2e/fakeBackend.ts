@@ -679,6 +679,7 @@ function install(scenario: Scenario) {
         claims: state.claims.filter((c) => c.workspace === task.cwd),
         task,
         parent: state.tasks.find((t) => t.id === task.parent_id) ?? null,
+        siblings: task.parent_id ? state.tasks.filter((t) => t.parent_id === task.parent_id && t.id !== id) : [],
         children: state.tasks.filter((t) => t.parent_id === id),
         events: [
           ...(state.taskEvents[id] ?? []),
@@ -707,6 +708,17 @@ function install(scenario: Scenario) {
       );
       emit("tasks://changed", null);
       emit("notifications://changed", null);
+      return null;
+    },
+    stop_task: (args) => {
+      // Like the backend: the task and everything delegated beneath it that's still running.
+      const tree = [String(args.id)];
+      for (let i = 0; i < tree.length; i++) tree.push(...state.tasks.filter((t) => t.parent_id === tree[i]).map((t) => t.id));
+      const running = state.tasks.filter((t) => tree.includes(t.id) && t.status === "doing");
+      if (running.length === 0) throw "Nothing in this task is running.";
+      state.tasks = state.tasks.map((t) => (running.includes(t) ? { ...t, status: "blocked", detail: "You stopped the task before it finished." } : t));
+      for (const t of running) setStatus(t.assignee, "idle");
+      emit("tasks://changed", null);
       return null;
     },
     close_task: (args) => {

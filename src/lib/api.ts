@@ -29,6 +29,9 @@ export const onTasksChanged = (cb: () => void): Promise<UnlistenFn> => listen("t
 /** Pick an interrupted task back up where it left off. */
 export const resumeTask = (id: string) => ok(commands.resumeTask(id));
 
+/** Stop a task and everything still running beneath it; each part that stops is blocked, saying you stopped it. */
+export const stopTask = (id: string) => ok(commands.stopTask(id));
+
 /** The task a chat opens as on Work: its latest work, or a new idle one. */
 export const taskForChat = (conversationId: number) => ok(commands.taskForChat(conversationId));
 

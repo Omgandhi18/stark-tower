@@ -57,20 +57,36 @@ describe("task presentation", () => {
   describe("openConflict", () => {
     const clash = event("claim_refused", "karen", "", "KAREN wanted to change src/types.ts, which VISION has claimed (Shared types)");
     const overlap = event("claim_overlap", "karen", "", "KAREN changed src/types.ts while VISION had claimed it (Shared types)");
+    // The test events belong to task "t".
+    const her = (status: string) => [{ id: "t", status }];
 
     it("shows someone's latest clash with another agent while their work is open", () => {
-      expect(openConflict([clash], "karen", "doing")).toBe(clash.summary);
-      expect(openConflict([clash, overlap], "karen", "blocked")).toBe(overlap.summary);
+      expect(openConflict([clash], "karen", her("doing"))).toBe(clash.summary);
+      expect(openConflict([clash, overlap], "karen", her("blocked"))).toBe(overlap.summary);
       // Ready for review still shows it: the reviewer should know.
-      expect(openConflict([clash], "karen", "done")).toBe(clash.summary);
+      expect(openConflict([clash], "karen", her("done"))).toBe(clash.summary);
     });
 
     it("drops it once the work is over", () => {
-      for (const status of ["idle", "reviewed", "closed"]) expect(openConflict([clash], "karen", status)).toBeUndefined();
+      for (const status of ["idle", "reviewed", "closed"]) expect(openConflict([clash], "karen", her(status))).toBeUndefined();
     });
 
-    it("keeps to that agent's clashes", () => {
-      expect(openConflict([clash], "friday", "doing")).toBeUndefined();
+    it("keeps to that agent's clashes, in their tasks that are still open", () => {
+      expect(openConflict([clash], "friday", her("doing"))).toBeUndefined();
+      // A clash from her finished task stays out of the way of another she's still on.
+      const elsewhere = { ...clash, task_id: "done-one" };
+      expect(
+        openConflict([elsewhere], "karen", [
+          { id: "done-one", status: "reviewed" },
+          { id: "t", status: "doing" },
+        ]),
+      ).toBeUndefined();
+      expect(
+        openConflict([clash, elsewhere], "karen", [
+          { id: "done-one", status: "reviewed" },
+          { id: "t", status: "doing" },
+        ]),
+      ).toBe(clash.summary);
     });
 
     it("leaves routine steps to the activity, including ones recorded with the agent's instructions", () => {
@@ -82,9 +98,9 @@ describe("task presentation", () => {
         'bun.lock needs an exclusive claim before editing. Call claim_files with paths: ["bun.lock"] and a reason, then try again.',
       );
       const git = event("claim_refused", "karen", "", "Only FRIDAY, who owns this task, runs git here.");
-      expect(openConflict([routine], "karen", "doing")).toBeUndefined();
-      expect(openConflict([told], "karen", "doing")).toBeUndefined();
-      expect(openConflict([git], "karen", "doing")).toBeUndefined();
+      expect(openConflict([routine], "karen", her("doing"))).toBeUndefined();
+      expect(openConflict([told], "karen", her("doing"))).toBeUndefined();
+      expect(openConflict([git], "karen", her("doing"))).toBeUndefined();
     });
   });
 });

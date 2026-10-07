@@ -1278,7 +1278,8 @@ pub fn run_task_blocking(
     let context = crate::prompts::workspace_context(app, agent_id, cwd);
     let request = if context.is_empty() { task.to_string() } else { format!("{context}\n\n{task}") };
     let outcome = run_worker(app, agent_id, &request, cwd, &sink);
-    crate::tasks::end_child(app, &child.id, agent_id, &outcome);
+    // A task you stopped tells whoever delegated it so, not whatever the worker had said by then.
+    let outcome = if crate::tasks::end_child(app, &child.id, agent_id, &outcome) { Err(crate::tasks::STOPPED_BY_YOU.to_string()) } else { outcome };
     let status = if matches!(&outcome, Ok(r) if !r.trim().is_empty()) { "done" } else { "blocked" };
     floor_log(app, agent_id, &format!("task-{status}"), &truncate(task, 80));
     crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
@@ -1297,21 +1298,36 @@ fn run_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, cwd: &str, sin
         _ => {}
     }
     let mut child = build_headless(&launch).spawn().map_err(|e| e.to_string())?;
-    // Track this one-shot worker so app-quit can kill its group (it lives outside
-    // the `chat` session map).
     let pid = child.id();
-    if let Some(state) = app.try_state::<crate::AppState>() {
-        state.oneshot_pids.lock().unwrap().insert(pid);
-    }
+    worker_running(app, pid, sink);
     let outcome = drive_worker(app, agent_id, task, &mut child, &sink.launched(&launch));
     if outcome.is_err() {
         let _ = child.kill();
     }
     let _ = child.wait();
+    worker_ended(app, pid, sink);
+    outcome
+}
+
+/// A one-shot worker is running. It lives outside the `chat` session map, so it's tracked here:
+/// app-quit ends its process group, and so does stopping the task it works on.
+pub(crate) fn worker_running(app: &tauri::AppHandle, pid: u32, sink: &Sink) {
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        state.oneshot_pids.lock().unwrap().insert(pid);
+    }
+    if let Some(task) = &sink.task {
+        crate::tasks::worker_started(app, task, pid);
+    }
+}
+
+/// The one-shot worker has ended.
+pub(crate) fn worker_ended(app: &tauri::AppHandle, pid: u32, sink: &Sink) {
     if let Some(state) = app.try_state::<crate::AppState>() {
         state.oneshot_pids.lock().unwrap().remove(&pid);
     }
-    outcome
+    if let Some(task) = &sink.task {
+        crate::tasks::worker_finished(app, task);
+    }
 }
 
 /// Feed a spawned worker its task, stream its output, and return its result text.

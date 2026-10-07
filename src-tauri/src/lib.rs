@@ -1715,6 +1715,14 @@ fn get_tasks(state: tauri::State<AppState>, limit: Option<i64>) -> Vec<ledger::T
     state.ledger.tasks(limit.unwrap_or(50))
 }
 
+/// Stop a task and everything still running beneath it: its owner's session if it's on the task,
+/// and the workers doing what it delegated. Each part that stops is blocked, saying you stopped it.
+#[tauri::command]
+#[specta::specta]
+fn stop_task(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    tasks::stop(&app, &id)
+}
+
 /// Close a task card without reviewing it (cancel it, or set aside a blocked one): it
 /// leaves the Work board but stays in history.
 #[tauri::command]
@@ -2176,6 +2184,7 @@ fn specta_builder() -> tauri_specta::Builder {
             list_agents,
             get_ledger,
             get_tasks,
+            stop_task,
             close_task,
             review_task,
             delete_conversation,

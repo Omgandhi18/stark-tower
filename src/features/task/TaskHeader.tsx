@@ -4,7 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { cx, portraitKey, Button, IconButton, OverflowMenu, Portrait, StatusPill, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
 import { AUTO_MODE_GOES_AHEAD, AUTO_MODE_STILL_ASKS, useAutoModeOf } from "../automode/autoMode";
-import { seeCodeReview, chatStop, closeTask, resumeTask, reviewTask } from "../../lib/api";
+import { seeCodeReview, closeTask, resumeTask, reviewTask, stopTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { formatElapsed } from "../../lib/time";
 import type { Agent, TaskDetail } from "../../lib/types";
@@ -47,9 +47,19 @@ export default function TaskHeader({ detail, owner, live, requester, state, now 
   const elapsed = formatElapsed((task.finished ?? now) - started);
   const name = owner?.name ?? task.assignee;
   const [error, setError] = useState<string | null>(null);
+  const [stopping, setStopping] = useState(false);
   const markReviewed = () => {
     setError(null);
     reviewTask(task.id).catch((e) => setError(errorMessage(e, "The task couldn't be marked reviewed.")));
+  };
+  // Stop shows while anything in the task runs: its owner, or work it delegated.
+  const running = task.status === "doing" || detail.children.some((c) => c.status === "doing");
+  const stop = () => {
+    setStopping(true);
+    setError(null);
+    stopTask(task.id)
+      .catch((e) => setError(errorMessage(e, "The task couldn't be stopped.")))
+      .finally(() => setStopping(false));
   };
 
   const items: MenuItem[] = [];
@@ -63,9 +73,6 @@ export default function TaskHeader({ detail, owner, live, requester, state, now 
   }
   if (task.status === "blocked" && task.conversation_id !== null && !task.parent_id) {
     items.push({ id: "resume", label: "Continue where it left off", icon: Play, onSelect: () => void resumeTask(task.id).catch(report("continue the task")) });
-  }
-  if (task.status === "doing" && !task.parent_id) {
-    items.push({ id: "stop", label: "Stop", icon: Square, danger: true, onSelect: () => void chatStop(task.assignee).catch(report("stop the task")) });
   }
   // A finished task is marked reviewed (below); anything else still open can be closed.
   if (!["closed", "reviewed", "done"].includes(task.status)) {
@@ -99,6 +106,11 @@ export default function TaskHeader({ detail, owner, live, requester, state, now 
           {task.status === "done" && (
             <Button variant="review" icon={CheckCheck} onClick={markReviewed}>
               Mark as reviewed
+            </Button>
+          )}
+          {running && (
+            <Button icon={Square} disabled={stopping} title="Stop this task, and anything it delegated that's still running" onClick={stop}>
+              Stop
             </Button>
           )}
           {items.length > 0 && <OverflowMenu label={`More actions for ${task.title}`} items={items} />}

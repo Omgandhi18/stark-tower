@@ -547,9 +547,7 @@ pub(crate) fn start_chat(app: &tauri::AppHandle, launch: &Launch, gen: u64) -> R
 pub(crate) fn run_once(app: &tauri::AppHandle, launch: &Launch, task: &str, sink: &Sink) -> Result<String, String> {
     let (mut child, opencode) = connect(app, launch, sink.clone(), None)?;
     let pid = child.id();
-    if let Some(state) = app.try_state::<crate::AppState>() {
-        state.oneshot_pids.lock().unwrap().insert(pid);
-    }
+    chat::worker_running(app, pid, sink);
     let outcome = (|| {
         open_session(&opencode, launch)?;
         let (tx, rx) = mpsc::channel();
@@ -559,9 +557,7 @@ pub(crate) fn run_once(app: &tauri::AppHandle, launch: &Launch, task: &str, sink
         rx.recv().unwrap_or_else(|_| Err("OpenCode stopped before it finished.".into()))
     })();
     stop(&mut child);
-    if let Some(state) = app.try_state::<crate::AppState>() {
-        state.oneshot_pids.lock().unwrap().remove(&pid);
-    }
+    chat::worker_ended(app, pid, sink);
     outcome
 }
 

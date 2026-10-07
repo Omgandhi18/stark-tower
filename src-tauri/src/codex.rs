@@ -13,7 +13,6 @@ use std::io::{BufRead, BufReader};
 use std::process::{Child, Command};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
-use tauri::Manager;
 
 /// The app server answers its handshake quickly; a thread waits for MCP servers to start.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -536,9 +535,7 @@ pub(crate) fn start_chat(app: &tauri::AppHandle, launch: &Launch, gen: u64) -> R
 pub(crate) fn run_once(app: &tauri::AppHandle, launch: &Launch, task: &str, sink: &Sink) -> Result<String, String> {
     let (mut child, codex) = connect(app, launch, sink.clone(), None)?;
     let pid = child.id();
-    if let Some(state) = app.try_state::<crate::AppState>() {
-        state.oneshot_pids.lock().unwrap().insert(pid);
-    }
+    chat::worker_running(app, pid, sink);
     let outcome = (|| {
         let thread = open_thread(&codex, launch, true)?;
         let (tx, rx) = mpsc::channel();
@@ -554,9 +551,7 @@ pub(crate) fn run_once(app: &tauri::AppHandle, launch: &Launch, task: &str, sink
     crate::proc::kill_tree(pid);
     let _ = child.kill();
     let _ = child.wait();
-    if let Some(state) = app.try_state::<crate::AppState>() {
-        state.oneshot_pids.lock().unwrap().remove(&pid);
-    }
+    chat::worker_ended(app, pid, sink);
     outcome
 }
 

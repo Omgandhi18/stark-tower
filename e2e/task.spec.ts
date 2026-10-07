@@ -1,6 +1,6 @@
 import { fakeCalls } from "./fakeBackend";
 import { expect, openApp, test } from "./fixtures";
-import { defaultScenario, taskEvent } from "./scenario";
+import { defaultScenario, task, taskEvent } from "./scenario";
 
 const openSettingsTask = async (page: import("@playwright/test").Page) => {
   await openApp(page);
@@ -92,5 +92,63 @@ test.describe("task screen", () => {
     await execution.getByRole("button", { name: /VERONICA.*Delegated/ }).click();
     await page.getByRole("tab", { name: "Activity" }).click();
     await expect(page.getByText("VERONICA was asked to claim package-lock.json before changing it, as other agents work in this folder")).toBeVisible();
+  });
+
+  test("lists an agent's tasks under them once, and keeps them together on each of their tasks", async ({ page }) => {
+    const scenario = defaultScenario();
+    const refunds = scenario.tasks.find((t) => t.id === "t-refunds")!;
+    scenario.tasks.push(
+      task(
+        {
+          id: "t-ci-cache",
+          title: "Cache the CI dependencies",
+          assignee: "veronica",
+          status: "done",
+          cwd: refunds.cwd,
+          parent_id: refunds.id,
+          requested_by: "jarvis",
+        },
+        40,
+        3,
+      ),
+    );
+    await openApp(page, scenario);
+    await page.getByRole("region", { name: "Running" }).getByRole("button", { name: "Ship the refunds feature", exact: true }).click();
+    const execution = page.getByRole("navigation", { name: "Who's working on this task" });
+    // VERONICA shows once, with both of her tasks; the others keep one each.
+    await expect(execution.locator(".execution-name", { hasText: "VERONICA" })).toHaveCount(1);
+    await expect(execution.getByLabel("4 items")).toBeVisible();
+    const hers = execution.getByRole("list", { name: "VERONICA's tasks" });
+    await expect(hers.getByRole("button")).toHaveCount(2);
+    await expect(execution.getByText(/1 waiting on you · 1 ready for review|1 ready for review · 1 waiting on you/)).toBeVisible();
+
+    await hers.getByRole("button", { name: "Ready for review: Cache the CI dependencies" }).click();
+    await expect(page.getByRole("heading", { name: "Cache the CI dependencies", level: 1 })).toBeVisible();
+    // On her task, both are still together: this one marked, the other a click away.
+    await expect(hers.locator('[aria-current="page"]')).toHaveText("Cache the CI dependencies");
+    await hers.getByRole("button", { name: /Upgrade the CI runners to Node 22$/ }).click();
+    await expect(page.getByRole("heading", { name: "Upgrade the CI runners to Node 22", level: 1 })).toBeVisible();
+  });
+
+  test("stops a delegated part on its own, or a whole task with the work it delegated", async ({ page }) => {
+    await openApp(page);
+    await page.getByRole("region", { name: "Running" }).getByRole("button", { name: "Ship the refunds feature", exact: true }).click();
+    const header = page.locator(".task-header");
+    const execution = page.getByRole("navigation", { name: "Who's working on this task" });
+
+    await execution.getByRole("button", { name: /VERONICA.*Delegated/ }).click();
+    await expect(page.getByRole("heading", { name: "Upgrade the CI runners to Node 22", level: 1 })).toBeVisible();
+    await header.getByRole("button", { name: "Stop", exact: true }).click();
+    expect(await fakeCalls(page)).toContainEqual({ cmd: "stop_task", args: { id: "t-ci" } });
+    await expect(page.locator(".task-facts").getByText("Blocked")).toBeVisible();
+    await expect(header.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
+
+    // JARVIS's task still runs, with VISION on part of it: stopping it stops both.
+    await execution.getByRole("button", { name: /JARVIS.*Asked by/ }).click();
+    await expect(page.getByRole("heading", { name: "Ship the refunds feature", level: 1 })).toBeVisible();
+    await header.getByRole("button", { name: "Stop", exact: true }).click();
+    expect(await fakeCalls(page)).toContainEqual({ cmd: "stop_task", args: { id: "t-refunds" } });
+    await expect(execution.getByText("Blocked: Refunds service architecture")).toBeVisible();
+    await expect(header.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
   });
 });

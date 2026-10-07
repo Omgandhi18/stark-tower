@@ -43,6 +43,18 @@ async getTasks(limit: number | null) : Promise<Task[]> {
     return await TAURI_INVOKE("get_tasks", { limit });
 },
 /**
+ * Stop a task and everything still running beneath it: its owner's session if it's on the task,
+ * and the workers doing what it delegated. Each part that stops is blocked, saying you stopped it.
+ */
+async stopTask(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_task", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Close a task card without reviewing it (cancel it, or set aside a blocked one): it
  * leaves the Work board but stays in history.
  */
@@ -1894,7 +1906,11 @@ export type TaskDetail = { task: Task;
 /**
  * The task this was delegated from, so a delegated task's page leads back to it.
  */
-parent: Task | null; children: Task[]; events: TaskEvent[]; plan: PlanItem[]; checks: CheckRun[]; 
+parent: Task | null; 
+/**
+ * The other tasks delegated from the same parent, oldest first (none for a task nobody delegated).
+ */
+siblings: Task[]; children: Task[]; events: TaskEvent[]; plan: PlanItem[]; checks: CheckRun[]; 
 /**
  * Uncommitted changes in the task's folder right now.
  */

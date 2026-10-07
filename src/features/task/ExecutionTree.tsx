@@ -4,11 +4,22 @@ import type { Agent, Task, TaskDetail } from "../../lib/types";
 import { useActivity } from "../../stores/activity";
 import { useAgents } from "../../stores/agents";
 import { useNavigation } from "../../stores/navigation";
+import { byAgent, stateSummary } from "./executionModel";
 import { filesByAgent, helpersOf, openConflict } from "./taskPresentation";
 import { taskState } from "../work/board";
 
 /** Each person's portrait in the tree (task.css's --execution-avatar holds the same size). */
 const AVATAR = 40;
+
+/** One of someone's tasks, listed under them when they have more than one in this work. */
+interface NodeTask {
+  id: string;
+  title: string;
+  state: string;
+  tone: string;
+  /** The task this page shows. */
+  current: boolean;
+}
 
 interface NodeProps {
   agent: Agent | undefined;
@@ -23,9 +34,12 @@ interface NodeProps {
   claims?: string[];
   /** A clash with another agent over a file, while it still matters. */
   conflict?: string;
+  /** Their tasks in this work: listed, each opening from here, when there's more than one. */
+  tasks?: NodeTask[];
+  onOpenTask?: (id: string) => void;
 }
 
-function Node({ agent, agentId, role, line, files, current, onOpen, tone, claims = [], conflict }: NodeProps) {
+function Node({ agent, agentId, role, line, files, current, onOpen, tone, claims = [], conflict, tasks = [], onOpenTask }: NodeProps) {
   const name = agent?.name ?? agentId;
   const body = (
     <>
@@ -49,6 +63,26 @@ function Node({ agent, agentId, role, line, files, current, onOpen, tone, claims
       ) : (
         <div className="execution-button">{body}</div>
       )}
+      {tasks.length > 1 && (
+        <ul className="execution-tasks" aria-label={`${name}'s tasks`}>
+          {tasks.map((t) => {
+            const label = `${t.state}: ${t.title}`;
+            return (
+              <li key={t.id}>
+                {t.current ? (
+                  <span className={cx("execution-task", `tone-${t.tone}`)} aria-current="page" aria-label={label} title={label}>
+                    <span className="execution-task-title">{t.title}</span>
+                  </span>
+                ) : (
+                  <button type="button" className={cx("execution-task", `tone-${t.tone}`)} aria-label={label} title={label} onClick={() => onOpenTask?.(t.id)}>
+                    <span className="execution-task-title">{t.title}</span>
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {claims.length > 0 && <details className="execution-claims" open={claims.length <= 3}><summary>{claims.length} claimed {claims.length === 1 ? "file" : "files"}</summary><ul>{claims.map((path) => <li key={path}>{path}</li>)}</ul></details>}
       {conflict && (
         <p className="execution-conflict">
@@ -62,13 +96,14 @@ function Node({ agent, agentId, role, line, files, current, onOpen, tone, claims
 
 /**
  * Everyone working on the task: the owner, teammates it delegated to, and temporary helpers.
- * A delegated task starts with the task it came from, which opens from here.
+ * Each person shows once, with their tasks listed under them when they have more than one. A
+ * delegated task starts with the task it came from, and lists its owner's other tasks from it.
  */
 export default function ExecutionTree({ detail, waitingOnYou }: { detail: TaskDetail; waitingOnYou: ReadonlySet<string> }) {
   const agents = useAgents((s) => s.agents);
   const latest = useActivity((s) => s.latest);
   const openTask = useNavigation((s) => s.openTask);
-  const { task, parent, children, events } = detail;
+  const { task, parent, siblings, children, events } = detail;
   const files = filesByAgent(events);
   const helpers = helpersOf(events);
   const claimsFor = (id: string) => detail.claims.filter((c) => c.agent_id === id).map((c) => `${c.path || "Whole workspace"} (${c.reason})`);
@@ -76,11 +111,19 @@ export default function ExecutionTree({ detail, waitingOnYou }: { detail: TaskDe
   const owner = find(task.assignee);
   const ownerState = taskState(task, owner, children, waitingOnYou);
   const ownerLine = task.status === "doing" && latest[task.assignee] ? latest[task.assignee].summary : ownerState.label;
-  const members = 1 + children.length + helpers.length + (parent ? 1 : 0);
+  // All the owner was asked to do in the same work, this task among them.
+  const ownerTasks = [task, ...siblings.filter((s) => s.assignee === task.assignee)].sort((a, b) => a.ts - b.ts);
+  const delegates = byAgent(children);
+  const members = 1 + delegates.length + helpers.length + (parent ? 1 : 0);
 
+  const stateOf = (other: Task) => taskState(other, find(other.assignee), [], waitingOnYou);
   const summaryOf = (other: Task) => {
-    const state = taskState(other, find(other.assignee), [], waitingOnYou);
+    const state = stateOf(other);
     return { line: `${state.label}: ${other.title}`, tone: state.tone };
+  };
+  const listed = (other: Task): NodeTask => {
+    const state = stateOf(other);
+    return { id: other.id, title: other.title, state: state.label, tone: state.tone, current: other.id === task.id };
   };
 
   return (
@@ -97,23 +140,30 @@ export default function ExecutionTree({ detail, waitingOnYou }: { detail: TaskDe
           line={ownerLine}
           files={files[task.assignee] ?? 0}
           claims={claimsFor(task.assignee)}
-          conflict={openConflict(events, task.assignee, task.status)}
+          conflict={openConflict(events, task.assignee, [task])}
           current
           tone={ownerState.tone}
+          tasks={ownerTasks.map(listed)}
+          onOpenTask={openTask}
         />
-        {children.map((child) => (
-          <Node
-            key={child.id}
-            agent={find(child.assignee)}
-            agentId={child.assignee}
-            role="Delegated"
-            {...summaryOf(child)}
-            files={files[child.assignee] ?? 0}
-            claims={claimsFor(child.assignee)}
-            conflict={openConflict(events, child.assignee, child.status)}
-            onOpen={() => openTask(child.id)}
-          />
-        ))}
+        {delegates.map(({ agentId, tasks }) => {
+          const only = tasks.length === 1 ? tasks[0] : null;
+          return (
+            <Node
+              key={agentId}
+              agent={find(agentId)}
+              agentId={agentId}
+              role="Delegated"
+              {...(only ? summaryOf(only) : stateSummary(tasks.map(stateOf)))}
+              files={files[agentId] ?? 0}
+              claims={claimsFor(agentId)}
+              conflict={openConflict(events, agentId, tasks)}
+              onOpen={only ? () => openTask(only.id) : undefined}
+              tasks={tasks.map(listed)}
+              onOpenTask={openTask}
+            />
+          );
+        })}
         {helpers.map((helper, i) => (
           <li key={`${helper.at}-${i}`} className="execution-node is-helper">
             <div className="execution-button">

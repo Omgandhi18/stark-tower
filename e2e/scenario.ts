@@ -284,7 +284,7 @@ const config: AppConfig = {
   ],
 };
 
-const task = (
+export const task = (
   over: Partial<Task> & Pick<Task, "id" | "title" | "assignee" | "status" | "cwd">,
   startedMinutesAgo: number,
   updatedMinutesAgo: number,

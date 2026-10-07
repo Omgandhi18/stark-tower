@@ -47,12 +47,16 @@ const AGENT_INSTRUCTION = /Call claim_files|runs git here/;
 
 /**
  * The conflict to show under someone in the execution tree: their latest clash with another agent
- * over a file, until their part of the work is over. Routine steps (claiming a shared file first,
- * leaving git to the owner) stay in the task's activity.
+ * over a file in one of `tasks` (theirs in this work) that isn't over yet. Routine steps (claiming a
+ * shared file first, leaving git to the owner) stay in the task's activity.
  */
-export function openConflict(events: readonly Pick<TaskEvent, "agent_id" | "kind" | "summary">[], agentId: string, status: Task["status"]): string | undefined {
-  if (SETTLED.includes(status)) return undefined;
-  const latest = events.filter((e) => e.agent_id === agentId && CONFLICTS.includes(e.kind)).slice(-1)[0];
+export function openConflict(
+  events: readonly Pick<TaskEvent, "task_id" | "agent_id" | "kind" | "summary">[],
+  agentId: string,
+  tasks: readonly Pick<Task, "id" | "status">[],
+): string | undefined {
+  const open = new Set(tasks.filter((t) => !SETTLED.includes(t.status)).map((t) => t.id));
+  const latest = events.filter((e) => e.agent_id === agentId && open.has(e.task_id) && CONFLICTS.includes(e.kind)).slice(-1)[0];
   return latest && !AGENT_INSTRUCTION.test(latest.summary) ? latest.summary : undefined;
 }
 
