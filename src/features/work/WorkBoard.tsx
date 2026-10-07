@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { ArrowUpDown, CircleCheckBig, CirclePause, Hourglass, ListTodo, MessageSquareReply, MessagesSquare, OctagonAlert, Play } from "lucide-react";
+import { ArrowUpDown, CircleCheckBig, CirclePause, Hourglass, ListTodo, MessageSquareReply, MessagesSquare, OctagonAlert, Play, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { portraitKey, CountBadge, EmptyState, Portrait, SelectField, SkeletonRows, Tabs, ICON_SIZE, ICON_STROKE } from "../../design";
+import { portraitKey, CountBadge, EmptyState, IconButton, Portrait, SelectField, SkeletonRows, Tabs, ICON_SIZE, ICON_STROKE } from "../../design";
 import { AGENT_STATUS } from "../../lib/status";
 import { useNow } from "../../lib/useNow";
 import { useActivity } from "../../stores/activity";
@@ -11,8 +11,11 @@ import { useNavigation } from "../../stores/navigation";
 import { useWorkspace } from "../../stores/workspace";
 import ProjectTodos from "../todos/ProjectTodos";
 import { useProjectTodos } from "../todos/useProjectTodos";
-import { buildBoard, type WorkSort, type WorkTab } from "./board";
+import { buildBoard, type TaskRow, type WorkSort, type WorkTab } from "./board";
+import { selectableRows } from "./bulk";
+import { BulkBar, CloseConfirm, SectionBulk, SelectButton } from "./BulkControls";
 import { ChatRowView, TaskRowView } from "./TaskRows";
+import { useBulk, type Bulk } from "./useBulk";
 
 const CLOCK_MS = 15_000;
 
@@ -45,6 +48,8 @@ export default function WorkBoard({ project }: { project: string | null }) {
     () => buildBoard({ agents, since, tasks, conversations, latest, pending, project, tab, sort, now }),
     [agents, since, tasks, conversations, latest, pending, project, tab, sort, now],
   );
+  const selectable = useMemo(() => selectableRows(board), [board]);
+  const bulk = useBulk(selectable);
 
   if (!agentsLoaded || !tasksLoaded) {
     return (
@@ -60,16 +65,33 @@ export default function WorkBoard({ project }: { project: string | null }) {
     <div className="work-board">
       <div className="work-toolbar">
         <Tabs tabs={TABS} value={tab} onChange={setTab} label="Which work" idPrefix="work" className="work-tabs" />
-        <SelectField
-          label="Sort"
-          hideLabel
-          icon={ArrowUpDown}
-          value={sort}
-          options={SORTS}
-          onChange={(value) => setSort(value as WorkSort)}
-          className="work-sort"
-        />
+        <div className="work-toolbar-actions">
+          {bulk.selecting ? (
+            <BulkBar tasks={bulk.selectedTasks} busy={bulk.busy} onAction={bulk.request} onDone={bulk.stop} />
+          ) : (
+            <>
+              {selectable.length > 0 && <SelectButton onClick={bulk.start} />}
+              <SelectField
+                label="Sort"
+                hideLabel
+                icon={ArrowUpDown}
+                value={sort}
+                options={SORTS}
+                onChange={(value) => setSort(value as WorkSort)}
+                className="work-sort"
+              />
+            </>
+          )}
+        </div>
       </div>
+
+      {bulk.error && (
+        <p className="work-bulk-error" role="alert">
+          {bulk.error}
+          <IconButton icon={X} label="Dismiss" size="sm" onClick={bulk.dismissError} />
+        </p>
+      )}
+      <CloseConfirm tasks={bulk.closing} onConfirm={bulk.confirmClose} onCancel={bulk.cancelClose} />
 
       <div role="tabpanel" id={`work-panel-${tab}`} aria-labelledby={`work-tab-${tab}`} className="work-sections">
         <BoardSection title="Running" icon={Play} tone="running" count={runningCount}>
@@ -78,7 +100,7 @@ export default function WorkBoard({ project }: { project: string | null }) {
               compact
               icon={CirclePause}
               title="Nothing is running"
-              body={orchestrator ? `Ask ${orchestrator.name} above to start something.` : "Mention an agent above to start something."}
+              body={orchestrator ? `Ask ${orchestrator.name} below to start something.` : "Mention an agent above to start something."}
             />
           ) : (
             <ul className="work-rows">
@@ -92,47 +114,30 @@ export default function WorkBoard({ project }: { project: string | null }) {
           )}
         </BoardSection>
 
-        {board.queued.length > 0 && (
-          <BoardSection title="Waiting their turn" icon={Hourglass} tone="idle" count={board.queued.length}>
-            <ul className="work-rows">
-              {board.queued.map((row) => (
-                <TaskRowView key={row.task.id} row={row} now={now} />
-              ))}
-            </ul>
-          </BoardSection>
-        )}
+        {board.queued.length > 0 && <TaskSection title="Waiting their turn" icon={Hourglass} tone="idle" rows={board.queued} now={now} bulk={bulk} />}
 
-        <BoardSection title="Ready for review" icon={CircleCheckBig} tone="review" count={board.ready.length}>
-          {board.ready.length === 0 ? (
-            <EmptyState compact icon={CircleCheckBig} title="Nothing to review" body="Finished tasks wait here until you close them." />
-          ) : (
-            <ul className="work-rows">
-              {board.ready.map((row) => (
-                <TaskRowView key={row.task.id} row={row} now={now} />
-              ))}
-            </ul>
-          )}
-        </BoardSection>
+        <TaskSection
+          title="Ready for review"
+          icon={CircleCheckBig}
+          tone="review"
+          rows={board.ready}
+          now={now}
+          bulk={bulk}
+          empty={<EmptyState compact icon={CircleCheckBig} title="Nothing to review" body="Finished tasks wait here until you close them." />}
+        />
 
-        {board.blocked.length > 0 && (
-          <BoardSection title="Blocked" icon={OctagonAlert} tone="danger" count={board.blocked.length}>
-            <ul className="work-rows">
-              {board.blocked.map((row) => (
-                <TaskRowView key={row.task.id} row={row} now={now} />
-              ))}
-            </ul>
-          </BoardSection>
-        )}
+        {board.blocked.length > 0 && <TaskSection title="Blocked" icon={OctagonAlert} tone="danger" rows={board.blocked} now={now} bulk={bulk} />}
 
         {board.answered.length > 0 && (
-          <BoardSection title="Answered" icon={MessageSquareReply} tone="idle" count={board.answered.length}>
-            <p className="work-section-note">Finished with nothing to review. Each stays here for a day, and with its chat after that.</p>
-            <ul className="work-rows">
-              {board.answered.map((row) => (
-                <TaskRowView key={row.task.id} row={row} now={now} />
-              ))}
-            </ul>
-          </BoardSection>
+          <TaskSection
+            title="Answered"
+            icon={MessageSquareReply}
+            tone="idle"
+            rows={board.answered}
+            now={now}
+            bulk={bulk}
+            note={<p className="work-section-note">Finished with nothing to review. Each stays here for a day, and with its chat after that.</p>}
+          />
         )}
 
         {project && <ProjectTodosSection project={project} />}
@@ -148,7 +153,51 @@ interface BoardSectionProps {
   icon: LucideIcon;
   tone: string;
   count?: number;
+  /** Controls at the end of the header. */
+  actions?: ReactNode;
   children: ReactNode;
+}
+
+interface TaskSectionProps {
+  title: string;
+  icon: LucideIcon;
+  tone: string;
+  rows: readonly TaskRow[];
+  now: number;
+  bulk: Bulk;
+  /** Shown above the rows. */
+  note?: ReactNode;
+  /** Shown instead of the rows when there are none. */
+  empty?: ReactNode;
+}
+
+/** A section of tasks that can be marked reviewed or closed all at once, or a few at a time. */
+function TaskSection({ title, icon, tone, rows, now, bulk, note, empty }: TaskSectionProps) {
+  const actions =
+    rows.length > 0 ? (
+      <SectionBulk section={title} rows={rows} selecting={bulk.selecting} selected={bulk.selected} busy={bulk.busy} onPick={bulk.setMany} onAction={bulk.request} />
+    ) : undefined;
+  return (
+    <BoardSection title={title} icon={icon} tone={tone} count={rows.length} actions={actions}>
+      {rows.length === 0 ? (
+        empty
+      ) : (
+        <>
+          {note}
+          <ul className="work-rows">
+            {rows.map((row) => (
+              <TaskRowView
+                key={row.task.id}
+                row={row}
+                now={now}
+                selection={bulk.selecting ? { checked: bulk.selected.has(row.task.id), onToggle: () => bulk.toggle(row.task.id) } : undefined}
+              />
+            ))}
+          </ul>
+        </>
+      )}
+    </BoardSection>
+  );
 }
 
 /** What's left to do in the project Work shows, from its to-do lists. */
@@ -161,7 +210,7 @@ function ProjectTodosSection({ project }: { project: string }) {
   );
 }
 
-function BoardSection({ title, icon: Icon, tone, count, children }: BoardSectionProps) {
+function BoardSection({ title, icon: Icon, tone, count, actions, children }: BoardSectionProps) {
   const id = `work-section-${title.toLowerCase().replace(/\s+/g, "-")}`;
   return (
     <section className="work-section" aria-labelledby={id}>
@@ -173,6 +222,7 @@ function BoardSection({ title, icon: Icon, tone, count, children }: BoardSection
           {title}
         </h2>
         {count !== undefined && <CountBadge count={count} label={title} tone="neutral" showZero />}
+        {actions && <div className="work-section-actions">{actions}</div>}
       </header>
       {children}
     </section>

@@ -88,6 +88,42 @@ test.describe("work", () => {
     await expect(ready.getByText("Write the release notes for 2.4")).toHaveCount(0);
   });
 
+  test("marks everything ready for review as reviewed at once", async ({ page }) => {
+    await openApp(page);
+    const ready = page.getByRole("region", { name: "Ready for review" });
+    await ready.getByRole("button", { name: "Mark all reviewed" }).click();
+    await expect(ready.getByText("Nothing to review")).toBeVisible();
+    expect(await fakeCalls(page)).toContainEqual({ cmd: "review_task", args: { id: "t-notes" } });
+  });
+
+  test("closes the selected tasks after asking", async ({ page }) => {
+    await openApp(page);
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    await page.getByRole("checkbox", { name: "Select “Load-test the refunds endpoint”" }).check();
+    await page.getByRole("checkbox", { name: "Select all in Ready for review" }).check();
+    const bar = page.getByRole("toolbar", { name: "Selected tasks" });
+    await expect(bar.getByText("2 selected")).toBeVisible();
+    await bar.getByRole("button", { name: "Close" }).click();
+    const confirm = page.getByRole("dialog", { name: "Close 2 tasks?" });
+    await confirm.getByRole("button", { name: "Close 2 tasks" }).click();
+    await expect(page.getByRole("region", { name: "Blocked" })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Ready for review" }).getByText("Nothing to review")).toBeVisible();
+    const closed = (await fakeCalls(page)).filter((c) => c.cmd === "close_task").map((c) => c.args.id);
+    expect(closed.sort()).toEqual(["t-load", "t-notes"]);
+  });
+
+  test("marks only the finished tasks in a selection reviewed", async ({ page }) => {
+    await openApp(page);
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    await page.getByRole("checkbox", { name: "Select “Load-test the refunds endpoint”" }).check();
+    await page.getByRole("checkbox", { name: "Select “Write the release notes for 2.4”" }).check();
+    await page.getByRole("toolbar", { name: "Selected tasks" }).getByRole("button", { name: "Mark reviewed" }).click();
+    await expect(page.getByRole("region", { name: "Ready for review" }).getByText("Nothing to review")).toBeVisible();
+    await expect(page.getByRole("checkbox", { name: "Select “Load-test the refunds endpoint”" })).toBeChecked();
+    const reviewed = (await fakeCalls(page)).filter((c) => c.cmd === "review_task").map((c) => c.args.id);
+    expect(reviewed).toEqual(["t-notes"]);
+  });
+
   test("deletes a chat, but not one an agent is working in", async ({ page }) => {
     await openApp(page);
     const projects = page.getByRole("list", { name: "Projects" });

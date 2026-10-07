@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { CalendarClock, CheckCheck, CornerDownRight, Hourglass, MessageSquareReply, MessageSquareText, Play, RotateCcw, Square, SquareArrowOutUpRight, X } from "lucide-react";
-import { portraitKey, Button, OverflowMenu, Portrait, StatusPill, Tag, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
+import { cx, portraitKey, Button, OverflowMenu, Portrait, StatusPill, Tag, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
 import { chatStop, closeTask, resumeTask, reviewTask, startTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { automationOf } from "../../lib/requester";
@@ -13,6 +13,7 @@ import { folderName } from "../../stores/workspace";
 import { providerLabel } from "../agents/display";
 import { excerpt } from "../attention/presentation";
 import { progressRatio, type ChatRow, type TaskRow } from "./board";
+import { SelectBox } from "./BulkControls";
 
 const SHOWN_CONTRIBUTORS = 3;
 const PERCENT = 100;
@@ -53,10 +54,12 @@ export function PlanProgress({ progress }: { progress: { done: number; total: nu
 interface TaskRowViewProps {
   row: TaskRow;
   now: number;
+  /** While selecting tasks on Work: whether this one is selected. */
+  selection?: { checked: boolean; onToggle: () => void };
 }
 
 /** One task on the board: who owns it, where it runs, how far along it is. */
-export function TaskRowView({ row, now }: TaskRowViewProps) {
+export function TaskRowView({ row, now, selection }: TaskRowViewProps) {
   const config = useConfig((s) => s.config);
   const openTask = useNavigation((s) => s.openTask);
   const openConversation = useNavigation((s) => s.openConversation);
@@ -106,7 +109,8 @@ export function TaskRowView({ row, now }: TaskRowViewProps) {
   }
 
   return (
-    <li className="work-row">
+    <li className={cx("work-row", selection && "is-selectable", selection?.checked && "is-selected")}>
+      {selection && <SelectBox state={selection.checked ? "all" : "none"} label={`Select “${task.title}”`} onChange={selection.onToggle} />}
       <Portrait name={name} figure={portraitKey(owner)} accent={owner?.accent} status={status === "doing" ? owner?.status : undefined} size={48} />
       <div className="work-row-main">
         <span className="work-row-agent">
