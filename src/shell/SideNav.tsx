@@ -5,6 +5,7 @@ import { CountBadge, cx, ICON_SIZE, ICON_STROKE, usePeek } from "../design";
 import { PANEL_SHORTCUT } from "../app/panelShortcuts";
 import { NAV_ITEMS, navRouteFor } from "../app/routes";
 import SettingsNav from "../features/settings/SettingsNav";
+import TodoListNav from "../features/todos/TodoListNav";
 import ProjectNav from "../features/work/ProjectNav";
 import { useNavigation, type RouteId } from "../stores/navigation";
 import { selectNeedsYouCount, useNotifications } from "../stores/notifications";
@@ -12,7 +13,7 @@ import { usePanels } from "../stores/panels";
 import { useSystem } from "../stores/system";
 
 /** A destination's own places, nested under it while it's open. */
-const NESTED: Partial<Record<RouteId, ComponentType>> = { work: ProjectNav, settings: SettingsNav };
+const NESTED: Partial<Record<RouteId, ComponentType>> = { work: ProjectNav, todos: TodoListNav, settings: SettingsNav };
 
 /**
  * The six destinations, with the open one's places nested under it. Notifications carries the count of things that need you.

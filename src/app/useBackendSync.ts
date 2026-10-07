@@ -26,6 +26,7 @@ import {
   onBrowserReveal,
   onSimulatorReveal,
   onRemindersChanged,
+  onTodosChanged,
   onBugsChanged,
   onChatEvent,
   onChatStatus,
@@ -56,6 +57,7 @@ import { useMemoryNotes } from "../stores/memoryNotes";
 import { useDevServers } from "../stores/devservers";
 import { usePreview } from "../stores/preview";
 import { useReminders } from "../stores/reminders";
+import { useTodos } from "../stores/todos";
 import { useChats } from "../stores/chats";
 import { useNavigation } from "../stores/navigation";
 import { useConfig } from "../stores/config";
@@ -139,6 +141,7 @@ export function useBackendSync() {
     first("notifications", useNotifications.getState().refresh);
     first("automations", useAutomations.getState().refresh);
     first("reminders", useReminders.getState().refresh);
+    first("to-dos", useTodos.getState().refresh);
     first("dev servers", () => devserverList().then((servers) => servers.forEach(useDevServers.getState().apply)));
     first("browser", () => browserPage().then(usePreview.getState().applyPage));
     first("runtime health", system.refreshHealth);
@@ -177,6 +180,7 @@ export function useBackendSync() {
       onNotificationsChanged(() => useNotifications.getState().refresh().catch(report("notifications"))),
       onAutomationsChanged(() => useAutomations.getState().refreshAll().catch(report("automations"))),
       onRemindersChanged(() => useReminders.getState().refresh().catch(report("reminders"))),
+      onTodosChanged(() => useTodos.getState().refresh().catch(report("to-dos"))),
       onDevserverChanged((server) => {
         const previous = useDevServers.getState().servers[server.folder];
         useDevServers.getState().apply(server);

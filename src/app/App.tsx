@@ -4,6 +4,7 @@ import { IS_TAURI } from "../lib/platform";
 import AgentsScreen from "../features/agents/AgentsScreen";
 import AutomationsScreen from "../features/automations/AutomationsScreen";
 import RemindersScreen from "../features/reminders/RemindersScreen";
+import TodosScreen from "../features/todos/TodosScreen";
 import NotificationsScreen from "../features/notifications/NotificationsScreen";
 import Onboarding from "../features/onboarding/Onboarding";
 import SettingsScreen from "../features/settings/SettingsScreen";
@@ -29,6 +30,7 @@ const ROUTE_LABEL: Record<RouteId, string> = {
   agents: "Agents",
   automations: "Automations",
   reminders: "Reminders",
+  todos: "To-dos",
   notifications: "Notifications",
   settings: "Settings",
 };
@@ -52,6 +54,8 @@ function screenFor(route: RouteId, comparing: boolean) {
       return <AutomationsScreen />;
     case "reminders":
       return <RemindersScreen />;
+    case "todos":
+      return <TodosScreen />;
     case "notifications":
       return <NotificationsScreen />;
     case "settings":

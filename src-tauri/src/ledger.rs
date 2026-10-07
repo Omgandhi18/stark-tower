@@ -709,6 +709,7 @@ impl Ledger {
             [],
         )?;
         conn.execute_batch(crate::spend::SCHEMA)?;
+        conn.execute_batch(crate::todo_store::SCHEMA)?;
         Ok(Ledger {
             conn: Mutex::new(conn),
             active: Mutex::new(HashMap::new()),

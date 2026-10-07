@@ -3,7 +3,7 @@
 // a camera position or a scroll offset.
 import { create } from "zustand";
 
-export type RouteId = "work" | "task" | "environment" | "agents" | "automations" | "reminders" | "notifications" | "settings";
+export type RouteId = "work" | "task" | "environment" | "agents" | "automations" | "reminders" | "todos" | "notifications" | "settings";
 
 export type SettingsSection = "general" | "notifications" | "voices" | "spend" | "providers" | "permissions" | "power" | "themes" | "diagnostics";
 
@@ -24,6 +24,8 @@ interface NavigationState {
   notificationId: number | null;
   /** The automation open on Automations. */
   automationId: number | null;
+  /** The list open on To-dos; null for every list's open to-dos. */
+  todoList: number | null;
   /** Agents whose chats were opened this session (the Environment's drawer keeps them mounted). */
   openChats: string[];
   visited: RouteId[];
@@ -43,6 +45,8 @@ interface NavigationState {
   focusNotification: (id: number | null) => void;
   /** Open an automation on Automations. */
   openAutomation: (id: number | null) => void;
+  /** Open a to-do list (null: every list) on To-dos. */
+  openTodoList: (id: number | null) => void;
 }
 
 const markVisited = (visited: RouteId[], route: RouteId) => (visited.includes(route) ? visited : [...visited, route]);
@@ -62,6 +66,7 @@ export const useNavigation = create<NavigationState>((set) => ({
   taskId: null,
   notificationId: null,
   automationId: null,
+  todoList: null,
   openChats: [],
   visited: ["work"],
   navigate: (route) => set((s) => goTo(route, s.visited)),
@@ -74,4 +79,5 @@ export const useNavigation = create<NavigationState>((set) => ({
   focusNotification: (notificationId) => set((s) => ({ ...goTo("notifications", s.visited), notificationId, reviewId: null })),
   openTask: (taskId) => set((s) => ({ ...goTo("task", s.visited), taskId })),
   openAutomation: (automationId) => set((s) => ({ ...goTo("automations", s.visited), automationId })),
+  openTodoList: (todoList) => set((s) => ({ ...goTo("todos", s.visited), todoList })),
 }));

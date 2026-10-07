@@ -299,6 +299,19 @@
   color: var(--nav-active-bar);
 }
 
+/* How many are left in a place (a to-do list's open items). */
+.nav-sub-count {
+  flex: none;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--nav-hover);
+  color: var(--nav-muted);
+  font-size: var(--text-2xs);
+  line-height: 16px;
+  text-align: center;
+}
+
 /* A row's actions show while that row is hovered or focused (its nested chats have their own),
    over the end of the row where the default star otherwise sits. */
 .nav-sub-row > .menu-root {
@@ -426,11 +439,11 @@
   flex: none;
 }
 
-.sidenav.is-rail :is(.nav-label, .nav-sub-label, .nav-sub-default, .nav-update-text) {
+.sidenav.is-rail :is(.nav-label, .nav-sub-label, .nav-sub-default, .nav-sub-count, .nav-update-text) {
   transition: opacity var(--duration) var(--ease-out);
 }
 
-.sidenav.is-rail:not(.is-peeking) :is(.nav-label, .nav-sub-label, .nav-sub-default, .nav-update-text) {
+.sidenav.is-rail:not(.is-peeking) :is(.nav-label, .nav-sub-label, .nav-sub-default, .nav-sub-count, .nav-update-text) {
   opacity: 0;
 }
 

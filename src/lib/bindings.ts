@@ -934,6 +934,82 @@ async getChat(agentId: string, limit: number | null) : Promise<StoredMessage[]> 
 async conversationChat(conversationId: number, limit: number | null) : Promise<ConversationChat | null> {
     return await TAURI_INVOKE("conversation_chat", { conversationId, limit });
 },
+async listTodoLists() : Promise<TodoList[]> {
+    return await TAURI_INVOKE("list_todo_lists");
+},
+async saveTodoList(input: TodoListInput) : Promise<Result<TodoList, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_todo_list", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteTodoList(id: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_todo_list", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listTodos() : Promise<Todo[]> {
+    return await TAURI_INVOKE("list_todos");
+},
+async saveTodo(input: TodoInput) : Promise<Result<Todo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_todo", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setTodoDone(id: number, done: boolean) : Promise<Result<Todo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_todo_done", { id, done }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteTodo(id: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_todo", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async reorderTodos(listId: number, ids: number[]) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reorder_todos", { listId, ids }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Hand a to-do to its agent now.
+ */
+async startTodo(id: number) : Promise<Result<Task, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_todo", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Hand a whole list to an agent, who works through its open to-dos.
+ */
+async handTodoList(listId: number, agentId: string) : Promise<Result<Task, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("hand_todo_list", { listId, agentId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * The agent's current saved chat, if it has one, so the UI can restore the folder
  * it runs in: resuming a Claude session only works from its own folder.
@@ -1955,6 +2031,71 @@ summary: string;
 data: string }
 export type TerminalInfo = { id: string; folder: string; title: string; shell: string; alive: boolean; exit_code: number | null; program_running: boolean; note: string | null }
 export type TerminalOutput = { data: number[]; offset: number; exit_code: number | null }
+/**
+ * One thing to do, done by you or by the agent it's assigned to.
+ */
+export type Todo = { id: number; list_id: number; title: string; notes: string; 
+/**
+ * Who'll do it.
+ */
+agent_id: string | null; 
+/**
+ * The task it started, once an agent's on it.
+ */
+task_id: string | null; 
+/**
+ * When it's due (Unix ms); you're reminded then.
+ */
+due: number | null; 
+/**
+ * The reminder for its due time.
+ */
+reminder_id: number | null; 
+/**
+ * When it was ticked off.
+ */
+done: number | null; 
+/**
+ * Who ticked it off: "you", or an agent.
+ */
+done_by: string | null; 
+/**
+ * Who added it: "you", or an agent.
+ */
+added_by: string; position: number; created: number; updated: number }
+/**
+ * A to-do as you make or change it.
+ */
+export type TodoInput = { 
+/**
+ * None to create one.
+ */
+id: number | null; list_id: number; title: string; notes: string; agent_id: string | null; due: number | null }
+/**
+ * A named list of to-dos, tied to a project or not.
+ */
+export type TodoList = { id: number; name: string; 
+/**
+ * The project folder its agent work runs in; "" for a list that isn't about one.
+ */
+project: string; 
+/**
+ * What assigning an agent does: "manual" (it waits for Start), "now" (it starts at once)
+ * or "when_free" (it starts when the agent has nothing running).
+ */
+start_mode: string; position: number; created: number; updated: number }
+/**
+ * A list as you make or change it.
+ */
+export type TodoListInput = { 
+/**
+ * None to create one.
+ */
+id: number | null; name: string; 
+/**
+ * A project folder, or "" for none.
+ */
+project: string; start_mode: string }
 export type Tone = { 
 /**
  * Serious (0) to playful.

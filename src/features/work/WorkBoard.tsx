@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { ArrowUpDown, CircleCheckBig, CirclePause, Hourglass, MessageSquareReply, MessagesSquare, OctagonAlert, Play } from "lucide-react";
+import { ArrowUpDown, CircleCheckBig, CirclePause, Hourglass, ListTodo, MessageSquareReply, MessagesSquare, OctagonAlert, Play } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { portraitKey, CountBadge, EmptyState, Portrait, SelectField, SkeletonRows, Tabs, ICON_SIZE, ICON_STROKE } from "../../design";
 import { AGENT_STATUS } from "../../lib/status";
@@ -9,6 +9,8 @@ import { useAgents, selectOrchestrator } from "../../stores/agents";
 import { useAttention } from "../../stores/attention";
 import { useNavigation } from "../../stores/navigation";
 import { useWorkspace } from "../../stores/workspace";
+import ProjectTodos from "../todos/ProjectTodos";
+import { useProjectTodos } from "../todos/useProjectTodos";
 import { buildBoard, type WorkSort, type WorkTab } from "./board";
 import { ChatRowView, TaskRowView } from "./TaskRows";
 
@@ -133,6 +135,8 @@ export default function WorkBoard({ project }: { project: string | null }) {
           </BoardSection>
         )}
 
+        {project && <ProjectTodosSection project={project} />}
+
         {tab === "all" && <TeamSection />}
       </div>
     </div>
@@ -145,6 +149,16 @@ interface BoardSectionProps {
   tone: string;
   count?: number;
   children: ReactNode;
+}
+
+/** What's left to do in the project Work shows, from its to-do lists. */
+function ProjectTodosSection({ project }: { project: string }) {
+  const { open } = useProjectTodos(project);
+  return (
+    <BoardSection title="To-dos" icon={ListTodo} tone="idle" count={open.length}>
+      <ProjectTodos project={project} />
+    </BoardSection>
+  );
 }
 
 function BoardSection({ title, icon: Icon, tone, count, children }: BoardSectionProps) {

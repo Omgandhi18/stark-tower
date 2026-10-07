@@ -1,0 +1,399 @@
+/* To-dos: lists of what needs doing, each to-do assignable to an agent. */
+.todos-screen {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The page centres in what's left beside the open to-do. */
+.todos-page {
+  display: grid;
+  align-content: start;
+  gap: var(--space-5);
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-8) max(var(--space-6), calc(50% - 440px)) var(--space-10);
+  overflow-y: auto;
+}
+
+/* ---- Adding ------------------------------------------------------------------------ */
+.todo-add {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0 var(--space-3);
+  padding: 0 var(--space-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-raised);
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.todo-add:focus-within {
+  border-style: solid;
+  border-color: var(--accent);
+}
+
+.todo-add-icon {
+  color: var(--text-muted);
+}
+
+.todo-add-input {
+  height: 46px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-md);
+  outline: none;
+}
+
+.todo-add-input::placeholder {
+  color: var(--text-muted);
+}
+
+.todo-add .todo-error {
+  grid-column: 2;
+  padding-bottom: var(--space-2);
+}
+
+/* ---- Rows ---------------------------------------------------------------------------- */
+.todo-rows {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface-raised);
+  list-style: none;
+  overflow: hidden;
+}
+
+.todo-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 54px;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.todo-row + .todo-row {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.todo-row.is-selected {
+  background: var(--accent-soft);
+}
+
+/* A round box to tick, drawn over the real checkbox (which keeps the keyboard and screen readers). */
+.todo-check {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+.todo-check input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.todo-check-box {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+  color: var(--text-on-strong);
+  pointer-events: none;
+  transition: background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
+}
+
+.todo-check:hover .todo-check-box {
+  border-color: var(--state-success);
+}
+
+.todo-check input:checked + .todo-check-box {
+  border-color: var(--state-success);
+  background: var(--state-success);
+}
+
+.todo-check input:focus-visible + .todo-check-box {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.todo-main {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.todo-title {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: var(--text-md);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+button.todo-title:hover {
+  color: var(--accent-text);
+}
+
+.todo-row.is-done .todo-title {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.todo-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.todo-meta:empty {
+  display: none;
+}
+
+.todo-due {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.todo-due.is-overdue {
+  color: var(--state-danger);
+  font-weight: var(--weight-medium);
+}
+
+.todo-state {
+  flex: none;
+}
+
+.todo-agent {
+  flex: none;
+  width: 150px;
+}
+
+.todo-error {
+  color: var(--state-danger);
+  font-size: var(--text-xs);
+}
+
+.todo-done > summary {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: default;
+}
+
+.todo-done[open] > summary {
+  margin-bottom: var(--space-2);
+}
+
+/* ---- A list's head -------------------------------------------------------------------- */
+.todo-list-head {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.todo-list-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* The name reads as the page title and edits in place. */
+.todo-list-title {
+  flex: 1;
+  min-width: 0;
+  margin-left: -7px;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+}
+
+.todo-list-title:hover {
+  border-color: var(--border-subtle);
+}
+
+.todo-list-title:focus {
+  border-color: var(--accent);
+  background: var(--surface-raised);
+  outline: none;
+}
+
+.todo-list-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.todo-list-settings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.todo-list-form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+/* ---- Every list at once ---------------------------------------------------------------- */
+.todo-group {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.todo-group-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.todo-group-title:hover {
+  color: var(--accent-text);
+}
+
+.todo-group-count {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+  text-align: center;
+}
+
+.todo-group-empty {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* ---- One to-do in full ------------------------------------------------------------------ */
+.todo-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 360px;
+  flex: none;
+  min-height: 0;
+  padding: var(--space-5);
+  border-left: 1px solid var(--border-subtle);
+  background: var(--surface-sunken);
+  overflow-y: auto;
+}
+
+.todo-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.todo-detail-kicker {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.todo-detail .textarea {
+  min-height: 110px;
+}
+
+.todo-detail-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.todo-detail-due {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.todo-detail-due > .field {
+  flex: 1;
+}
+
+.todo-detail-work {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface-raised);
+}
+
+.todo-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.todo-detail-hint {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.todo-detail-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: auto;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* ---- On Work, for a project ------------------------------------------------------------- */
+.project-todos {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.project-todos-open {
+  justify-self: start;
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 1280px) {
+  .todo-agent {
+    width: 120px;
+  }
+
+  .todo-detail {
+    width: 320px;
+  }
+}

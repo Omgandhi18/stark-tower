@@ -47,6 +47,8 @@ mod spend;
 mod capture_mac;
 mod studio;
 mod tasks;
+mod todo_store;
+mod todos;
 mod terminal;
 mod workspaces;
 mod claims;
@@ -1000,6 +1002,70 @@ fn get_task_file_diff(state: tauri::State<AppState>, id: String, path: String) -
 #[specta::specta]
 fn get_chat(state: tauri::State<AppState>, agent_id: String, limit: Option<i64>) -> Vec<StoredMessage> {
     state.ledger.messages(&agent_id, limit.unwrap_or(500))
+}
+
+// ---- To-do lists ----
+
+#[tauri::command]
+#[specta::specta]
+fn list_todo_lists(app: tauri::AppHandle) -> Vec<todo_store::TodoList> {
+    todos::lists(&app)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn save_todo_list(app: tauri::AppHandle, input: todos::TodoListInput) -> Result<todo_store::TodoList, String> {
+    todos::save_list(&app, input)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn delete_todo_list(app: tauri::AppHandle, id: i64) -> Result<(), String> {
+    todos::delete_list(&app, id)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn list_todos(app: tauri::AppHandle) -> Vec<todo_store::Todo> {
+    todos::all(&app)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn save_todo(app: tauri::AppHandle, input: todos::TodoInput) -> Result<todo_store::Todo, String> {
+    todos::save(&app, input, tasks::BY_DEVELOPER)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_todo_done(app: tauri::AppHandle, id: i64, done: bool) -> Result<todo_store::Todo, String> {
+    todos::set_done(&app, id, done, tasks::BY_DEVELOPER)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn delete_todo(app: tauri::AppHandle, id: i64) -> Result<(), String> {
+    todos::delete(&app, id)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn reorder_todos(app: tauri::AppHandle, list_id: i64, ids: Vec<i64>) -> Result<(), String> {
+    todos::reorder(&app, list_id, &ids)
+}
+
+/// Hand a to-do to its agent now.
+#[tauri::command]
+#[specta::specta]
+fn start_todo(app: tauri::AppHandle, id: i64) -> Result<ledger::Task, String> {
+    todos::start(&app, id)
+}
+
+/// Hand a whole list to an agent, who works through its open to-dos.
+#[tauri::command]
+#[specta::specta]
+fn hand_todo_list(app: tauri::AppHandle, list_id: i64, agent_id: String) -> Result<ledger::Task, String> {
+    todos::hand_list(&app, list_id, &agent_id)
 }
 
 /// One chat, as the UI shows it: the conversation, its transcript, and how its session is doing.
@@ -2316,6 +2382,16 @@ fn specta_builder() -> tauri_specta::Builder {
             chat_stop,
             get_chat,
             conversation_chat,
+            list_todo_lists,
+            save_todo_list,
+            delete_todo_list,
+            list_todos,
+            save_todo,
+            set_todo_done,
+            delete_todo,
+            reorder_todos,
+            start_todo,
+            hand_todo_list,
             active_conversation,
             list_conversations,
             new_chat,
@@ -2494,6 +2570,7 @@ pub fn run() {
             // Recovery first, then the automation scheduler.
             automations::start(app.handle().clone());
             reminders::start(app.handle().clone());
+            todos::start_scheduler(app.handle().clone());
             hosting::start(app.handle().clone());
             voices::start(app.handle().clone());
             // Copies of files attached to messages that were never sent go after a day.

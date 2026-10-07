@@ -201,6 +201,14 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
             handle_remind(app, &mut writer, &req);
             return;
         }
+        Some("todo") => {
+            let value = match crate::todos::tool(app, &actor_of(&req), &req) {
+                Ok(result) => serde_json::json!({ "result": result }),
+                Err(error) => serde_json::json!({ "error": error }),
+            };
+            reply(&mut writer, value);
+            return;
+        }
         Some("dev_server") => {
             let agent = req.get("agentId").and_then(|v| v.as_str()).unwrap_or("");
             let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");

@@ -1,7 +1,7 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { commands, type AutomationInput, type Bounds, type BrowserPage, type Budget, type CodeReviews, type CommitInput, type ExtraArgs, type MacNotifications, type Output, type PowerState, type ReminderInput, type RequestInput, type Result, type Server, type WorktreeSetup } from "./bindings";
-import type { Attachment, ChatEvent, ChatStatus, ChatSwitch, TaskEvent, LedgerEntry, PtyData, ReviewRequest, StatusEvent, UsageUpdate, UpdateStatus } from "./types";
+import type { Attachment, ChatEvent, ChatStatus, ChatSwitch, TodoInput, TodoListInput, TaskEvent, LedgerEntry, PtyData, ReviewRequest, StatusEvent, UsageUpdate, UpdateStatus } from "./types";
 
 // Commands are the tauri-specta-generated, typed wrappers (bindings.ts). Fallible
 // Rust commands (Result<T, String>) return a Result here; `ok()` unwraps it back
@@ -247,6 +247,23 @@ export const newChat = (agentId: string, cwd?: string) => commands.newChat(agent
 export const openConversation = (conversationId: number) => commands.openConversation(conversationId);
 
 export const onConversationsChanged = (cb: () => void): Promise<UnlistenFn> => listen("conversations://changed", () => cb());
+
+// ---- to-do lists ----
+
+export const listTodoLists = () => commands.listTodoLists();
+export const saveTodoList = (input: TodoListInput) => ok(commands.saveTodoList(input));
+export const deleteTodoList = (id: number) => ok(commands.deleteTodoList(id));
+export const listTodos = () => commands.listTodos();
+export const saveTodo = (input: TodoInput) => ok(commands.saveTodo(input));
+export const setTodoDone = (id: number, done: boolean) => ok(commands.setTodoDone(id, done));
+export const deleteTodo = (id: number) => ok(commands.deleteTodo(id));
+export const reorderTodos = (listId: number, ids: number[]) => ok(commands.reorderTodos(listId, ids));
+/** Hand a to-do to its agent now: it becomes a task in their chat for the list's project. */
+export const startTodo = (id: number) => ok(commands.startTodo(id));
+/** Hand a whole list to an agent, who works through its open to-dos. */
+export const handTodoList = (listId: number, agentId: string) => ok(commands.handTodoList(listId, agentId));
+/** A list or to-do changed (yours, or an agent's). */
+export const onTodosChanged = (cb: () => void): Promise<UnlistenFn> => listen("todos://changed", () => cb());
 
 // ---- maintenance (bugs) ----
 

@@ -298,6 +298,45 @@ const SIMULATOR_TOOL = {
   },
 };
 
+const ADD_TODO_TOOL = {
+  name: "add_todo",
+  description:
+    "Add a to-do to the developer's lists: a follow-up you found that's outside what you were asked " +
+    "(\"the login form has no error state either\"), or one they asked you to note down. It goes on the list " +
+    "named in `list`, else the list of the to-do you're working on, else your project's list, else Inbox. " +
+    "They see that you added it.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      title: { type: "string", description: "What needs doing, in a short line." },
+      notes: { type: "string", description: "Anything else they or the agent who does it should know (optional)." },
+      list: { type: "string", description: "The list's name (optional)." },
+    },
+    required: ["title"],
+  },
+};
+
+const COMPLETE_TODO_TOOL = {
+  name: "complete_todo",
+  description:
+    "Tick off one of the developer's to-dos once it's done: the one you were handed (its number is in the " +
+    "request), or one you finished from a list you were asked to work through. They see that you ticked it off.",
+  inputSchema: {
+    type: "object",
+    properties: { id: { type: "integer", description: "The to-do's number." } },
+    required: ["id"],
+  },
+};
+
+const LIST_TODOS_TOOL = {
+  name: "list_todos",
+  description: "Read what's left on the developer's to-do lists, with each to-do's number, notes and who it's assigned to.",
+  inputSchema: {
+    type: "object",
+    properties: { list: { type: "string", description: "Only this list (optional)." } },
+  },
+};
+
 const CLAIM_FILES_TOOL = {
   name: "claim_files",
   description: "Reserve files or folders exclusively before editing in a shared workspace. Sensitive files must be claimed. Overlaps report who holds them and why.",
@@ -310,7 +349,7 @@ const RELEASE_FILES_TOOL = {
 };
 
 async function toolsList() {
-  const tools = [CLAIM_FILES_TOOL, RELEASE_FILES_TOOL, ASK_HUMAN_TOOL, MESSAGE_TOOL, SHARE_TOOL, REMIND_TOOL, BROWSER_TOOL, DEV_SERVER_TOOL, SIMULATOR_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
+  const tools = [CLAIM_FILES_TOOL, RELEASE_FILES_TOOL, ASK_HUMAN_TOOL, MESSAGE_TOOL, SHARE_TOOL, REMIND_TOOL, ADD_TODO_TOOL, COMPLETE_TODO_TOOL, LIST_TODOS_TOOL, BROWSER_TOOL, DEV_SERVER_TOOL, SIMULATOR_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
   if (IS_ORCH) {
     const workers = await getRoster();
     tools.unshift(buildDelegateTool(workers));
@@ -411,6 +450,20 @@ rl.on("line", async (raw) => {
       });
       if (res.error) result(id, "remind failed: " + res.error, true);
       else result(id, res.result || "(set)");
+    } else if (name === "add_todo" || name === "complete_todo" || name === "list_todos") {
+      const action = { add_todo: "add", complete_todo: "done", list_todos: "list" }[name];
+      log(name, "->", args.title || args.id || args.list || "");
+      const res = await bridge({
+        type: "todo",
+        agentId: AGENT_ID,
+        action,
+        title: args.title || "",
+        notes: args.notes || "",
+        list: args.list || "",
+        ...(Number.isInteger(args.id) ? { id: args.id } : {}),
+      });
+      if (res.error) result(id, name + " failed: " + res.error, true);
+      else result(id, res.result || "Done.");
     } else if (name === "browser" || name === "simulator" || name === "dev_server") {
       log(name, "->", args.action);
       const res = await bridge({

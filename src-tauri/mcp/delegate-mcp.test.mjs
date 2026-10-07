@@ -99,6 +99,19 @@ test("says which chat it works in, so an agent in several chats is answered in t
   }
 });
 
+test("adds and ticks off to-dos for the developer, as the agent running it", async () => {
+  const app = await fakeApp((request) => ({ result: request.action === "add" ? "Added to-do #7 to \"Inbox\"." : "Ticked off to-do #7." }));
+  try {
+    const added = await callTool(app.sock, "add_todo", { title: "Add an error state to the login form", list: "Release" });
+    assert.match(added.content[0].text, /Added to-do #7/);
+    await callTool(app.sock, "complete_todo", { id: 7 });
+    assert.deepEqual(app.requests[0], { type: "todo", agentId: "friday", action: "add", title: "Add an error state to the login form", notes: "", list: "Release", token: TOKEN });
+    assert.deepEqual(app.requests[1], { type: "todo", agentId: "friday", action: "done", title: "", notes: "", list: "", id: 7, token: TOKEN });
+  } finally {
+    app.close();
+  }
+});
+
 test("denies when the app can't be reached", async () => {
   const result = await callTool(join(tmpdir(), "no-such-starkline.sock"), "approve", { tool_name: "Bash", input: { command: "npm test" } });
   assert.equal(JSON.parse(result.content[0].text).behavior, "deny");

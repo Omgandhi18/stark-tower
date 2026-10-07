@@ -4,6 +4,8 @@
 import type { ConversationSpend, SpendSummary, SpendTotal, TerminalInfo } from "../src/lib/bindings";
 import { DEFAULT_VOICE_SETTINGS, defaultVoice } from "../src/features/voices/voiceModel";
 import type {
+  Todo,
+  TodoList,
   AgentConfig,
   AgentStatus,
   AppConfig,
@@ -110,6 +112,8 @@ export interface Scenario {
   models: Record<string, ModelChoice[]>;
   /** Reminders the developer set, soonest first. */
   reminders: Reminder[];
+  todoLists: TodoList[];
+  todos: Todo[];
   /** The built-in browser's page. */
   browser: BrowserPage;
   terminals: Array<TerminalInfo & { output: number[]; offset: number; input: string }>;
@@ -339,6 +343,27 @@ const message = (id: number, role: string, fields: Partial<StoredMessage>): Stor
   detail: null,
   ...fields,
 });
+
+/** A to-do on a list, as the backend keeps it. */
+export function todo(id: number, listId: number, title: string, patch: Partial<Todo> = {}): Todo {
+  return {
+    id,
+    list_id: listId,
+    title,
+    notes: "",
+    agent_id: null,
+    task_id: null,
+    due: null,
+    reminder_id: null,
+    done: null,
+    done_by: null,
+    added_by: "you",
+    position: id,
+    created: NOW - 7_200_000,
+    updated: NOW - 7_200_000,
+    ...patch,
+  };
+}
 
 export function defaultScenario(): Scenario {
   return {
@@ -719,6 +744,13 @@ export function defaultScenario(): Scenario {
     ],
     ...automations(),
     reminders: reminders(),
+    todoLists: [{ id: 1, name: "Checkout launch", project: APP, start_mode: "manual", position: 0, created: NOW - 86_400_000, updated: NOW - 86_400_000 }],
+    todos: [
+      todo(1, 1, "Write the release notes", { position: 0 }),
+      todo(2, 1, "Add an empty state to the cart", { agent_id: "karen", position: 1 }),
+      todo(3, 1, "Check the refund emails render in dark mode", { added_by: "jarvis", position: 2 }),
+      todo(4, 1, "Bump the version to 2.4.0", { done: NOW - 3_600_000, done_by: "you", position: 3 }),
+    ],
     terminals: [],
     browser: { url: "", title: "", loading: false },
     browserPick: null,

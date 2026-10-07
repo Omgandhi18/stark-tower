@@ -5,7 +5,7 @@ import { useTerminal } from "../stores/terminal";
 import { panelFor } from "./panelShortcuts";
 import { NAV_ITEMS } from "./routes";
 
-/** ⌘1 to ⌘7 jump between the destinations from anywhere; ⌘B (and on a task ⇧⌘B, ⌥⌘B) collapse the side panels. */
+/** ⌘1 to ⌘8 jump between the destinations from anywhere; ⌘B (and on a task ⇧⌘B, ⌥⌘B) collapse the side panels. */
 export function useShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

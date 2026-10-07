@@ -197,6 +197,33 @@ function install(scenario: Scenario) {
     return task;
   };
 
+  /** Start work for an agent in a chat of its own, as a to-do or a handed-over list does. */
+  const startWork = (agentId: string, prompt: string, cwd: string) => {
+    const conversationId = nextConversation++;
+    const now = Date.now();
+    state.conversations.unshift({ id: conversationId, agent_id: agentId, title: prompt.split("\n")[0].slice(0, 60), cwd, created: now, updated: now, delegated: false, project_folder: cwd, branch: "" });
+    state.transcripts[conversationId] = [];
+    state.current[agentId] = conversationId;
+    const task = chatTask(conversationId, agentId, prompt, "doing", prompt.split("\n")[0].slice(0, 80));
+    chatTasks.delete(task.id);
+    persist(agentId, "user", { text: prompt }, conversationId);
+    setChatStatus(agentId, conversationId, "working");
+    emit("conversations://changed", null);
+    return task;
+  };
+
+  /** Hand a to-do to its agent, in the list's project. */
+  const startTodo = (id: number) => {
+    const todo = state.todos.find((t) => t.id === id);
+    if (!todo) throw "That to-do no longer exists.";
+    if (!todo.agent_id) throw "Assign an agent to it first.";
+    const list = state.todoLists.find((l) => l.id === todo.list_id);
+    const task = startWork(todo.agent_id, `${todo.title}\n\n(This is to-do #${todo.id}.)`, list?.project || state.projects.active);
+    todo.task_id = task.id;
+    emit("todos://changed", null);
+    return task;
+  };
+
   /** A short scripted reply so a sent message visibly gets an answer. */
   const reply = (agentId: string, text: string, taskId?: string, conversation?: number) => {
     const conversationId = conversation ?? state.current[agentId];
@@ -979,6 +1006,76 @@ function install(scenario: Scenario) {
     skip_missed_run: (args) => {
       settleAutomation(Number(args.id), "Skipped");
       return null;
+    },
+    list_todo_lists: () => [...state.todoLists].sort((a, b) => a.position - b.position),
+    list_todos: () => state.todos,
+    save_todo_list: (args) => {
+      const input = args.input as { id: number | null; name: string; project: string; start_mode: string };
+      if (!input.name.trim()) throw "Give the list a name.";
+      const now = Date.now();
+      const existing = state.todoLists.find((l) => l.id === input.id);
+      const list = existing
+        ? Object.assign(existing, { name: input.name.trim(), project: input.project, start_mode: input.start_mode, updated: now })
+        : { id: Math.max(0, ...state.todoLists.map((l) => l.id)) + 1, name: input.name.trim(), project: input.project, start_mode: input.start_mode, position: state.todoLists.length, created: now, updated: now };
+      if (!existing) state.todoLists.push(list);
+      emit("todos://changed", null);
+      return list;
+    },
+    delete_todo_list: (args) => {
+      state.todoLists = state.todoLists.filter((l) => l.id !== args.id);
+      state.todos = state.todos.filter((t) => t.list_id !== args.id);
+      emit("todos://changed", null);
+      return null;
+    },
+    save_todo: (args) => {
+      const input = args.input as { id: number | null; list_id: number; title: string; notes: string; agent_id: string | null; due: number | null };
+      if (!input.title.trim()) throw "Say what needs doing.";
+      const now = Date.now();
+      const existing = state.todos.find((t) => t.id === input.id);
+      const before = existing?.agent_id ?? null;
+      const todo = existing
+        ? Object.assign(existing, { list_id: input.list_id, title: input.title.trim(), notes: input.notes, agent_id: input.agent_id, due: input.due, updated: now })
+        : {
+            id: Math.max(0, ...state.todos.map((t) => t.id)) + 1,
+            list_id: input.list_id,
+            title: input.title.trim(),
+            notes: input.notes,
+            agent_id: input.agent_id,
+            task_id: null as string | null,
+            due: input.due,
+            reminder_id: null,
+            done: null,
+            done_by: null,
+            added_by: "you",
+            position: state.todos.filter((t) => t.list_id === input.list_id).length,
+            created: now,
+            updated: now,
+          };
+      if (!existing) state.todos.push(todo);
+      // A list that starts work at once does so when an agent is newly assigned.
+      const list = state.todoLists.find((l) => l.id === todo.list_id);
+      if (list?.start_mode === "now" && todo.agent_id && todo.agent_id !== before && !todo.task_id) startTodo(todo.id);
+      emit("todos://changed", null);
+      return todo;
+    },
+    set_todo_done: (args) => {
+      const todo = state.todos.find((t) => t.id === args.id);
+      if (!todo) throw "That to-do no longer exists.";
+      Object.assign(todo, args.done ? { done: Date.now(), done_by: "you" } : { done: null, done_by: null });
+      emit("todos://changed", null);
+      return todo;
+    },
+    delete_todo: (args) => {
+      state.todos = state.todos.filter((t) => t.id !== args.id);
+      emit("todos://changed", null);
+      return null;
+    },
+    reorder_todos: () => null,
+    start_todo: (args) => startTodo(Number(args.id)),
+    hand_todo_list: (args) => {
+      const list = state.todoLists.find((l) => l.id === args.listId);
+      if (!list) throw "That list no longer exists.";
+      return startWork(String(args.agentId), `Work through my to-do list "${list.name}"`, list.project || state.projects.active);
     },
     list_conversations: () => [...state.conversations].sort((a, b) => b.updated - a.updated),
     active_conversation: (args) => conversationOf(String(args.agentId)),

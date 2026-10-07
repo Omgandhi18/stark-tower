@@ -675,6 +675,8 @@ pub fn review(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     state.ledger.set_task_status(id, "reviewed", None);
     event(app, id, &task.assignee, "status", "Reviewed by you", "");
     crate::notify::task_settled(app, id, "Reviewed");
+    // A to-do the work was started for is done once you've reviewed it.
+    crate::todos::task_reviewed(app, id);
     settled(app, id);
     emit_changed(app);
     Ok(())
