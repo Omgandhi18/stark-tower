@@ -23,7 +23,7 @@
       "background": "#efe6d6",
       "style": { "source": "08", "rect": [446, 258, 524, 372] },
       "figures": {
-        "commander": { "outfit": "a green tweed jacket over a white collared shirt (the developer prefers this to the apron the room paints; aprons are Mori Cafe's)", "refs": [{ "source": "05", "rect": [836, 822, 938, 912] }, { "source": "06", "rect": [486, 222, 600, 362] }] },
+        "commander": { "outfit": "a green tweed jacket over a white collared shirt (the developer prefers this to the apron mockup 06 paints, and the room's cut-out is redressed to match; aprons are Mori Cafe's)", "refs": [{ "source": "05", "rect": [836, 822, 938, 912] }, { "source": "06", "rect": [486, 222, 600, 362] }] },
         "engineer": { "outfit": "a tan cardigan over a white collared shirt", "refs": [{ "source": "08", "rect": [446, 258, 524, 372] }, { "source": "06", "rect": [205, 797, 305, 958] }, { "source": "06", "rect": [700, 495, 800, 660] }] },
         "architect": { "outfit": "a green tweed jacket over a pale blue shirt with a dark tie", "refs": [{ "source": "05", "rect": [938, 822, 1040, 912] }, { "source": "06", "rect": [968, 498, 1106, 652] }] },
         "recon": { "outfit": "an olive green work shirt under dark overalls", "refs": [{ "source": "08", "rect": [446, 688, 524, 778] }, { "source": "06", "rect": [1416, 528, 1522, 708] }] },

@@ -56,7 +56,8 @@
         "commander": {
           "station": "glassOfficeOccupied",
           "scale": 1.05,
-          "outfit": "a white collared shirt with rolled sleeves under a brown leather apron, dark trousers and brown shoes"
+          "outfit": "a moss-green tweed jacket with long sleeves over a white collared shirt open at the neck, dark trousers and brown shoes",
+          "faces": { "walkFront": "right", "walkBack": "right" }
         },
         "engineer": {
           "station": "researchDeskOccupied",

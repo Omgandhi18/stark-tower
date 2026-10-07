@@ -736,7 +736,7 @@ This builds what the entry above lists as not built, except the Character Studio
 - **One renderer and one view draw every room from data**: stations, lights, helpers, the card's placement, name tags and the board, kept in each room's scene file. Only After Hours R&D has a character who walks (FRIDAY's animation frames), and R&D is unchanged.
 - **VERONICA has no station in either mockup**, so Codex paints her into a free seat: the far side of the Studio Office meeting table, and a floor cushion in Mori Cafe's tatami lounge. Those two cut-outs are generated art, not mockup pixels. Reference mode leaves the two seats empty, as the mockups show them.
 - **Theme outfits.** Studio Office and Mori Cafe each have a portrait for every figure in that theme's outfits (`scripts/mockup-extract/outfits.py`). Each comes from three references: the agent's own portrait (their face), the mockups' drawings of the outfit, and one of the theme's mockup portraits (the style). Theme Studio's Agent appearance (mockup 05) offers three choices: keep current appearance, use theme outfits (the default), or choose another theme's outfits. The choice is saved with the theme (`outfits` in the configuration), works independently of it (gate E), and is previewed with it. After Hours R&D's outfits are the agents' own look. The rooms always show their own outfits, because they're painted, so the setting changes portraits only.
-- Where the mockups disagree about an outfit, the developer chose: Studio Office's JARVIS keeps the tweed jacket from 05 in his portrait (aprons are Mori Cafe's look), while the room keeps the apron 06 paints.
+- Where the mockups disagree about an outfit, the developer chose: Studio Office's JARVIS keeps the tweed jacket from 05 in his portrait (aprons are Mori Cafe's look), while the room keeps the apron 06 paints (reversed on 2026-10-07: the room now dresses him in the jacket too).
 - Still not built: the Character Studio's part-by-part customisation and pose previews.
 
 ### 2026-10-06: chats per project, one session per chat, and marking work reviewed
@@ -1120,3 +1120,11 @@ The developer asked that marking an owner's task reviewed can mark its delegated
 - **Mark as reviewed asks, when there's finished delegated work:** a checkbox (ticked) to mark that work reviewed too, the teammates' tasks it covers, and how many stay as they are. With nothing finished delegated, it marks the task at once, as before.
 - **Afterwards, from the task's menu:** "Mark N finished delegated tasks reviewed", for a task already reviewed (or still running) whose delegated work has since finished or was left out.
 - **Verified here.** A Rust test covers which delegated work counts as finished; a unit test covers the same on screen. WebKit tests mark a task reviewed with its finished delegated work, and without it and then from the menu.
+
+### 2026-10-07: JARVIS wears his tweed jacket in the Studio Office
+
+The developer pointed out that JARVIS sits in the Studio Office "wearing an apron — when he should be wearing a suit like his avatar". This reverses the 2026-10-06 choice that the room keeps the apron mockup 06 paints.
+
+- **The room dresses him like his portrait**: a moss-green tweed jacket over a white collared shirt. An agent target in a room spec can now carry an `outfit` (`scripts/mockup-extract/rooms.py`). Codex redresses that agent in the region's crop. Their cut-out keeps the mockup's outline (the same pixels lifted out, the same rect), with the new clothes blended in wherever the repaint changed them. The rest of the room is still the mockup. The check counts the redressed pixels separately (2,324 px) and still requires 0 px off everywhere else.
+- **His animation frames match.** The Studio Office commander sheets (poses and walks) were redrawn from the redressed cut-out in the same outfit. His typing and glancing at the desk still move the cut-out's own pixels.
+- Reference mode shows him in the jacket too, so at his seat it now differs from mockup 06, on purpose. Mori Cafe keeps his apron, because aprons are its look.

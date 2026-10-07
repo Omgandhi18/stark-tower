@@ -1,5 +1,5 @@
 {
-  "$comment": "Studio Office (mockup 06). 'crop' is the context Codex sees; each target's 'box' bounds what it removes. Agents and helpers become cut-outs of the mockup's own pixels; 'interface' targets are the mockup's UI painted over the room, removed for good. 'floorY' orders overlapping agents (front first). Every rect is [x0, y0, x1, y1) in mockup pixels.",
+  "$comment": "Studio Office (mockup 06). 'crop' is the context Codex sees; each target's 'box' bounds what it removes. Agents and helpers become cut-outs of the mockup's own pixels; 'interface' targets are the mockup's UI painted over the room, removed for good. 'floorY' orders overlapping agents (front first). An agent's 'outfit' redresses their cut-out to match their theme portrait (JARVIS wears his tweed jacket, not the apron the mockup paints). Every rect is [x0, y0, x1, y1) in mockup pixels.",
   "source": "docs/mockups/2026-09-16/06-environment-office.png",
   "viewport": [1584, 993],
   "plate": [196, 139, 1582, 993],
@@ -18,7 +18,8 @@
       "id": "glass-office",
       "crop": [400, 150, 720, 470],
       "targets": [
-        { "id": "glassOfficeOccupied", "kind": "agent", "box": [486, 222, 600, 362], "floorY": 355, "describe": "the man with curly hair and glasses sitting at the desk inside the glass office, typing on a laptop (keep his chair, empty)" }
+        { "id": "glassOfficeOccupied", "kind": "agent", "box": [486, 222, 600, 362], "floorY": 355, "describe": "the man with curly hair and glasses sitting at the desk inside the glass office, typing on a laptop (keep his chair, empty)",
+          "outfit": { "who": "the man with curly hair and glasses sitting at the desk inside the glass office, typing on a laptop", "wears": "a moss-green tweed jacket with long sleeves over a white collared shirt open at the neck, instead of the brown apron and rolled-up shirt sleeves" } }
       ]
     },
     {
