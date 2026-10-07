@@ -133,6 +133,10 @@
 }
 
 .execution-list {
+  /* The portrait's size (ExecutionTree's AVATAR) and its gap to the text; notes under a person line up with their text. */
+  --execution-avatar: 40px;
+  --execution-gap: 10px;
+  --execution-indent: calc(var(--space-2) + var(--execution-avatar) + var(--execution-gap));
   position: relative;
   display: grid;
   gap: var(--space-1);
@@ -145,12 +149,12 @@
   position: relative;
 }
 
-/* The reporting line from each contributor back to the owner. */
+/* The reporting line from each contributor back to the owner (and from the owner back to who asked). */
 .execution-node + .execution-node::before {
   content: "";
   position: absolute;
   top: -8px;
-  left: 28px;
+  left: calc(var(--space-2) + var(--execution-avatar) / 2);
   width: 1px;
   height: 22px;
   background: var(--border-strong);
@@ -159,7 +163,7 @@
 .execution-button {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: var(--execution-gap);
   width: 100%;
   padding: var(--space-2);
   border: 0;
@@ -179,8 +183,8 @@ button.execution-button:hover {
 .execution-helper-icon {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  width: var(--execution-avatar);
+  height: var(--execution-avatar);
   flex: none;
   border-radius: 50%;
   background: var(--surface-hover);
@@ -213,6 +217,31 @@ button.execution-button:hover {
 .execution-files {
   color: var(--text-muted);
   font-size: var(--text-xs);
+}
+
+/* Under a person: the files they've claimed, and a clash with another agent over one. */
+.execution-claims,
+.execution-conflict {
+  margin: 0;
+  padding: 0 var(--space-2) var(--space-2) var(--execution-indent);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.execution-claims {
+  color: var(--text-muted);
+}
+
+.execution-conflict {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--state-attention);
+}
+
+.execution-conflict svg {
+  flex: none;
+  margin-top: 1px;
 }
 
 /* Earlier chats with the owner */

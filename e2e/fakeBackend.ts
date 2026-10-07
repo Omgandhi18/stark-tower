@@ -678,8 +678,14 @@ function install(scenario: Scenario) {
         workspace,
         claims: state.claims.filter((c) => c.workspace === task.cwd),
         task,
+        parent: state.tasks.find((t) => t.id === task.parent_id) ?? null,
         children: state.tasks.filter((t) => t.parent_id === id),
-        events: state.taskEvents[id] ?? [],
+        events: [
+          ...(state.taskEvents[id] ?? []),
+          ...state.tasks
+            .filter((t) => t.parent_id === id)
+            .flatMap((child) => (state.taskEvents[child.id] ?? []).filter((e) => e.kind === "claim_refused" || e.kind === "claim_overlap")),
+        ].sort((a, b) => a.ts - b.ts),
         plan: state.plans[id] ?? [],
         checks: state.checks[id] ?? [],
         changes: state.changes[task.cwd] ?? [],

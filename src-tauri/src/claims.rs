@@ -18,6 +18,56 @@ pub struct Claims {
     files: Vec<FileClaim>,
 }
 
+/// Why an agent was stopped in a workspace it shares with other agents. The agent is told how
+/// to carry on; the developer reads what happened, without the agent's instructions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal {
+    /// Another agent holds a claim over the path.
+    Claimed { holder: String, path: String, why: String },
+    /// A shared file (a lockfile, migration or generated file) waits for the agent's own exclusive claim.
+    NeedsClaim { path: String },
+    /// Only the task's owner changes the repository here.
+    GitOwner { owner: String },
+}
+
+impl Refusal {
+    /// A conflict with another agent, which the developer hears about. The others are steps the agent takes itself.
+    pub fn is_conflict(&self) -> bool {
+        matches!(self, Refusal::Claimed { .. })
+    }
+
+    /// What the agent is told: what stopped it and how to carry on. `name` turns an agent id into its name.
+    pub fn for_agent(&self, name: &dyn Fn(&str) -> String, task_owner: &str) -> String {
+        match self {
+            Refusal::Claimed { holder, path, why } => {
+                format!("{} has claimed {path} ({why}). Ask them to release it, or ask the task owner {task_owner}.", name(holder))
+            }
+            Refusal::NeedsClaim { path } => {
+                format!("{path} needs an exclusive claim before editing. Call claim_files with paths: [\"{path}\"] and a reason, then try again.")
+            }
+            Refusal::GitOwner { owner } => format!("Only {}, who owns this task, runs git here.", name(owner)),
+        }
+    }
+
+    /// What the developer reads in the task's history.
+    pub fn for_developer(&self, agent: &str, name: &dyn Fn(&str) -> String) -> String {
+        match self {
+            Refusal::Claimed { holder, path, why } => format!("{agent} wanted to change {path}, which {} has claimed ({why})", name(holder)),
+            Refusal::NeedsClaim { path } => format!("{agent} was asked to claim {path} before changing it, as other agents work in this folder"),
+            Refusal::GitOwner { owner } => format!("{agent} was asked to leave git changes to {}, who owns this task", name(owner)),
+        }
+    }
+
+    /// The same, when the change was already made (a provider's own sandbox edited the file).
+    pub fn after_the_fact(&self, agent: &str, name: &dyn Fn(&str) -> String) -> String {
+        match self {
+            Refusal::Claimed { holder, path, why } => format!("{agent} changed {path} while {} had claimed it ({why})", name(holder)),
+            Refusal::NeedsClaim { path } => format!("{agent} changed {path} without claiming it, while other agents work in this folder"),
+            Refusal::GitOwner { owner } => format!("{agent} changed git history, which {} looks after here", name(owner)),
+        }
+    }
+}
+
 pub fn resolve(workspace: &str, raw: &str) -> Result<String, String> {
     if raw.trim().is_empty() {
         return Err("Name a file or folder inside your workspace.".into());
@@ -146,9 +196,9 @@ impl Claims {
     pub fn release_task(&mut self, id: &str) {
         self.files.retain(|c| c.task_id.as_deref() != Some(id));
     }
-    fn check_command(&self, workspace: &str, agent: &str, owner: &str, command: &str) -> Result<(), String> {
+    fn check_command(&self, workspace: &str, agent: &str, owner: &str, command: &str) -> Result<(), Refusal> {
         if owner != agent && mutates_git(command) {
-            return Err(format!("Only {owner}, who owns this task, runs git here."));
+            return Err(Refusal::GitOwner { owner: owner.into() });
         }
         let ctx = crate::gate::Context::for_project(workspace);
         let dependencies = installs_dependencies(command, &ctx);
@@ -166,7 +216,7 @@ impl Claims {
             Ok(())
         }
     }
-    fn check_edit(&self, workspace: &str, path: &str, agent: &str, shared: bool) -> Result<(), String> {
+    fn check_edit(&self, workspace: &str, path: &str, agent: &str, shared: bool) -> Result<(), Refusal> {
         if !shared {
             return Ok(());
         }
@@ -175,10 +225,7 @@ impl Claims {
             .iter()
             .find(|c| c.workspace == workspace && c.agent_id != agent && overlaps(path, &c.path))
         {
-            return Err(format!(
-                "{} has claimed {} ({}). Ask them to release it, or ask the task owner.",
-                other.agent_id, other.path, other.reason
-            ));
+            return Err(Refusal::Claimed { holder: other.agent_id.clone(), path: other.path.clone(), why: other.reason.clone() });
         }
         if sensitive(workspace, path)
             && !self
@@ -186,9 +233,7 @@ impl Claims {
                 .iter()
                 .any(|c| c.workspace == workspace && c.agent_id == agent && c.exclusive && Path::new(path).starts_with(&c.path))
         {
-            return Err(format!(
-                "{path} needs an exclusive claim before editing. Call claim_files with paths: [\"{path}\"] and a reason, then try again."
-            ));
+            return Err(Refusal::NeedsClaim { path: path.into() });
         }
         Ok(())
     }
@@ -298,46 +343,45 @@ fn owner(app: &tauri::AppHandle, agent: &str) -> String {
     task.map(|t| t.assignee).unwrap_or_else(|| agent.into())
 }
 
-pub fn report(app: &tauri::AppHandle, agent: &str, workspace: &str, reason: &str) {
+/// Records a refusal in the agent's task. A conflict with another agent ("claim_refused") is also a
+/// notification; a step the agent takes itself ("claim_needed": claim a shared file first, leave git to
+/// the owner) is only history.
+pub fn report(app: &tauri::AppHandle, agent: &str, workspace: &str, refusal: &Refusal) {
     let state = app.state::<crate::AppState>();
     let task = crate::tasks::active_task_for(app, agent);
-    let mut reason = reason.to_string();
-    let roster = state.config.lock().unwrap().agents.clone();
-    for member in roster {
-        reason = reason.replace(&format!("{} has claimed", member.id), &format!("{} has claimed", member.name));
-    }
-    let owner_name = crate::prompts::agent_name(app, &owner(app, agent));
-    reason = reason.replace("ask the task owner.", &format!("ask the task owner {owner_name}."));
+    let name = |id: &str| crate::prompts::agent_name(app, id);
+    let who = name(agent);
     if let Some(id) = &task {
-        let e = state.ledger.add_task_event(id, agent, "claim_refused", &reason, "");
+        let kind = if refusal.is_conflict() { "claim_refused" } else { "claim_needed" };
+        let e = state.ledger.add_task_event(id, agent, kind, &refusal.for_developer(&who, &name), "");
         let _ = app.emit("tasks://event", e);
     }
-    let title = if let Some((holder, claimed)) = reason.split_once(" has claimed ") {
-        let path = claimed.split(" (").next().unwrap_or(claimed);
-        format!(
-            "{} wanted to edit {}, which {holder} has claimed",
-            crate::prompts::agent_name(app, agent),
-            crate::chat::base_name(path)
-        )
-    } else {
-        format!("{} couldn't change the shared workspace", crate::prompts::agent_name(app, agent))
-    };
-    if first_in_a_while(agent, &title) {
-        if let Some(stored) = state.ledger.add_notification(&crate::ledger::NewNotification {
-            kind: "claim_refused",
-            urgency: "update",
-            agent_id: agent,
-            task_id: task.as_deref(),
-            cwd: workspace,
-            title: &title,
-            body: &reason,
-            ..Default::default()
-        }) {
-            crate::system_notifications::deliver(app, &stored, "");
-            let _ = app.emit("notifications://changed", ());
-        }
+    if let Refusal::Claimed { holder, path, why } = refusal {
+        let title = format!("{who} wanted to edit {}, which {} has claimed", crate::chat::base_name(path), name(holder));
+        notify(app, agent, task.as_deref(), workspace, &title, &format!("{} claimed {path} for: {why}.", name(holder)));
     }
     changed(app);
+}
+
+/// Tells the developer about a conflict over a claimed file, once however often the agent retries.
+fn notify(app: &tauri::AppHandle, agent: &str, task: Option<&str>, workspace: &str, title: &str, body: &str) {
+    if !first_in_a_while(agent, title) {
+        return;
+    }
+    let state = app.state::<crate::AppState>();
+    if let Some(stored) = state.ledger.add_notification(&crate::ledger::NewNotification {
+        kind: "claim_refused",
+        urgency: "update",
+        agent_id: agent,
+        task_id: task,
+        cwd: workspace,
+        title,
+        body,
+        ..Default::default()
+    }) {
+        crate::system_notifications::deliver(app, &stored, "");
+        let _ = app.emit("notifications://changed", ());
+    }
 }
 
 /// How long the same refusal stays one notification, however often the agent retries.
@@ -368,38 +412,27 @@ pub fn check(app: &tauri::AppHandle, agent: &str, tool: &str, input: &serde_json
         return Ok(());
     };
     let sharing = shared(app, &workspace, agent);
-    let result = if let Some(raw) = edit_path(tool, input) {
+    let refused = if let Some(raw) = edit_path(tool, input) {
         // The permission gate handles files outside the workspace.
-        resolve(&workspace, raw).map_or(Ok(()), |path| state.claims.lock().unwrap().check_edit(&workspace, &path, agent, sharing))
+        resolve(&workspace, raw)
+            .ok()
+            .and_then(|path| state.claims.lock().unwrap().check_edit(&workspace, &path, agent, sharing).err())
     } else if tool == "Bash" && sharing {
         let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
         let owner = owner(app, agent);
-        state
-            .claims
-            .lock()
-            .unwrap()
-            .check_command(&workspace, agent, &owner, command)
-            .map_err(|reason| reason.replace(&format!("Only {owner},"), &format!("Only {},", crate::prompts::agent_name(app, &owner))))
+        state.claims.lock().unwrap().check_command(&workspace, agent, &owner, command).err()
     } else {
-        Ok(())
+        None
     };
-    let result = result.map_err(|mut reason| {
-        let roster = state.config.lock().unwrap().agents.clone();
-        for member in roster {
-            reason = reason.replace(&format!("{} has claimed", member.id), &format!("{} has claimed", member.name));
-        }
-        reason.replace(
-            "Ask them to release it, or ask the task owner.",
-            &format!(
-                "Ask them to release it, or ask the task owner {}.",
-                crate::prompts::agent_name(app, &owner(app, agent))
-            ),
-        )
-    });
-    if let Err(reason) = &result {
-        report(app, agent, &workspace, reason);
-    }
-    result
+    let Some(refusal) = refused else { return Ok(()) };
+    report(app, agent, &workspace, &refusal);
+    Err(told(app, agent, &refusal))
+}
+
+/// The refusal as the agent reads it, with everyone named.
+fn told(app: &tauri::AppHandle, agent: &str, refusal: &Refusal) -> String {
+    let name = |id: &str| crate::prompts::agent_name(app, id);
+    refusal.for_agent(&name, &name(&owner(app, agent)))
 }
 
 fn installs_dependencies(command: &str, context: &crate::gate::Context) -> bool {
@@ -457,12 +490,9 @@ pub fn allowed(app: &tauri::AppHandle, agent: &str, tool: &str, input: &serde_js
         .unwrap()
         .claim(&workspace, &path, agent, task.as_deref(), "edited it", false);
     if let Err(other) = conflict {
-        let reason = format!(
-            "{} has claimed {} ({}). Ask them to release it, or ask the task owner.",
-            other.agent_id, other.path, other.reason
-        );
-        report(app, agent, &workspace, &reason);
-        return Err(reason);
+        let refusal = Refusal::Claimed { holder: other.agent_id, path: other.path, why: other.reason };
+        report(app, agent, &workspace, &refusal);
+        return Err(told(app, agent, &refusal));
     }
     changed(app);
     Ok(())
@@ -484,13 +514,16 @@ pub fn after_edit(app: &tauri::AppHandle, agent: &str, tool: &str, input: &serde
         let _ = claims.claim(&workspace, &path, agent, task.as_deref(), "edited it", false);
         problem
     };
-    if let Some(reason) = problem {
-        report(app, agent, &workspace, &reason);
-        if let Some(id) = task {
-            let e = state
-                .ledger
-                .add_task_event(&id, agent, "claim_overlap", &format!("The provider already edited this file. {reason}"), "");
+    if let Some(refusal) = problem {
+        let name = |id: &str| crate::prompts::agent_name(app, id);
+        let who = name(agent);
+        if let Some(id) = &task {
+            let e = state.ledger.add_task_event(id, agent, "claim_overlap", &refusal.after_the_fact(&who, &name), "");
             let _ = app.emit("tasks://event", e);
+        }
+        if let Refusal::Claimed { holder, path, why } = &refusal {
+            let title = format!("{who} changed {}, which {} has claimed", crate::chat::base_name(path), name(holder));
+            notify(app, agent, task.as_deref(), &workspace, &title, &format!("{} claimed {path} for: {why}.", name(holder)));
         }
     }
     changed(app);
@@ -578,9 +611,11 @@ mod tests {
     fn overlapping_files_and_folders_are_refused_with_actionable_reason() {
         let mut claims = Claims::default();
         claims.claim("/workspace", "src/settings", "karen", Some("child"), "Settings UI", true).unwrap();
-        let reason = claims.check_edit("/workspace", "src/settings/Form.tsx", "vision", true).unwrap_err();
-        assert!(reason.contains("karen has claimed src/settings (Settings UI)"));
-        assert!(reason.contains("release"));
+        let refusal = claims.check_edit("/workspace", "src/settings/Form.tsx", "vision", true).unwrap_err();
+        assert_eq!(refusal, Refusal::Claimed { holder: "karen".into(), path: "src/settings".into(), why: "Settings UI".into() });
+        let told = refusal.for_agent(&|id: &str| id.to_uppercase(), "FRIDAY");
+        assert!(told.contains("KAREN has claimed src/settings (Settings UI)"));
+        assert!(told.contains("Ask them to release it, or ask the task owner FRIDAY."));
         assert!(claims.claim("/workspace", "src", "friday", Some("owner"), "Refactor", true).is_err());
         assert!(claims.check_edit("/workspace", "src/settings-other/Form.tsx", "vision", true).is_ok());
         assert!(claims.check_edit("/elsewhere", "src/settings/Form.tsx", "vision", true).is_ok());
@@ -633,7 +668,7 @@ mod tests {
                 claims.check_edit(&repo.project, &path, "karen", false).is_ok(),
                 "single-agent editing stays quiet"
             );
-            assert!(claims.check_edit(&repo.project, &path, "karen", true).unwrap_err().contains("claim_files"));
+            assert_eq!(claims.check_edit(&repo.project, &path, "karen", true).unwrap_err(), Refusal::NeedsClaim { path: path.clone() });
             claims.claim(&repo.project, &path, "karen", Some("task"), "edited it", false).unwrap();
             assert!(claims.check_edit(&repo.project, &path, "karen", true).is_err(), "implicit isn't exclusive");
             claims
@@ -663,10 +698,10 @@ mod tests {
             "bash -c 'git reset --hard'",
         ] {
             assert!(mutates_git(command), "{command}");
-            assert!(claims
-                .check_command(&repo.project, "karen", "friday", command)
-                .unwrap_err()
-                .contains("Only friday"));
+            assert_eq!(
+                claims.check_command(&repo.project, "karen", "friday", command).unwrap_err(),
+                Refusal::GitOwner { owner: "friday".into() }
+            );
             assert!(claims.check_command(&repo.project, "friday", "friday", command).is_ok());
         }
         for command in [
@@ -687,10 +722,10 @@ mod tests {
         std::fs::write(Path::new(&repo.project).join("package-lock.json"), "{}").unwrap();
         let mut claims = Claims::default();
         for command in ["npm install", "npm ci", "npm install && git push", "bash -lc 'npm install && git push'"] {
-            assert!(claims
-                .check_command(&repo.project, "karen", "karen", command)
-                .unwrap_err()
-                .contains("package-lock.json"));
+            assert_eq!(
+                claims.check_command(&repo.project, "karen", "karen", command).unwrap_err(),
+                Refusal::NeedsClaim { path: "package-lock.json".into() }
+            );
         }
         claims
             .claim(&repo.project, "package-lock.json", "karen", Some("child"), "Dependencies", true)
@@ -698,6 +733,36 @@ mod tests {
         assert!(claims.check_command(&repo.project, "karen", "karen", "npm ci").is_ok());
         assert!(claims.check_command(&repo.project, "vision", "vision", "npm ci").is_err());
         assert!(claims.check_command(&repo.project, "vision", "vision", "npm test").is_ok());
+    }
+
+    #[test]
+    fn refusals_tell_the_agent_what_to_do_and_the_developer_what_happened() {
+        let name = |id: &str| id.to_uppercase();
+        let claimed = Refusal::Claimed { holder: "vision".into(), path: "src/types.ts".into(), why: "Shared types".into() };
+        let needs = Refusal::NeedsClaim { path: "bun.lock".into() };
+        let git = Refusal::GitOwner { owner: "friday".into() };
+
+        // The agent keeps its instructions, word for word.
+        assert_eq!(
+            needs.for_agent(&name, "JARVIS"),
+            "bun.lock needs an exclusive claim before editing. Call claim_files with paths: [\"bun.lock\"] and a reason, then try again."
+        );
+        assert_eq!(git.for_agent(&name, "JARVIS"), "Only FRIDAY, who owns this task, runs git here.");
+
+        // The developer reads what happened, never the agent's tool calls or retries.
+        for refusal in [&claimed, &needs, &git] {
+            for text in [refusal.for_developer("KAREN", &name), refusal.after_the_fact("KAREN", &name)] {
+                assert!(text.starts_with("KAREN "), "{text}");
+                assert!(!text.contains("claim_files") && !text.contains("try again"), "{text}");
+            }
+        }
+        assert_eq!(claimed.for_developer("KAREN", &name), "KAREN wanted to change src/types.ts, which VISION has claimed (Shared types)");
+        assert_eq!(needs.for_developer("KAREN", &name), "KAREN was asked to claim bun.lock before changing it, as other agents work in this folder");
+        assert_eq!(claimed.after_the_fact("KAREN", &name), "KAREN changed src/types.ts while VISION had claimed it (Shared types)");
+
+        // Only a conflict with another agent is worth a notification.
+        assert!(claimed.is_conflict());
+        assert!(!needs.is_conflict() && !git.is_conflict());
     }
 
     #[test]

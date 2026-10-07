@@ -308,7 +308,7 @@ const task = (
 });
 
 let eventSeq = 0;
-const taskEvent = (taskId: string, agentId: string, kind: string, summary: string, minutesAgo: number, data: unknown = ""): TaskEvent => ({
+export const taskEvent = (taskId: string, agentId: string, kind: string, summary: string, minutesAgo: number, data: unknown = ""): TaskEvent => ({
   id: ++eventSeq,
   task_id: taskId,
   ts: ago(minutesAgo),

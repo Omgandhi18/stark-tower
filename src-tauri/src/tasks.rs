@@ -925,6 +925,8 @@ pub struct CheckRun {
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct TaskDetail {
     pub task: Task,
+    /// The task this was delegated from, so a delegated task's page leads back to it.
+    pub parent: Option<Task>,
     pub children: Vec<Task>,
     pub events: Vec<TaskEvent>,
     pub plan: Vec<PlanItem>,
@@ -975,12 +977,14 @@ pub fn detail(app: &tauri::AppHandle, id: &str) -> Option<TaskDetail> {
     let checks = latest_checks(&events);
     let messages = state.ledger.task_messages(&task, MESSAGE_LIMIT);
     let claims = state.claims.lock().unwrap().list(&task.cwd);
+    let parent = task.parent_id.as_deref().and_then(|id| state.ledger.task(id));
     Some(TaskDetail {
         workspace: crate::workspaces::info(&state.ledger, &task),
         claims,
         changes: changes(&task.cwd),
         branch: current_branch(&task.cwd),
         task,
+        parent,
         children,
         events,
         plan,

@@ -1,5 +1,6 @@
 import { fakeCalls } from "./fakeBackend";
 import { expect, openApp, test } from "./fixtures";
+import { defaultScenario, taskEvent } from "./scenario";
 
 const openSettingsTask = async (page: import("@playwright/test").Page) => {
   await openApp(page);
@@ -53,5 +54,43 @@ test.describe("task screen", () => {
     await page.getByRole("button", { name: "More actions for Redesign the settings page" }).click();
     await page.getByRole("menuitem", { name: "Close task" }).click();
     expect(await fakeCalls(page)).toContainEqual({ cmd: "close_task", args: { id: "t-settings" } });
+  });
+
+  test("a delegated task leads back to the task it came from", async ({ page }) => {
+    await openApp(page);
+    await page.getByRole("region", { name: "Running" }).getByRole("button", { name: "Ship the refunds feature", exact: true }).click();
+    const execution = page.getByRole("navigation", { name: "Who's working on this task" });
+    await execution.getByRole("button", { name: /VERONICA.*Delegated/ }).click();
+    await expect(page.getByRole("heading", { name: "Upgrade the CI runners to Node 22", level: 1 })).toBeVisible();
+    await expect(execution.getByRole("heading", { name: "Execution" })).toBeVisible();
+    await execution.getByRole("button", { name: /JARVIS.*Asked by.*Ship the refunds feature/ }).click();
+    await expect(page.getByRole("heading", { name: "Ship the refunds feature", level: 1 })).toBeVisible();
+  });
+
+  test("shows a clash over a file under the agent while it matters, and keeps routine claim steps in the activity", async ({ page }) => {
+    const scenario = defaultScenario();
+    scenario.taskEvents["t-ci"] = [
+      taskEvent("t-ci", "veronica", "claim_needed", "VERONICA was asked to claim package-lock.json before changing it, as other agents work in this folder", 6),
+      taskEvent("t-ci", "veronica", "claim_refused", "VERONICA wanted to change .github/workflows/ci.yml, which VISION has claimed (CI settings)", 4),
+    ];
+    // EDITH's part is ready for review; an old instruction to her is routine, whatever its kind.
+    scenario.taskEvents["t-idem"] = [
+      taskEvent(
+        "t-idem",
+        "edith",
+        "claim_refused",
+        'bun.lock needs an exclusive claim before editing. Call claim_files with paths: ["bun.lock"] and a reason, then try again.',
+        30,
+      ),
+    ];
+    await openApp(page, scenario);
+    await page.getByRole("region", { name: "Running" }).getByRole("button", { name: "Ship the refunds feature", exact: true }).click();
+    const execution = page.getByRole("navigation", { name: "Who's working on this task" });
+    await expect(execution.getByText("VERONICA wanted to change .github/workflows/ci.yml, which VISION has claimed (CI settings)")).toBeVisible();
+    await expect(execution.getByText(/claim_files|asked to claim/)).toHaveCount(0);
+
+    await execution.getByRole("button", { name: /VERONICA.*Delegated/ }).click();
+    await page.getByRole("tab", { name: "Activity" }).click();
+    await expect(page.getByText("VERONICA was asked to claim package-lock.json before changing it, as other agents work in this folder")).toBeVisible();
   });
 });

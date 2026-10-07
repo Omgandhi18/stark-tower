@@ -4,16 +4,18 @@ import {
   CircleDot,
   CirclePlay,
   Clock,
+  FileLock,
   FilePen,
   Forward,
   Hourglass,
   ListChecks,
   ShieldAlert,
   SquareTerminal,
+  TriangleAlert,
   UserRoundPlus,
   type LucideIcon,
 } from "lucide-react";
-import type { FileChange, PlanItem, TaskEvent } from "../../lib/types";
+import type { FileChange, PlanItem, Task, TaskEvent } from "../../lib/types";
 
 const EVENT_ICON: Record<string, LucideIcon> = {
   created: CircleDot,
@@ -27,9 +29,32 @@ const EVENT_ICON: Record<string, LucideIcon> = {
   helper: UserRoundPlus,
   approval: ShieldAlert,
   status: Clock,
+  claim_needed: FileLock,
+  claim_refused: TriangleAlert,
+  claim_overlap: TriangleAlert,
 };
 
 export const eventIcon = (event: Pick<TaskEvent, "kind">): LucideIcon => EVENT_ICON[event.kind] ?? CircleDot;
+
+/** A clash with another agent over a file: refused before an edit, or found after one. */
+const CONFLICTS: readonly string[] = ["claim_refused", "claim_overlap"];
+
+/** Work that's over: a conflict that came up in it needs no one now. */
+const SETTLED: readonly Task["status"][] = ["idle", "reviewed", "closed"];
+
+/** What the agent was told, from before refusals were worded for people: steps it took itself, not clashes. */
+const AGENT_INSTRUCTION = /Call claim_files|runs git here/;
+
+/**
+ * The conflict to show under someone in the execution tree: their latest clash with another agent
+ * over a file, until their part of the work is over. Routine steps (claiming a shared file first,
+ * leaving git to the owner) stay in the task's activity.
+ */
+export function openConflict(events: readonly Pick<TaskEvent, "agent_id" | "kind" | "summary">[], agentId: string, status: Task["status"]): string | undefined {
+  if (SETTLED.includes(status)) return undefined;
+  const latest = events.filter((e) => e.agent_id === agentId && CONFLICTS.includes(e.kind)).slice(-1)[0];
+  return latest && !AGENT_INSTRUCTION.test(latest.summary) ? latest.summary : undefined;
+}
 
 /** A verification event's outcome, read from its data. */
 export function checkPassed(event: Pick<TaskEvent, "kind" | "data">): boolean | null {

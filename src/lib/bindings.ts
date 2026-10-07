@@ -1890,7 +1890,11 @@ plan_done: number | null; plan_total: number | null; workspace_kind: string; pro
 /**
  * Everything the task screen shows.
  */
-export type TaskDetail = { task: Task; children: Task[]; events: TaskEvent[]; plan: PlanItem[]; checks: CheckRun[]; 
+export type TaskDetail = { task: Task; 
+/**
+ * The task this was delegated from, so a delegated task's page leads back to it.
+ */
+parent: Task | null; children: Task[]; events: TaskEvent[]; plan: PlanItem[]; checks: CheckRun[]; 
 /**
  * Uncommitted changes in the task's folder right now.
  */

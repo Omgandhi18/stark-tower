@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FileChange, TaskEvent } from "../../lib/types";
-import { changeLetter, changeSummary, checkPassed, diffLines, filesByAgent, helpersOf, stepLabel, stepState } from "./taskPresentation";
+import { changeLetter, changeSummary, checkPassed, diffLines, filesByAgent, helpersOf, openConflict, stepLabel, stepState } from "./taskPresentation";
 
 const event = (kind: string, agent: string, data: unknown, summary = ""): TaskEvent => ({
   id: 1,
@@ -52,5 +52,39 @@ describe("task presentation", () => {
     expect(checkPassed(event("verification", "f", { passed: true }))).toBe(true);
     expect(checkPassed(event("verification", "f", { passed: false }))).toBe(false);
     expect(checkPassed(event("file", "f", {}))).toBeNull();
+  });
+
+  describe("openConflict", () => {
+    const clash = event("claim_refused", "karen", "", "KAREN wanted to change src/types.ts, which VISION has claimed (Shared types)");
+    const overlap = event("claim_overlap", "karen", "", "KAREN changed src/types.ts while VISION had claimed it (Shared types)");
+
+    it("shows someone's latest clash with another agent while their work is open", () => {
+      expect(openConflict([clash], "karen", "doing")).toBe(clash.summary);
+      expect(openConflict([clash, overlap], "karen", "blocked")).toBe(overlap.summary);
+      // Ready for review still shows it: the reviewer should know.
+      expect(openConflict([clash], "karen", "done")).toBe(clash.summary);
+    });
+
+    it("drops it once the work is over", () => {
+      for (const status of ["idle", "reviewed", "closed"]) expect(openConflict([clash], "karen", status)).toBeUndefined();
+    });
+
+    it("keeps to that agent's clashes", () => {
+      expect(openConflict([clash], "friday", "doing")).toBeUndefined();
+    });
+
+    it("leaves routine steps to the activity, including ones recorded with the agent's instructions", () => {
+      const routine = event("claim_needed", "karen", "", "KAREN was asked to claim bun.lock before changing it, as other agents work in this folder");
+      const told = event(
+        "claim_refused",
+        "karen",
+        "",
+        'bun.lock needs an exclusive claim before editing. Call claim_files with paths: ["bun.lock"] and a reason, then try again.',
+      );
+      const git = event("claim_refused", "karen", "", "Only FRIDAY, who owns this task, runs git here.");
+      expect(openConflict([routine], "karen", "doing")).toBeUndefined();
+      expect(openConflict([told], "karen", "doing")).toBeUndefined();
+      expect(openConflict([git], "karen", "doing")).toBeUndefined();
+    });
   });
 });
