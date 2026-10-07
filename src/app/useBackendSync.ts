@@ -16,6 +16,7 @@ import {
   onAgentStatus,
   onAutomationsChanged,
   onAutoModeChanged,
+  onMemoryChanged,
   browserPage,
   browserNavigate,
   devserverList,
@@ -50,6 +51,7 @@ import { useAgents } from "../stores/agents";
 import { useAttention } from "../stores/attention";
 import { useAutomations } from "../stores/automations";
 import { useAutoMode } from "../stores/autoMode";
+import { useMemoryNotes } from "../stores/memoryNotes";
 import { useDevServers } from "../stores/devservers";
 import { usePreview } from "../stores/preview";
 import { useReminders } from "../stores/reminders";
@@ -158,6 +160,7 @@ export function useBackendSync() {
       onReviewRequest((r) => useAttention.getState().add(r)),
       onReviewResolved((id) => useAttention.getState().remove(id)),
       onAutoModeChanged((c) => useAutoMode.getState().apply(c.conversationId, c.on)),
+      onMemoryChanged((agentId) => useMemoryNotes.getState().changed(agentId)),
       onChatEvent((e) => {
         useActivity.getState().record(e);
         useChats.getState().apply(e);

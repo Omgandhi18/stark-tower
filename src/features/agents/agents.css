@@ -531,3 +531,43 @@ form.agent-editor-body {
   font-weight: var(--weight-medium);
 }
 
+
+/* ---- Memory, from a chat or task header ------------------------------------------ */
+.memory-button {
+  position: relative;
+}
+
+.memory-button.has-update::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.memory-popover {
+  width: 460px;
+}
+
+.memory-popover-body {
+  min-height: 0;
+  overflow-y: auto;
+  outline: none;
+}
+
+.memory-popover .agent-memory {
+  gap: var(--space-3);
+  padding: 12px 14px;
+}
+
+.memory-popover .agent-memory-note {
+  font-size: var(--text-sm);
+}
+
+.memory-popover .agent-memory-text {
+  padding: var(--space-3) var(--space-4);
+}

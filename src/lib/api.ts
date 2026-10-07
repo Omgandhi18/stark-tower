@@ -276,6 +276,10 @@ export interface AutoModeChange {
 export const onAutoModeChanged = (cb: (change: AutoModeChange) => void): Promise<UnlistenFn> =>
   listen<AutoModeChange>("automode://changed", (evt) => cb(evt.payload));
 
+/** An agent changed the notes it keeps for itself. */
+export const onMemoryChanged = (cb: (agentId: string) => void): Promise<UnlistenFn> =>
+  listen<{ agentId: string }>("memory://changed", (evt) => cb(evt.payload.agentId));
+
 export const getProject = () => commands.getProject();
 
 export const listProjects = () => commands.listProjects();

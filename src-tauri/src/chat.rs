@@ -842,7 +842,11 @@ pub(crate) fn tool_called(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, t
     crate::tasks::tool_use(app, agent_id, task.as_deref(), tool_use_id, name, input);
     if matches!(name, "Write" | "Edit" | "MultiEdit" | "NotebookEdit") {
         let path = ["file_path", "notebook_path"].iter().find_map(|k| input.get(*k).and_then(|v| v.as_str())).unwrap_or("");
-        if !path.is_empty() {
+        let full = crate::outputs::resolve(&crate::outputs::cwd_for(agent_id).unwrap_or_default(), path);
+        if !path.is_empty() && crate::prompts::is_memory_file(app, &full) {
+            // Notes an agent keeps for itself aren't something it made for you: they get a quiet spot of their own.
+            let _ = app.emit("memory://changed", serde_json::json!({ "agentId": agent_id }));
+        } else if !path.is_empty() {
             crate::outputs::wrote(agent_id, path);
         }
     }
@@ -879,7 +883,11 @@ pub(crate) fn turn_finished(app: &tauri::AppHandle, sink: &Sink, agent_id: &str,
     }
     let (made, more) = crate::outputs::finished(agent_id);
     // Only files the agent may read without asking: nothing reaches the chat past the gate.
-    let made: Vec<_> = made.into_iter().filter(|p| crate::bridge::may_read_freely(app, agent_id, p)).collect();
+    // Its memory is readable too, but it isn't something it made for you.
+    let made: Vec<_> = made
+        .into_iter()
+        .filter(|p| !crate::prompts::is_memory_file(app, p) && crate::bridge::may_read_freely(app, agent_id, p))
+        .collect();
     if !made.is_empty() {
         let (kept, _) = keep_copies(app, &made);
         let caption = (more > 0).then(|| format!("And {more} more {} in the folder.", if more == 1 { "file" } else { "files" }));

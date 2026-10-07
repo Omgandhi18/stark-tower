@@ -259,6 +259,18 @@ pub(crate) fn memory_file_path(app: &tauri::AppHandle, agent_id: &str) -> String
         .unwrap_or_default()
 }
 
+/// Whether a file is in Starkline's memory folder, where each agent keeps notes for itself.
+pub(crate) fn is_memory_file(app: &tauri::AppHandle, path: &std::path::Path) -> bool {
+    let Some(state) = app.try_state::<crate::AppState>() else { return false };
+    in_folder(path, std::path::Path::new(&state.memory_dir))
+}
+
+/// Whether `path` is inside `folder`, through any symlinks either has.
+fn in_folder(path: &std::path::Path, folder: &std::path::Path) -> bool {
+    let real = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    !folder.as_os_str().is_empty() && (path.starts_with(folder) || real(path).starts_with(real(folder)))
+}
+
 /// The memory section for a system prompt: a standing instruction to curate the
 /// file, plus its current contents so the agent recalls without a read.
 fn memory_block(app: &tauri::AppHandle, agent_id: &str) -> String {
@@ -341,6 +353,25 @@ pub(crate) fn workspace_context(app: &tauri::AppHandle, agent: &str, cwd: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memory_files_are_told_apart_from_everything_else() {
+        let root = std::env::temp_dir().join(format!("starkline-memory-{}", std::process::id()));
+        let memory = root.join("memory");
+        std::fs::create_dir_all(&memory).unwrap();
+        std::fs::write(memory.join("jarvis.md"), "notes").unwrap();
+        assert!(in_folder(&memory.join("jarvis.md"), &memory));
+        assert!(in_folder(&memory.join("friday.md"), &memory), "another agent's, not written yet");
+        assert!(!in_folder(&root.join("notes.md"), &memory));
+        assert!(!in_folder(&root.join("memory-old/jarvis.md"), &memory), "a neighbour that only shares the name");
+        assert!(!in_folder(&memory.join("jarvis.md"), std::path::Path::new("")), "no memory folder");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&memory, root.join("link")).unwrap();
+            assert!(in_folder(&root.join("link/jarvis.md"), &memory), "reached through a link");
+        }
+        std::fs::remove_dir_all(&root).ok();
+    }
 
     #[test]
     fn sections_are_exactly_the_launch_prompt() {
