@@ -220,6 +220,12 @@
   font-weight: var(--weight-semibold);
 }
 
+.work-section-note {
+  margin: calc(var(--space-1) * -1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
 .work-rows {
   margin: 0;
   padding: 0;

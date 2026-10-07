@@ -1,6 +1,6 @@
 // What the Work board shows, derived from the stores: tasks by state (running,
-// waiting their turn, ready for review, blocked), agents busy in a plain chat,
-// and the team.
+// waiting their turn, ready for review, blocked, answered), agents busy in a
+// plain chat, and the team.
 import type { Activity } from "../../stores/activity";
 import type { Agent, Conversation, ReviewRequest, Task } from "../../lib/types";
 import { askedByDeveloper } from "../../lib/requester";
@@ -41,6 +41,8 @@ export interface Board {
   queued: TaskRow[];
   ready: TaskRow[];
   blocked: TaskRow[];
+  /** Asked and answered in the last day, with nothing to review. */
+  answered: TaskRow[];
   team: Agent[];
 }
 
@@ -54,25 +56,34 @@ interface BoardInput {
   project: string | null;
   tab?: WorkTab;
   sort?: WorkSort;
+  /** Now, for how long answered work stays on the board. */
+  now?: number;
 }
 
 const DEFAULT_CHAT_TITLE = "New chat";
 const RUNNING: readonly string[] = ["doing"];
+/** How long answered work stays on the board; it stays with its chat after that. */
+export const ANSWERED_FOR_MS = 24 * 60 * 60 * 1000;
 
 function newestFirst<T>(items: readonly T[], key: (item: T) => number): T[] {
   return [...items].sort((a, b) => key(b) - key(a));
 }
 
-/** Tasks off the board: finished with by the developer, or idle with nothing to review (they stay with their chats). */
-const SETTLED: readonly string[] = ["closed", "reviewed", "idle"];
+/** Tasks the developer is finished with: they leave the board and stay in history. */
+const SETTLED: readonly string[] = ["closed", "reviewed"];
+
+/** Asked and answered lately, with nothing to review. A chat that was opened and left alone has nothing to show. */
+const recentlyAnswered = (t: Task, now: number) => t.status === "idle" && Boolean(t.prompt.trim()) && now - (t.finished ?? t.updated) < ANSWERED_FOR_MS;
+
+const onBoard = (t: Task, now: number) => !SETTLED.includes(t.status) && (t.status !== "idle" || recentlyAnswered(t, now));
 
 /** Tasks shown on their own: top-level ones, and delegations whose parent isn't shown. */
-function shownOnBoard(tasks: readonly Task[]): Task[] {
-  const open = new Set(tasks.filter((t) => !SETTLED.includes(t.status)).map((t) => t.id));
-  return tasks.filter((t) => !SETTLED.includes(t.status) && !(t.parent_id && open.has(t.parent_id)));
+function shownOnBoard(tasks: readonly Task[], now: number): Task[] {
+  const shown = new Set(tasks.filter((t) => onBoard(t, now)).map((t) => t.id));
+  return tasks.filter((t) => onBoard(t, now) && !(t.parent_id && shown.has(t.parent_id)));
 }
 
-export function buildBoard({ agents, since, tasks, conversations, latest, pending, project, tab = "all", sort = "recent" }: BoardInput): Board {
+export function buildBoard({ agents, since, tasks, conversations, latest, pending, project, tab = "all", sort = "recent", now = Date.now() }: BoardInput): Board {
   const byId = new Map(agents.map((a) => [a.id, a]));
   const waitingOnYou = new Set(pending.map((r) => r.agentId));
   const childrenOf = (id: string) => tasks.filter((t) => t.parent_id === id);
@@ -98,7 +109,7 @@ export function buildBoard({ agents, since, tasks, conversations, latest, pendin
     };
   };
 
-  const visible = shownOnBoard(tasks).filter((t) => inProject(t.project_folder || t.cwd, project) && (tab === "all" || askedByDeveloper(t.requested_by)));
+  const visible = shownOnBoard(tasks, now).filter((t) => inProject(t.project_folder || t.cwd, project) && (tab === "all" || askedByDeveloper(t.requested_by)));
   const ordered = sort === "longest" ? [...visible].sort((a, b) => (a.started ?? a.ts) - (b.started ?? b.ts)) : newestFirst(visible, (t) => t.updated);
   const withStatus = (status: string) => ordered.filter((t) => t.status === status).map(rowFor);
 
@@ -141,6 +152,10 @@ export function buildBoard({ agents, since, tasks, conversations, latest, pendin
     queued: withStatus("todo"),
     ready: withStatus("done"),
     blocked: withStatus("blocked"),
+    answered: newestFirst(
+      ordered.filter((t) => t.status === "idle"),
+      (t) => t.finished ?? t.updated,
+    ).map(rowFor),
     team: agents.filter((a) => a.kind !== "maintenance"),
   };
 }
@@ -171,7 +186,7 @@ function stateForStopped(task: Task): TaskRow["state"] {
     case "reviewed":
       return { label: "Reviewed", tone: "success" };
     case "idle":
-      return { label: "Idle", tone: "idle" };
+      return task.prompt.trim() ? { label: "Answered", tone: "idle" } : { label: "Idle", tone: "idle" };
     default:
       return { label: "Closed", tone: "idle" };
   }

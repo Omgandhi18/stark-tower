@@ -15,7 +15,7 @@ test.describe("Work's chats", () => {
     await expect(chats.getByRole("button", { name: "Redesign the settings page", exact: true })).toHaveClass(/is-current/);
   });
 
-  test("a chat that only talks stays idle and off the board, and carries on when you ask for more", async ({ page }) => {
+  test("a chat that only talks needs no review: it shows as answered, and carries on when you ask for more", async ({ page }) => {
     await openApp(page);
     const projects = page.getByRole("list", { name: "Projects" });
     await projects.getByRole("button", { name: /^checkout-web/ }).click();
@@ -29,11 +29,24 @@ test.describe("Work's chats", () => {
     await box.press("Enter");
     await expect(page.getByRole("heading", { name: "Which test runner do we use?", level: 1 })).toBeVisible();
     await expect(page.getByRole("log", { name: "Conversation with JARVIS" }).getByText(/Got it: "Which test runner/)).toBeVisible();
-    await expect(status).toContainText("Idle");
+    await expect(status).toContainText("Answered");
 
     await projects.getByRole("button", { name: "All work" }).click();
-    // Its title isn't a row anywhere on the board (JARVIS's other work may still quote it as his latest activity).
-    await expect(page.getByRole("region", { name: "Running" }).getByRole("button", { name: "Ship the refunds feature", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Which test runner do we use?", exact: true })).toHaveCount(0);
+    const answered = page.getByRole("region", { name: "Answered" });
+    await expect(answered.getByRole("button", { name: "Which test runner do we use?", exact: true })).toBeVisible();
+    await expect(answered.getByText(/Got it: "Which test runner/)).toBeVisible();
+    await expect(page.getByRole("region", { name: "Ready for review" }).getByRole("button", { name: "Which test runner do we use?", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Running" }).getByRole("button", { name: "Which test runner do we use?", exact: true })).toHaveCount(0);
+
+    // Closing it takes it off the board. The section is below the fold: bring it into view first,
+    // since a menu closes when its row scrolls.
+    const more = answered.getByRole("button", { name: "More actions for Which test runner do we use?" });
+    await more.scrollIntoViewIfNeeded();
+    await expect(async () => {
+      if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+      await expect(page.getByRole("menuitem", { name: "Close task" })).toBeVisible({ timeout: 500 });
+    }).toPass();
+    await page.getByRole("menuitem", { name: "Close task" }).click();
+    await expect(page.getByRole("region", { name: "Answered" })).toHaveCount(0);
   });
 });

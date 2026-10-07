@@ -359,7 +359,9 @@ fn finish_round(app: &tauri::AppHandle, task: &Task, agent_id: &str) {
         event(app, &task.id, agent_id, "status", "Ready for review", "");
         crate::notify::task_ready(app, task);
     } else {
-        state.ledger.set_task_status(&task.id, "idle", None);
+        // What it answered, for the board to show.
+        let answer = last_reply(app, task).map(|reply| crate::chat::truncate(&reply, 200));
+        state.ledger.set_task_status(&task.id, "idle", answer.as_deref());
         event(app, &task.id, agent_id, "status", "Finished, with nothing to review", "");
     }
     settled(app, &task.id);

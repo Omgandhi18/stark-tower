@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CalendarClock, CheckCheck, CornerDownRight, Hourglass, MessageSquareText, Play, RotateCcw, Square, SquareArrowOutUpRight, X } from "lucide-react";
+import { CalendarClock, CheckCheck, CornerDownRight, Hourglass, MessageSquareReply, MessageSquareText, Play, RotateCcw, Square, SquareArrowOutUpRight, X } from "lucide-react";
 import { portraitKey, Button, OverflowMenu, Portrait, StatusPill, Tag, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
 import { chatStop, closeTask, resumeTask, reviewTask, startTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
@@ -126,7 +126,7 @@ export function TaskRowView({ row, now }: TaskRowViewProps) {
           </span>
         )}
         {status === "doing" && <p className="work-row-activity">{row.activity?.summary ?? "Getting started"}</p>}
-        {(status === "blocked" || status === "done") && task.detail && <p className="work-row-activity">{excerpt(task.detail, 160)}</p>}
+        {(status === "blocked" || status === "done" || status === "idle") && task.detail && <p className="work-row-activity">{excerpt(task.detail, 160)}</p>}
         {row.progress && <PlanProgress progress={row.progress} />}
         {error && (
           <p className="work-row-error" role="alert">
@@ -158,7 +158,7 @@ export function TaskRowView({ row, now }: TaskRowViewProps) {
             <StatusPill
               label={row.state.label}
               tone={row.state.tone}
-              icon={status === "todo" ? Hourglass : owner ? AGENT_STATUS[owner.status].icon : undefined}
+              icon={status === "todo" ? Hourglass : status === "idle" ? MessageSquareReply : owner ? AGENT_STATUS[owner.status].icon : undefined}
               live={status === "doing" && Boolean(owner && AGENT_STATUS[owner.status].busy)}
             />
           )}

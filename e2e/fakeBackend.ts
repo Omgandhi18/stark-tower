@@ -188,6 +188,7 @@ function install(scenario: Scenario) {
   /** A short scripted reply so a sent message visibly gets an answer. */
   const reply = (agentId: string, text: string, taskId?: string) => {
     setStatus(agentId, "working");
+    const answer = `Got it: "${text}". I'll take care of it.`;
     const steps: Array<() => void> = [
       () => {
         const detail = "src/pages/Settings.tsx";
@@ -195,7 +196,6 @@ function install(scenario: Scenario) {
         emit("chat://event", { agentId, kind: "tool", tool: "Read", detail, messageId });
       },
       () => {
-        const answer = `Got it: "${text}". I'll take care of it.`;
         const messageId = persist(agentId, "agent", { text: answer });
         emit("chat://event", { agentId, kind: "text", text: answer, messageId });
       },
@@ -204,7 +204,7 @@ function install(scenario: Scenario) {
         setStatus(agentId, "idle");
         const task = state.tasks.find((t) => t.id === taskId);
         if (task && chatTasks.has(task.id) && task.status === "doing") {
-          Object.assign(task, { status: "idle", finished: Date.now(), updated: Date.now() });
+          Object.assign(task, { status: "idle", finished: Date.now(), updated: Date.now(), detail: answer });
           emit("tasks://changed", null);
         }
       },
