@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import { ArrowDown, Brain, CircleAlert, Share2, Sparkles } from "lucide-react";
 import { portraitKey, Button, Markdown, Portrait, ICON_SIZE, ICON_STROKE } from "../../design";
 import { AttachmentGallery } from "../attachments/AttachmentView";
@@ -6,6 +6,7 @@ import { presentTool } from "../../lib/tools";
 import type { Agent } from "../../lib/types";
 import type { ChatMessage, MessageRole } from "../../stores/chats";
 import ReadAloud from "../voices/ReadAloud";
+import { withoutOwnMemory } from "./ownMemory";
 import { useStickToBottom } from "./useStickToBottom";
 
 /** Messages that come from the agent's side of the conversation. */
@@ -90,8 +91,9 @@ interface MessageListProps {
 }
 
 /** The transcript: follows new messages unless the reader scrolled back. */
-export default function MessageList({ agent, messages, pending, empty }: MessageListProps) {
+export default function MessageList({ agent, messages: transcript, pending, empty }: MessageListProps) {
   const { scrollerRef, contentRef, atEnd, jumpToEnd } = useStickToBottom();
+  const messages = useMemo(() => withoutOwnMemory(transcript, agent.id), [transcript, agent.id]);
   return (
     <div className="message-area">
       <div className="message-scroller" ref={scrollerRef}>
