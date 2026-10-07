@@ -446,7 +446,17 @@ pub fn resume(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     if !Path::new(&task.cwd).is_dir() { return Err("The task's workspace is no longer here. Restore the folder before continuing this task.".into()); }
     let conversation = task.conversation_id.ok_or("This task has no conversation to continue.")?;
     if task.parent_id.is_some() {
-        return Err("A delegated task continues through the agent that delegated it.".into());
+        // Delegated work picks back up in its own conversation, and its result goes to whoever delegated it.
+        let (task, conversation) = continue_child(app, BY_DEVELOPER, id)?;
+        let back_to = task.parent_id.as_deref().and_then(|p| state.ledger.task(p)).and_then(|p| p.conversation_id);
+        crate::delegation::register_delegation(app, back_to);
+        let app = app.clone();
+        std::thread::spawn(move || {
+            let result = crate::chat::continue_task_blocking(&app, BY_DEVELOPER, &task, conversation, "")
+                .unwrap_or_else(|e| format!("(it stopped again: {e})"));
+            crate::delegation::complete_delegation(&app, back_to, &task.assignee, &delegation_label(&task), &result);
+        });
+        return Ok(());
     }
     if is_busy_in(app, conversation) {
         let name = crate::prompts::agent_name(app, &task.assignee);
@@ -456,6 +466,75 @@ pub fn resume(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     developer_message(app, &task.assignee, conversation, request, &task.cwd);
     crate::chat::send_user_turn(app, &task.assignee, conversation, request, &[], &task.cwd)?;
     Ok(())
+}
+
+/// How a delegated task is named in the results its delegator gets: what it is, and its id to pick it back up by.
+pub fn delegation_label(task: &Task) -> String {
+    format!("{} (task {})", task.title, task.id)
+}
+
+/// Pick a delegated task that isn't running back up, in its own conversation, for `by`: whoever
+/// delegated it, the lead agent, or you. Returns the task, now running again, and its conversation.
+pub fn continue_child(app: &tauri::AppHandle, by: &str, id: &str) -> Result<(Task, i64), String> {
+    let state = engine(app).ok_or("Starkline isn't ready yet.")?;
+    let task = state.ledger.task(id).ok_or_else(|| format!("There's no task {id}."))?;
+    if task.parent_id.is_none() {
+        return Err("That's a chat's own work, not delegated work.".into());
+    }
+    let name = crate::prompts::agent_name(app, &task.assignee);
+    if matches!(task.status.as_str(), "doing" | "todo") {
+        return Err(format!("{name} is still working on it."));
+    }
+    let lead = crate::delegation::orchestrator_id(app);
+    if by != BY_DEVELOPER && by != task.requested_by && by != lead {
+        return Err(format!("Only {} (who delegated it) or {} can pick it back up.", requester_name(app, &task.requested_by), crate::prompts::agent_name(app, &lead)));
+    }
+    if !Path::new(&task.cwd).is_dir() {
+        return Err("The task's workspace is no longer here. Restore the folder before continuing it.".into());
+    }
+    let conversation = task.conversation_id.ok_or("This task has no conversation to continue.")?;
+    state.ledger.set_task_status(id, "doing", None);
+    start_round(app, id, &task.cwd, false);
+    event(app, id, by, "status", &format!("{} picked it back up", requester_name(app, by)), "");
+    crate::notify::task_settled(app, id, "Picked back up");
+    emit_changed(app);
+    Ok((state.ledger.task(id).unwrap_or(task), conversation))
+}
+
+/// Another agent's chat task that stopped carries on in its own chat, asked by `by` (the lead agent,
+/// or whoever asked for it), with `note` as the message there.
+pub fn continue_chat(app: &tauri::AppHandle, by: &str, task: &Task, note: &str) -> Result<(), String> {
+    let lead = crate::delegation::orchestrator_id(app);
+    if by != lead && by != task.requested_by {
+        return Err(format!("Only {} can pick another agent's chat back up.", crate::prompts::agent_name(app, &lead)));
+    }
+    if by == task.assignee {
+        return Err("That's your own chat; carry on in it.".into());
+    }
+    let conversation = task.conversation_id.ok_or("This task has no conversation to continue.")?;
+    if is_busy_in(app, conversation) {
+        return Err(format!("{} is working in that chat right now.", crate::prompts::agent_name(app, &task.assignee)));
+    }
+    if !Path::new(&task.cwd).is_dir() {
+        return Err("The task's workspace is no longer here.".into());
+    }
+    let asker = requester_name(app, by);
+    let request = if note.trim().is_empty() { format!("{asker} asks you to continue where you left off.") } else { format!("{asker} asks: {}", note.trim()) };
+    developer_message(app, &task.assignee, conversation, &request, &task.cwd);
+    event(app, &task.id, by, "status", &format!("{asker} picked it back up"), "");
+    crate::chat::send_user_turn(app, &task.assignee, conversation, &request, &[], &task.cwd).map(|_| ())
+}
+
+/// The work an agent delegated, oldest first: under the task its chat is on, else its latest.
+pub fn delegated_by(app: &tauri::AppHandle, by: &Actor) -> Vec<Task> {
+    const RECENT: usize = 20;
+    let Some(state) = engine(app) else { return Vec::new() };
+    if let Some(children) = task_of(app, by).map(|parent| state.ledger.child_tasks(&parent)).filter(|c| !c.is_empty()) {
+        return children;
+    }
+    let mut mine: Vec<Task> = state.ledger.tasks(EVENT_LIMIT).into_iter().filter(|t| t.parent_id.is_some() && t.requested_by == by.agent).take(RECENT).collect();
+    mine.reverse();
+    mine
 }
 
 /// Who asked for a task, and what it's called.

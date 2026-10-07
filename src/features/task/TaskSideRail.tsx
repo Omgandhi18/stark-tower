@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { CircleCheck, CircleX, FileDiff, Globe, ListChecks, PanelRightOpen, ShieldCheck, Smartphone, SquareTerminal } from "lucide-react";
-import { Button, EmptyState, Rail, RailButton, RailDivider, Tabs, cx, ICON_SIZE, ICON_STROKE, usePeek, type TabItem } from "../../design";
+import { CircleCheck, CircleX, FileDiff, Globe, ListChecks, Maximize2, Minimize2, PanelRightOpen, ShieldCheck, Smartphone, SquareTerminal } from "lucide-react";
+import { Button, EmptyState, IconButton, Rail, RailButton, RailDivider, Tabs, cx, ICON_SIZE, ICON_STROKE, usePeek, type TabItem } from "../../design";
 import { PANEL_SHORTCUT } from "../../app/panelShortcuts";
 import { formatElapsed, formatRelative } from "../../lib/time";
 import type { CheckRun, FileChange, ReviewRequest } from "../../lib/types";
@@ -83,6 +83,7 @@ function useToolsNeedRoom() {
       if (!next.collapsed.taskRight || previous.collapsed.taskRight) return;
       if (terminalAtSide(useTerminal.getState())) useTerminal.getState().setOpen(false);
       usePreview.getState().close();
+      usePanels.getState().setToolExpanded(false);
     });
     return () => {
       stopPreview();
@@ -110,6 +111,8 @@ export default function TaskSideRail({ taskId, folder, active, conversationId, p
   // Collapsed, a tool is never drawn: the browser and simulator are native views that don't hide with the page.
   const tab = collapsed ? chosen : railTab(chosen, terminalHere, { open: previewOpen, tab: previewTab });
   const previewing = isPreviewTab(tab);
+  const tool = previewing || tab === "terminal";
+  const expanded = usePanels((s) => s.toolExpanded) && tool;
   const drag = useRef<{ x: number; width: number } | null>(null);
   useOneToolAtATime();
   useToolsNeedRoom();
@@ -120,6 +123,7 @@ export default function TaskSideRail({ taskId, folder, active, conversationId, p
     else {
       if (terminalHere) useTerminal.getState().setOpen(false);
       usePreview.getState().close();
+      usePanels.getState().setToolExpanded(false);
       setChosen(next);
     }
   };
@@ -165,11 +169,11 @@ export default function TaskSideRail({ taskId, folder, active, conversationId, p
     <aside
       ref={ref}
       className={cx("task-rail", collapsed && "is-collapsed", tab === "terminal" && "has-terminal", previewing && "has-preview")}
-      style={previewing ? { width } : undefined}
+      style={previewing && !expanded ? { width } : undefined}
       aria-label="Task side panel"
       {...handlers}
     >
-      {previewing && (
+      {previewing && !expanded && (
         <div
           role="separator"
           aria-orientation="vertical"
@@ -203,7 +207,19 @@ export default function TaskSideRail({ taskId, folder, active, conversationId, p
         </Rail>
       )}
       <div ref={panelRef} className={cx("task-rail-inner", peeking && "is-peeking")} tabIndex={collapsed ? -1 : undefined}>
-        <Tabs tabs={tabs} value={tab} onChange={setTab} label="Task side panel" idPrefix="task-rail" />
+        <div className="task-rail-bar">
+          <Tabs tabs={tabs} value={tab} onChange={setTab} label="Task side panel" idPrefix="task-rail" />
+          {tool && (
+            <IconButton
+              icon={expanded ? Minimize2 : Maximize2}
+              size="sm"
+              label={expanded ? "Back beside the chat" : "Fill the page"}
+              pressed={expanded}
+              className="task-rail-expand"
+              onClick={() => usePanels.getState().setToolExpanded(!expanded)}
+            />
+          )}
+        </div>
         <div role="tabpanel" id={`task-rail-panel-${tab}`} aria-labelledby={`task-rail-tab-${tab}`} className={cx("task-rail-body", (tab === "terminal" || previewing) && "is-tool")}>
           {tab === "terminal" && <TerminalDrawer folder={folder} active={active} dock="side" movable />}
           {tab === "browser" && <BrowserView active={active} chat={pointChat} folder={folder} />}

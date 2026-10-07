@@ -151,4 +151,18 @@ test.describe("task screen", () => {
     await expect(execution.getByText("Blocked: Refunds service architecture")).toBeVisible();
     await expect(header.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
   });
+
+  test("picks a teammate's stopped work back up, with the result going to whoever delegated it", async ({ page }) => {
+    const scenario = defaultScenario();
+    const idem = scenario.tasks.find((t) => t.id === "t-idem")!;
+    Object.assign(idem, { status: "blocked", detail: "Starkline closed while this was running.", conversation_id: 50 });
+    scenario.conversations.push({ ...scenario.conversations.find((c) => c.id === 40)!, id: 50, agent_id: "edith", title: "Compare idempotency strategies", delegated: true });
+    await openApp(page, scenario);
+    await page.getByRole("button", { name: "Ship the refunds feature", exact: true }).click();
+    await page.getByRole("navigation", { name: "Who's working on this task" }).getByRole("button", { name: /EDITH/ }).click();
+    await expect(page.getByRole("heading", { name: "Compare idempotency strategies for refunds", level: 1 })).toBeVisible();
+    await page.getByRole("button", { name: "More actions for Compare idempotency strategies for refunds" }).click();
+    await page.getByRole("menuitem", { name: "Pick it back up (the result goes to JARVIS)" }).click();
+    expect(await fakeCalls(page)).toContainEqual({ cmd: "resume_task", args: { id: "t-idem" } });
+  });
 });

@@ -100,6 +100,8 @@ export const onDevserverOutput = (cb: (output: Output) => void): Promise<Unliste
 export const browserShow = (bounds: Bounds, zoom = 1) => ok(commands.browserShow(bounds, zoom));
 export const browserHide = () => commands.browserHide();
 /** Open what was typed in the address bar. */
+/** The address the built-in browser opens a kept file at (a page an agent made). */
+export const attachmentUrl = (path: string) => ok(commands.attachmentUrl(path));
 export const browserNavigate = (url: string) => ok(commands.browserNavigate(url));
 export const browserGo = (action: "back" | "forward" | "reload" | "stop") => ok(commands.browserGo(action));
 export const browserPage = () => commands.browserPage();
@@ -447,6 +449,9 @@ export const hideCapture = () => ok(commands.hideCapture());
 export const resizeCapture = (height: number) => ok(commands.resizeCapture(height));
 export const rememberCapture = (agentId: string, project: string | null, reminder: boolean) => commands.rememberCapture(agentId, project, reminder);
 export const openCaptureTask = (id: string) => ok(commands.openCaptureTask(id));
+/** Open a to-do list in the main window, and put quick capture away. */
+export const openCaptureTodoList = (listId: number) => ok(commands.openCaptureTodoList(listId));
+export const onCaptureOpenTodoList = (cb: (listId: number) => void): Promise<UnlistenFn> => listen<number>("capture://open-todo-list", (event) => cb(event.payload));
 export const onCaptureShown = (cb: () => void): Promise<UnlistenFn> => listen("capture://shown", () => cb());
 export const onCaptureError = (cb: (error: string) => void): Promise<UnlistenFn> => listen<string>("capture://error", (event) => cb(event.payload));
 export const onCaptureOpenTask = (cb: (id: string) => void): Promise<UnlistenFn> => listen<string>("capture://open-task", (event) => cb(event.payload));

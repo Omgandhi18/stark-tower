@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
-import { getConfig, listAgents, listProjects, onConfigChanged, onCaptureShown } from "../../lib/api";
+import { getConfig, listAgents, listProjects, onConfigChanged, onCaptureShown, onTodosChanged } from "../../lib/api";
 import { IS_TAURI } from "../../lib/platform";
 import { errorMessage } from "../../lib/errors";
 import { useAgents } from "../../stores/agents";
 import { useConfig } from "../../stores/config";
+import { useTodos } from "../../stores/todos";
 import { useWorkspace } from "../../stores/workspace";
 
-/** This window needs the roster, projects and theme, without the app's background UI. */
+/** This window needs the roster, projects, to-do lists and theme, without the app's background UI. */
 export function useCaptureSync() {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -14,7 +15,7 @@ export function useCaptureSync() {
     let stopped = false;
     const load = async () => {
       try {
-        const [agents, config, projects] = await Promise.all([listAgents(), getConfig(), listProjects()]);
+        const [agents, config, projects] = await Promise.all([listAgents(), getConfig(), listProjects(), useTodos.getState().refresh()]);
         if (stopped) return;
         useAgents.getState().replace(agents);
         useConfig.getState().apply(config);
@@ -24,7 +25,7 @@ export function useCaptureSync() {
         if (!stopped) setError(errorMessage(e, "Quick capture couldn't load. Close it and try again."));
       }
     };
-    const subscriptions = [onConfigChanged(() => void load()), onCaptureShown(() => void load())];
+    const subscriptions = [onConfigChanged(() => void load()), onCaptureShown(() => void load()), onTodosChanged(() => void useTodos.getState().refresh().catch(() => {}))];
     void load();
     return () => {
       stopped = true;

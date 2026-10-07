@@ -8,7 +8,9 @@ import { useAgents } from "../../stores/agents";
 import { useAttention } from "../../stores/attention";
 import { useAutomations } from "../../stores/automations";
 import { useNavigation } from "../../stores/navigation";
+import { usePanels } from "../../stores/panels";
 import { usePreview } from "../../stores/preview";
+import { useTerminal } from "../../stores/terminal";
 import { useWorkspace } from "../../stores/workspace";
 import TerminalDrawer from "../terminal/TerminalDrawer";
 import { taskState } from "../work/board";
@@ -114,6 +116,9 @@ function TaskWorkspace({ detail, active, now }: { detail: TaskDetail; active: bo
   const pending = useAttention((s) => s.pending);
   const automations = useAutomations((s) => s.items);
   const previewing = usePreview((s) => s.open);
+  const terminalAside = useTerminal((s) => s.open && s.place === "side");
+  // A tool in the side panel can fill the page; the left column and the chat step aside for it.
+  const expanded = usePanels((s) => s.toolExpanded) && (previewing || terminalAside);
   const [tab, setTab] = useState<CenterTab>("conversation");
   const { task } = detail;
   const owner = agents.find((a) => a.id === task.assignee);
@@ -131,7 +136,7 @@ function TaskWorkspace({ detail, active, now }: { detail: TaskDetail; active: bo
   ];
 
   return (
-    <div className={cx("task-screen", previewing && "has-preview")}>
+    <div className={cx("task-screen", previewing && "has-preview", expanded && "is-tool-expanded")}>
       <TaskHeader detail={detail} owner={owner} chat={chat} requester={requester} state={taskState(task, owner, detail.children, waitingOnYou)} now={now} />
       <div className="task-body">
         <TaskLeftColumn detail={detail} owner={owner} waitingOnYou={waitingOnYou} toolBeside={previewing} />

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Button, SelectField, Tabs, TextArea, TextField } from "../../design";
-import { hideCapture, onCaptureShown, openCaptureTask, rememberCapture, resizeCapture, saveReminder, startTask } from "../../lib/api";
+import { hideCapture, onCaptureShown, openCaptureTask, openCaptureTodoList, rememberCapture, resizeCapture, saveReminder, saveTodo, saveTodoList, startTask } from "../../lib/api";
 import { IS_TAURI } from "../../lib/platform";
 import { errorMessage } from "../../lib/errors";
 import { useNow } from "../../lib/useNow";
 import { useThemeSync } from "../../app/theme";
 import { selectOrchestrator, useAgents } from "../../stores/agents";
 import { useConfig } from "../../stores/config";
+import { useTodos } from "../../stores/todos";
 import { folderName, useWorkspace } from "../../stores/workspace";
 import { findAgent, routeMessage } from "../work/mentions";
 import { fromLocalInput, toLocalInput, whenChoices } from "../reminders/reminderModel";
@@ -15,7 +16,31 @@ import { useCaptureSync } from "./useCaptureSync";
 import "./capture.css";
 
 type When = { choice: string } | { custom: string };
-type Notice = { text: string; taskId?: string };
+/** What was done, and what Open shows: the task it started, else the list it went on. */
+type Notice = { text: string; taskId?: string; listId?: number };
+
+/** The list and agent a to-do went to last time, kept in this window. */
+const TODO_PREFS = "starkline.capture.todo";
+const NOBODY = "";
+/** Where a to-do goes when there are no lists yet. */
+const FIRST_LIST = "Inbox";
+
+function savedTodoPrefs(): { list: number | null; agent: string | null } {
+  try {
+    const value = JSON.parse(localStorage.getItem(TODO_PREFS) || "{}") as { list?: unknown; agent?: unknown };
+    return { list: typeof value.list === "number" ? value.list : null, agent: typeof value.agent === "string" ? value.agent : null };
+  } catch {
+    return { list: null, agent: null };
+  }
+}
+
+function rememberTodoPrefs(list: number, agent: string | null) {
+  try {
+    localStorage.setItem(TODO_PREFS, JSON.stringify({ list, agent }));
+  } catch {
+    // Not remembered; it still went where you chose.
+  }
+}
 
 export default function CaptureView() {
   const loadError = useCaptureSync();
@@ -32,6 +57,10 @@ export default function CaptureView() {
   const [agent, setAgent] = useState<string | null>(null);
   const [project, setProject] = useState<string | null>(null);
   const [reminderAgent, setReminderAgent] = useState<string | null>(null);
+  const lists = useTodos((s) => s.lists);
+  const [todoPrefs] = useState(savedTodoPrefs);
+  const [todoList, setTodoList] = useState<number | null>(todoPrefs.list);
+  const [todoAgent, setTodoAgent] = useState<string | null>(todoPrefs.agent);
   const [when, setWhen] = useState<When>({ choice: "1h" });
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +76,8 @@ export default function CaptureView() {
   const choices = whenChoices(now);
   const phrase = reminderPhrase(text, now);
   const choice = phrase.choice ?? ("choice" in when ? when.choice : null);
+  const listId = lists.some((l) => l.id === todoList) ? todoList! : (lists[0]?.id ?? null);
+  const todoAgentId = agents.some((a) => a.id === todoAgent) ? todoAgent : null;
 
   const focusInput = () => form.current?.querySelector("textarea")?.focus();
   const hide = () => IS_TAURI && void hideCapture().catch((e) => setError(errorMessage(e, "Quick capture couldn't be hidden. Try again.")));
@@ -112,6 +143,17 @@ export default function CaptureView() {
         void rememberCapture(routing.agentId, projectPath || null, false)
           .then(useConfig.getState().apply)
           .catch(() => {});
+      } else if (mode === "todo") {
+        const list = lists.find((l) => l.id === listId) ?? (await saveTodoList({ id: null, name: FIRST_LIST, project: "", start_mode: "manual" }));
+        const saved = await saveTodo({ id: null, list_id: list.id, title: text.trim(), notes: "", agent_id: todoAgentId, due: null });
+        setTodoList(list.id);
+        rememberTodoPrefs(list.id, todoAgentId);
+        const who = agents.find((a) => a.id === saved.agent_id)?.name;
+        setNotice({
+          text: who ? (saved.task_id ? `Added to ${list.name}, and ${who} has started on it` : `Added to ${list.name}, for ${who}`) : `Added to ${list.name}`,
+          taskId: saved.task_id ?? undefined,
+          listId: list.id,
+        });
       } else {
         const due = choice ? whenChoices(Date.now()).find((c) => c.id === choice)?.at : "custom" in when ? fromLocalInput(when.custom) : null;
         if (!due || due <= Date.now()) throw new Error("Pick a time that hasn't passed.");
@@ -126,7 +168,8 @@ export default function CaptureView() {
           .catch(() => {});
       }
     } catch (e) {
-      setError(errorMessage(e, mode === "task" ? "The task couldn't be sent. Try again." : "The reminder couldn't be saved. Try again."));
+      const failure = { task: "The task couldn't be sent. Try again.", reminder: "The reminder couldn't be saved. Try again.", todo: "The to-do couldn't be added. Try again." };
+      setError(errorMessage(e, failure[mode]));
     } finally {
       setSending(false);
     }
@@ -143,6 +186,7 @@ export default function CaptureView() {
             tabs={[
               { id: "task", label: "Task" },
               { id: "reminder", label: "Reminder" },
+              { id: "todo", label: "To-do" },
             ]}
             value={mode}
             onChange={setMode}
@@ -214,13 +258,32 @@ export default function CaptureView() {
             </div>
           )}
           <div className="capture-controls">
-            <SelectField
-              label={mode === "task" ? "Agent" : "Who reminds you"}
-              hideLabel
-              value={mode === "task" ? agentId : reminderId}
-              options={agents.length ? agents.map((a) => ({ value: a.id, label: a.name })) : [{ value: "", label: "Add an agent in Starkline" }]}
-              onChange={mode === "task" ? setAgent : setReminderAgent}
-            />
+            {mode === "todo" ? (
+              <>
+                <SelectField
+                  label="List"
+                  hideLabel
+                  value={listId === null ? "" : String(listId)}
+                  options={lists.length ? lists.map((l) => ({ value: String(l.id), label: l.name })) : [{ value: "", label: `${FIRST_LIST} (new)` }]}
+                  onChange={(value) => setTodoList(value ? Number(value) : null)}
+                />
+                <SelectField
+                  label="Who'll do it"
+                  hideLabel
+                  value={todoAgentId ?? NOBODY}
+                  options={[{ value: NOBODY, label: "Nobody yet" }, ...agents.map((a) => ({ value: a.id, label: a.name }))]}
+                  onChange={(value) => setTodoAgent(value === NOBODY ? null : value)}
+                />
+              </>
+            ) : (
+              <SelectField
+                label={mode === "task" ? "Agent" : "Who reminds you"}
+                hideLabel
+                value={mode === "task" ? agentId : reminderId}
+                options={agents.length ? agents.map((a) => ({ value: a.id, label: a.name })) : [{ value: "", label: "Add an agent in Starkline" }]}
+                onChange={mode === "task" ? setAgent : setReminderAgent}
+              />
+            )}
             {mode === "task" && (
               <SelectField
                 label="Project"
@@ -234,8 +297,8 @@ export default function CaptureView() {
                 onChange={setProject}
               />
             )}
-            <Button type="submit" variant="primary" disabled={sending || Boolean(notice) || !text.trim() || !config || !loaded || !agents.length}>
-              {mode === "task" ? "Send task" : "Set reminder"}
+            <Button type="submit" variant="primary" disabled={sending || Boolean(notice) || !text.trim() || !config || !loaded || (mode !== "todo" && !agents.length)}>
+              {{ task: "Send task", reminder: "Set reminder", todo: "Add to-do" }[mode]}
             </Button>
           </div>
         </div>
@@ -247,13 +310,22 @@ export default function CaptureView() {
         {notice && (
           <div className="capture-confirmation" role="status">
             {notice.text}
-            {notice.taskId && (
+            {notice.taskId ? (
               <Button
                 variant="ghost"
                 onClick={() => void openCaptureTask(notice.taskId!).catch((e) => setError(errorMessage(e, "The task couldn't be opened. Open it from Work.")))}
               >
                 Open
               </Button>
+            ) : (
+              notice.listId !== undefined && (
+                <Button
+                  variant="ghost"
+                  onClick={() => void openCaptureTodoList(notice.listId!).catch((e) => setError(errorMessage(e, "The list couldn't be opened. Open it from To-dos.")))}
+                >
+                  Open
+                </Button>
+              )
             )}
           </div>
         )}

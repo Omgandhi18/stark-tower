@@ -337,6 +337,29 @@ const LIST_TODOS_TOOL = {
   },
 };
 
+const CONTINUE_TASK_TOOL = {
+  name: "continue_task",
+  description:
+    "Pick a teammate's work back up where it stopped, instead of delegating it again from scratch: a delegated " +
+    "task that was blocked (or finished but needs more), or another agent's own chat task that stopped. The same " +
+    "teammate carries on in the same conversation, with everything it did so far, plus your note. A delegated " +
+    "task's result comes back to you as [DELEGATION RESULTS]. Get task ids from [DELEGATION RESULTS] or `delegations`.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      task_id: { type: "string", description: "The task's id (\"task-…\")." },
+      note: { type: "string", description: "What to do now: what was missing, or what changed (optional)." },
+    },
+    required: ["task_id"],
+  },
+};
+
+const DELEGATIONS_TOOL = {
+  name: "delegations",
+  description: "List the work you've delegated (for this chat's task, else your latest), with each part's task id, teammate, state and last word.",
+  inputSchema: { type: "object", properties: {} },
+};
+
 const CLAIM_FILES_TOOL = {
   name: "claim_files",
   description: "Reserve files or folders exclusively before editing in a shared workspace. Sensitive files must be claimed. Overlaps report who holds them and why.",
@@ -352,7 +375,7 @@ async function toolsList() {
   const tools = [CLAIM_FILES_TOOL, RELEASE_FILES_TOOL, ASK_HUMAN_TOOL, MESSAGE_TOOL, SHARE_TOOL, REMIND_TOOL, ADD_TODO_TOOL, COMPLETE_TODO_TOOL, LIST_TODOS_TOOL, BROWSER_TOOL, DEV_SERVER_TOOL, SIMULATOR_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
   if (IS_ORCH) {
     const workers = await getRoster();
-    tools.unshift(buildDelegateTool(workers));
+    tools.unshift(buildDelegateTool(workers), CONTINUE_TASK_TOOL, DELEGATIONS_TOOL);
   }
   return tools;
 }
@@ -450,6 +473,15 @@ rl.on("line", async (raw) => {
       });
       if (res.error) result(id, "remind failed: " + res.error, true);
       else result(id, res.result || "(set)");
+    } else if (name === "continue_task") {
+      log("continue_task ->", args.task_id);
+      const res = await bridge({ type: "continue", agentId: AGENT_ID, taskId: args.task_id || "", note: args.note || "" });
+      if (res.error) result(id, "continue_task failed: " + res.error, true);
+      else result(id, res.result || "(continuing)");
+    } else if (name === "delegations") {
+      const res = await bridge({ type: "delegations", agentId: AGENT_ID });
+      if (res.error) result(id, "delegations failed: " + res.error, true);
+      else result(id, res.result || "(nothing delegated)");
     } else if (name === "add_todo" || name === "complete_todo" || name === "list_todos") {
       const action = { add_todo: "add", complete_todo: "done", list_todos: "list" }[name];
       log(name, "->", args.title || args.id || args.list || "");

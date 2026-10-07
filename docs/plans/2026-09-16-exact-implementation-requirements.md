@@ -1070,3 +1070,44 @@ The developer asked for to-do lists "which I can attach any agent to work with",
 - **A due time reminds you** through the assigned agent (the lead agent when nobody's assigned), via Reminders; ticking it off or clearing the time takes the reminder away. An overdue to-do says so in red.
 - **One to-do in full:** its words and notes, who'll do it, its list (move it), its due time, its work, and who added and ticked it off.
 - **Verified here.** Rust tests cover storage, what a list and a to-do need, what an agent is told, which waiting to-dos free agents pick up, and which list a folder belongs to. Script tests cover the agent tools. Unit tests cover how a to-do stands. WebKit tests add, tick off, start and open a to-do, assign one on a list that starts right away, edit notes, hand a list to the lead agent, and see a new project list's to-do on Work.
+
+### 2026-10-07: quick capture adds to-dos
+
+The developer asked for "quick capture for to-dos too".
+
+- **A third kind, To-do,** after Task and Reminder; Tab still cycles them, and starting with "to-do" or "todo" (as whole words) switches to it and is taken off the text, as "remind me" does for a reminder.
+- **It asks which list and who'll do it** (nobody, or any agent), and remembers both for next time. With no lists yet, the to-do starts one. Adding it follows the list's own start setting, as adding it on To-dos would.
+- **Afterwards it says where it went,** with Open, which brings the main window up on that list.
+- **Verified here.** Unit tests cover the prefix and the Tab order; a WebKit test adds a to-do for an agent to a chosen list and opens it.
+
+### 2026-10-07: pages, mockups and images full screen
+
+The developer asked "to open up mockups or artifacts or html documents in a full screen mode".
+
+- **Full screen** sits with an agent's page or image wherever it shows (in the chat, on the task and on a mockup awaiting a decision in Notifications and the chat). It fills the window over everything else; from there, Mac full screen takes the whole display too, and Esc or Close comes back.
+- **Verified here.** WebKit tests open a page and an image full screen and close them.
+
+### 2026-10-07: an agent's pages open in the built-in browser
+
+The developer found "open in browser opens in the external browser.. it should use the internal browser".
+
+- **Open in browser opens the page in the task's Browser tab** (the task the chat belongs to, opening it first from elsewhere). Outside a task it still opens in your default browser.
+- **Served only on this Mac.** The built-in browser only goes to web addresses, so Starkline serves a page at a private address on 127.0.0.1, with a random part per file: only files you open this way, and only files Starkline already keeps as an agent's attachment, can be fetched, by nothing outside this Mac. Only that one file is served, so a page that loads images or styles from files beside it shows without them.
+- **Verified here.** Rust tests cover reading a request and refusing files that weren't opened. A WebKit test opens a page from the chat into the task's Browser tab.
+
+### 2026-10-07: the side panel's tools fill the page
+
+The developer asked to "fullscreen this inside the app" for the side panel's Terminal, Browser and Simulator.
+
+- **Fill the page,** beside the side panel's tabs, gives the tool the whole task page (the chat and the left column step aside, with the app's sidebar as it was); Back beside the chat undoes it. It's done in the page rather than over it, since the browser and simulator are native views that can't sit in a dialog. Going to a tab that isn't a tool, or folding the panel away, comes back too.
+- **Verified here.** A WebKit test fills the page with the Browser and goes back.
+
+### 2026-10-07: picking up a teammate's stopped work
+
+The developer asked for "a way for agents to unblock other agent's previously running chat too", showing KAREN's delegated part stopped as blocked.
+
+- **The lead agent, or whoever delegated it, can pick a stopped part back up** with `continue_task` and its task id (and a note if they like), rather than delegating it again from scratch. `delegations` lists the parts they delegated and how each stands. When delegation results come back with a part that didn't finish, the agent is told it can do this.
+- **It carries on where it stopped.** Each delegated chat now keeps its session, so a Claude Code teammate resumes the same session; other providers are sent the original request again, told they stopped before finishing. The result goes back into the chat that delegated it, as the first time.
+- **A stopped chat of their own** (not delegated) gets the note as a message from whoever asked, with the lead agent's name on it; an agent can't do this to its own work, or to a chat that's still running.
+- **You can do it too:** a stopped delegated task's menu offers "Pick it back up (the result goes to …)".
+- **Verified here.** Script tests cover the tools and what reaches the app. A WebKit test picks up EDITH's stopped part from its menu.

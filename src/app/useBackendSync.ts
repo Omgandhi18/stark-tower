@@ -8,6 +8,7 @@ import {
   onCodeReviewsChanged,
   refreshCodeReviews,
   onCaptureOpenTask,
+  onCaptureOpenTodoList,
   onStudioChanged,
   onVoiceStatus,
   voiceChatVisibility,
@@ -151,6 +152,7 @@ export function useBackendSync() {
     const subscriptions: Array<Promise<UnlistenFn>> = [
       onCodeReviewsChanged(useCodeReviews.getState().apply),
       onCaptureOpenTask((id) => useNavigation.getState().openTask(id)),
+      onCaptureOpenTodoList((id) => useNavigation.getState().openTodoList(id)),
       onStudioChanged(() => useLooks.getState().refresh().catch(report("custom looks"))),
       onVoiceStatus((s) => useVoices.getState().apply(s)),
       onAgentStatus((e) => useAgents.getState().setStatus(e.agentId, e.status)),

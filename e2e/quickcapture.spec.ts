@@ -67,12 +67,31 @@ test("defaults reminders to an hour, supports a custom time, Tab and Shift-Enter
   await page.getByLabel("Date and time").fill("2026-10-07T18:00");
   await input(page).press("Shift+Enter");
   await expect(input(page)).toHaveValue("to stretch\n");
+  // Tab steps through Task, Reminder and To-do, keeping what's typed.
+  await input(page).press("Tab");
+  await expect(page.getByRole("tab", { name: "To-do", exact: true })).toHaveAttribute("aria-selected", "true");
   await input(page).press("Tab");
   await expect(page.getByRole("tab", { name: "Task", exact: true })).toHaveAttribute("aria-selected", "true");
   await input(page).press("Tab");
   await input(page).press("Enter");
   await expect(page.getByRole("status")).toContainText("will remind you at");
   expect(await lastCall(page, "save_reminder")).toMatchObject({ input: { due: Date.parse("2026-10-07T18:00:00+05:30") } });
+});
+
+test("todo adds a to-do to the chosen list, for an agent, and opens the list", async ({ page }) => {
+  await openCapture(page);
+  await input(page).fill("todo: update the store screenshots");
+  await expect(page.getByRole("tab", { name: "To-do", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(input(page)).toHaveValue("update the store screenshots");
+  await expect(page.getByRole("combobox", { name: "List" })).toHaveValue("1");
+  await page.getByRole("combobox", { name: "Who'll do it" }).selectOption("karen");
+  await page.getByRole("button", { name: "Add to-do" }).click();
+  await expect(page.getByRole("status")).toContainText("Added to Checkout launch, for KAREN");
+  expect(await lastCall(page, "save_todo")).toEqual({
+    input: { id: null, list_id: 1, title: "update the store screenshots", notes: "", agent_id: "karen", due: null },
+  });
+  await page.getByRole("button", { name: "Open", exact: true }).click();
+  expect(await lastCall(page, "open_capture_todo_list")).toEqual({ listId: 1 });
 });
 
 test("Esc hides without losing a draft, and shown refocuses it", async ({ page }) => {

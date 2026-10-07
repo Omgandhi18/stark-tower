@@ -201,6 +201,15 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
             handle_remind(app, &mut writer, &req);
             return;
         }
+        Some("continue") => {
+            handle_continue(app, &mut writer, &req);
+            return;
+        }
+        Some("delegations") => {
+            let by = actor_of(&req);
+            reply(&mut writer, serde_json::json!({ "result": describe_delegations(app, &crate::tasks::delegated_by(app, &by)) }));
+            return;
+        }
         Some("todo") => {
             let value = match crate::todos::tool(app, &actor_of(&req), &req) {
                 Ok(result) => serde_json::json!({ "result": result }),
@@ -276,9 +285,86 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
     );
     let _ = writer.flush();
 
-    let result = run_task_blocking(app, &by, &agent, &task, &cwd)
-        .unwrap_or_else(|e| format!("(delegation failed: {e})"));
-    complete_delegation(app, by.conversation, &agent, &task, &result);
+    let (task_id, outcome) = run_task_blocking(app, &by, &agent, &task, &cwd);
+    let result = outcome.unwrap_or_else(|e| format!("(delegation failed: {e})"));
+    // Named with its id, so a part that stopped can be picked back up rather than delegated again.
+    let label = match task_id {
+        Some(id) => format!("{} (task {id})", truncate(&task, 80)),
+        None => task,
+    };
+    complete_delegation(app, by.conversation, &agent, &label, &result);
+}
+
+/// The lead agent (or whoever delegated it) picks up a teammate's work that stopped: a delegated
+/// task carries on in its own conversation and its result comes back as delegation results; a
+/// chat's own task carries on in that chat.
+fn handle_continue(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_json::Value) {
+    let reply = |w: &mut UnixStream, v: serde_json::Value| {
+        let _ = w.write_all((v.to_string() + "\n").as_bytes());
+    };
+    let mut by = actor_of(req);
+    if by.agent.is_empty() {
+        by.agent = crate::delegation::orchestrator_id(app);
+    }
+    let id = req.get("taskId").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let note = req.get("note").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let Some(task) = app.state::<crate::AppState>().ledger.task(&id) else {
+        reply(writer, serde_json::json!({ "error": format!("There's no task \"{id}\". List what you delegated with `delegations`.") }));
+        return;
+    };
+    let name = crate::prompts::agent_name(app, &task.assignee);
+    if task.parent_id.is_none() {
+        // A chat's own task: it carries on in that chat, with the note as your message there.
+        let continued = crate::tasks::continue_chat(app, &by.agent, &task, &note);
+        let value = match continued {
+            Ok(()) => serde_json::json!({ "result": format!("{name} carries on with \"{}\" in their own chat.", task.title) }),
+            Err(error) => serde_json::json!({ "error": error }),
+        };
+        reply(writer, value);
+        return;
+    }
+    let (task, conversation) = match crate::tasks::continue_child(app, &by.agent, &id) {
+        Ok(found) => found,
+        Err(error) => {
+            reply(writer, serde_json::json!({ "error": error }));
+            return;
+        }
+    };
+    register_delegation(app, by.conversation);
+    reply(
+        writer,
+        serde_json::json!({ "result": format!(
+            "Picked {} back up on \"{}\", where they left off — running in the background. You'll receive the result as a \
+[DELEGATION RESULTS] follow-up; acknowledge briefly now and synthesize then.",
+            name.to_uppercase(),
+            task.title
+        ) }),
+    );
+    let _ = writer.flush();
+    let result = crate::chat::continue_task_blocking(app, &by.agent, &task, conversation, &note).unwrap_or_else(|e| format!("(it stopped again: {e})"));
+    complete_delegation(app, by.conversation, &task.assignee, &crate::tasks::delegation_label(&task), &result);
+}
+
+/// The work an agent delegated, as it reads it: each part's id, teammate, state and last word.
+fn describe_delegations(app: &tauri::AppHandle, tasks: &[crate::ledger::Task]) -> String {
+    if tasks.is_empty() {
+        return "You haven't delegated anything lately.".into();
+    }
+    let lines: Vec<String> = tasks
+        .iter()
+        .map(|t| {
+            let state = match t.status.as_str() {
+                "doing" | "todo" => "working",
+                "done" => "finished, ready for review",
+                "idle" => "finished",
+                "blocked" => "stopped before finishing",
+                other => other,
+            };
+            let last = t.detail.as_deref().map(|d| format!(" — {}", truncate(d, 140))).unwrap_or_default();
+            format!("- {} · {} · {state}: {}{last}", t.id, crate::prompts::agent_name(app, &t.assignee), t.title)
+        })
+        .collect();
+    format!("{}\n\nPick up one that stopped with `continue_task` and its id.", lines.join("\n"))
 }
 
 /// An agent uses the built-in browser. Screenshots come back as a JPEG for the

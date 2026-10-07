@@ -13,6 +13,7 @@ mod capture;
 mod delegation;
 mod devserver;
 mod engine;
+mod file_server;
 mod floor;
 mod gate;
 mod health;
@@ -167,7 +168,7 @@ fn bridge_socket_path(data_dir: &std::path::Path, private_tmp: &std::path::Path,
     }
 }
 
-fn gen_token() -> String {
+pub(crate) fn gen_token() -> String {
     let mut buf = [0u8; 16];
     let ok = std::fs::File::open("/dev/urandom")
         .and_then(|mut f| {
@@ -1537,6 +1538,30 @@ fn open_capture_task(
     capture::hide(&app)
 }
 
+/// The address the built-in browser opens one of Starkline's kept files at (a page an agent made).
+#[tauri::command]
+#[specta::specta]
+fn attachment_url(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    let path = std::path::PathBuf::from(&path);
+    if !attachments::is_kept(&attachments::root(&app), &path) {
+        return Err("Only files kept in a chat can be opened in the built-in browser.".into());
+    }
+    file_server::url_for(&path)
+}
+
+/// Open a to-do list in the main window from quick capture, and put quick capture away.
+#[tauri::command]
+#[specta::specta]
+fn open_capture_todo_list(app: tauri::AppHandle, state: tauri::State<AppState>, list_id: i64) -> Result<(), String> {
+    if state.ledger.todo_list(list_id).is_none() {
+        return Err("That list couldn't be found. Open To-dos to see your lists.".into());
+    }
+    lifecycle::show_main(&app);
+    app.emit_to("main", "capture://open-todo-list", list_id)
+        .map_err(|_| "The list couldn't be opened. Open it from To-dos.".to_string())?;
+    capture::hide(&app)
+}
+
 #[tauri::command]
 #[specta::specta]
 async fn studio_available() -> Result<(), String> {
@@ -1938,7 +1963,7 @@ reversible), and briefly say what you changed. If one is too vague to act on, sa
 
     std::thread::spawn(move || {
         // A run that fails or ends without a result fixed nothing: reopen the bugs.
-        let outcome = chat::run_task_blocking(&app, &runs::Actor::new(tasks::BY_DEVELOPER, None), &maintainer, &task, &repo);
+        let (_, outcome) = chat::run_task_blocking(&app, &runs::Actor::new(tasks::BY_DEVELOPER, None), &maintainer, &task, &repo);
         let fixed = matches!(&outcome, Ok(result) if !result.trim().is_empty());
         if let Some(state) = app.try_state::<AppState>() {
             for id in ids {
@@ -2416,6 +2441,8 @@ fn specta_builder() -> tauri_specta::Builder {
             resize_capture,
             remember_capture,
             open_capture_task,
+            open_capture_todo_list,
+            attachment_url,
             voice_status,
             download_voices,
             cancel_voice_download,

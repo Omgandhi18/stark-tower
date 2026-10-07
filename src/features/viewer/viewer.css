@@ -1,0 +1,114 @@
+/* Something to look at, filling the window: a thin bar over a stage. */
+.viewer {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  max-width: none;
+  height: 100vh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--surface-app);
+  color: var(--text);
+}
+
+.viewer[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.viewer::backdrop {
+  background: var(--surface-app);
+}
+
+.viewer-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex: none;
+  min-height: 52px;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--topbar-surface);
+}
+
+.viewer-heading {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  line-height: var(--leading-tight);
+}
+
+.viewer-title {
+  overflow: hidden;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-subtitle {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+}
+
+.viewer-stage {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* A page or PDF takes the whole stage. */
+.viewer-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #ffffff;
+}
+
+.viewer-image {
+  max-width: 100%;
+  max-height: 100%;
+  margin: auto;
+  object-fit: contain;
+}
+
+.viewer-video {
+  max-width: 100%;
+  max-height: 100%;
+  margin: auto;
+  background: #000000;
+}
+
+/* A document reads at a comfortable measure in the middle. */
+.viewer-document {
+  width: 100%;
+  max-width: 820px;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-6) var(--space-10);
+}
+
+.viewer-text {
+  width: 100%;
+  margin: 0;
+  padding: var(--space-6);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.viewer-error {
+  margin: auto;
+  color: var(--state-danger);
+}

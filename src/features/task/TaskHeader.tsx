@@ -76,8 +76,10 @@ export default function TaskHeader({ detail, owner, chat, requester, state, now 
       onSelect: () => void revealItemInDir(task.cwd).catch(report("show the folder")),
     });
   }
-  if (task.status === "blocked" && task.conversation_id !== null && !task.parent_id) {
-    items.push({ id: "resume", label: "Continue where it left off", icon: Play, onSelect: () => void resumeTask(task.id).catch(report("continue the task")) });
+  if (task.status === "blocked" && task.conversation_id !== null) {
+    // Delegated work carries on in its own conversation, and its result still goes to whoever delegated it.
+    const label = task.parent_id ? `Pick it back up (the result goes to ${requester})` : "Continue where it left off";
+    items.push({ id: "resume", label, icon: Play, onSelect: () => void resumeTask(task.id).catch(report("continue the task")) });
   }
   // A finished task is marked reviewed (below); anything else still open can be closed.
   if (!["closed", "reviewed", "done"].includes(task.status)) {

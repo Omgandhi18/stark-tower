@@ -6,10 +6,15 @@ describe("capture text", () => {
   it("switches modes and strips only the leading whole phrase", () => {
     expect(captureText("REMIND ME to stretch", "task")).toEqual({ mode: "reminder", text: "to stretch" });
     expect(captureText("remind me", "task")).toEqual({ mode: "reminder", text: "" });
+    expect(captureText("todo: buy the domain", "task")).toEqual({ mode: "todo", text: "buy the domain" });
+    expect(captureText("To-do update the store screenshots", "task")).toEqual({ mode: "todo", text: "update the store screenshots" });
+    for (const text of ["todos are broken on the cart", "todo-list app is slow"]) expect(captureText(text, "task")).toEqual({ mode: "task", text });
     for (const text of ["remind melon", "write remind me in the docs", "remind meander"]) {
       expect(captureText(text, "task")).toEqual({ mode: "task", text });
     }
-    expect(toggleMode(toggleMode("task"))).toBe("task");
+    expect(toggleMode("task")).toBe("reminder");
+    expect(toggleMode("reminder")).toBe("todo");
+    expect(toggleMode(toggleMode(toggleMode("task")))).toBe("task");
   });
   it("detects and removes trailing quick times, leaving other prose alone", () => {
     for (const [phrase, choice] of [

@@ -112,6 +112,33 @@ test("adds and ticks off to-dos for the developer, as the agent running it", asy
   }
 });
 
+test("the lead picks a teammate's stopped work back up by its task id", async () => {
+  const app = await fakeApp(() => ({ result: "Picked KAREN back up on \"Slice 2c\"." }));
+  try {
+    const child = spawn(process.execPath, [SCRIPT], {
+      env: { ...process.env, STARK_DELEGATE_SOCK: app.sock, STARK_AGENT_ID: "jarvis", STARK_ROLE: "orchestrator", STARK_DELEGATE_TOKEN: TOKEN, STARK_CONVERSATION_ID: "20" },
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    const lines = readline.createInterface({ input: child.stdout });
+    const reply = new Promise((resolve) =>
+      lines.on("line", (line) => {
+        const message = JSON.parse(line);
+        if (message.id === 2) {
+          child.kill();
+          resolve(message.result);
+        }
+      }),
+    );
+    // The roster comes first (the delegate tool lists teammates); answer it too.
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "continue_task", arguments: { task_id: "task-9", note: "Use the new token names." } } }) + "\n");
+    const result = await reply;
+    assert.match(result.content[0].text, /Picked KAREN back up/);
+    assert.deepEqual(app.requests.find((r) => r.type === "continue"), { type: "continue", agentId: "jarvis", taskId: "task-9", note: "Use the new token names.", conversationId: 20, token: TOKEN });
+  } finally {
+    app.close();
+  }
+});
+
 test("denies when the app can't be reached", async () => {
   const result = await callTool(join(tmpdir(), "no-such-starkline.sock"), "approve", { tool_name: "Bash", input: { command: "npm test" } });
   assert.equal(JSON.parse(result.content[0].text).behavior, "deny");

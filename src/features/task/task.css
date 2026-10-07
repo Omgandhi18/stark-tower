@@ -942,38 +942,66 @@ button.execution-task:hover {
 
 /* Six tabs share a narrow panel, so they sit close. The tools keep to the end of the row and never
    hide: on a small window the status tabs' labels shorten first (and the row scrolls only past that). */
-.task-rail-inner > .tabs {
+/* The tabs, and (while a tool shows) the button that lets it fill the page, over one rule. */
+.task-rail-bar {
+  display: flex;
+  align-items: stretch;
   flex: none;
+  min-width: 0;
+  box-shadow: inset 0 -1px 0 var(--border-subtle);
+}
+
+.task-rail-expand {
+  align-self: center;
+  flex: none;
+  margin-right: var(--space-1);
+}
+
+.task-rail-bar > .tabs {
+  flex: 1;
+  min-width: 0;
   gap: 0;
   padding: 0 var(--space-1);
   overflow-x: auto;
   scrollbar-width: none;
 }
 
-.task-rail-inner > .tabs > .tab {
+/* A tool filling the task page: the left column and the chat step aside, the header stays. */
+.task-screen.is-tool-expanded :is(.task-left, .task-center) {
+  display: none;
+}
+
+.task-screen.is-tool-expanded .task-rail {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  border-left: 0;
+}
+
+.task-rail-bar > .tabs > .tab {
   flex: 0 1 auto;
   min-width: 0;
   gap: 4px;
   padding: 0 var(--space-2);
 }
 
-.task-rail-inner > .tabs .tab-label {
+.task-rail-bar > .tabs .tab-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.task-rail-inner > .tabs .count-badge {
+.task-rail-bar > .tabs .count-badge {
   flex: none;
 }
 
-.task-rail-inner > .tabs > .tab.is-icon-only {
+.task-rail-bar > .tabs > .tab.is-icon-only {
   flex: none;
   padding: 0 6px;
 }
 
-.task-rail-inner > .tabs > .tab:not(.is-icon-only) + .tab.is-icon-only {
+.task-rail-bar > .tabs > .tab:not(.is-icon-only) + .tab.is-icon-only {
   margin-left: auto;
 }
 

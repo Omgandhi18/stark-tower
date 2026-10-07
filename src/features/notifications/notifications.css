@@ -452,6 +452,17 @@
   font-size: var(--text-sm);
 }
 
+.review-mockup-wrap {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 100%;
+}
+
+.review-mockup-bar {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .review-mockup {
   width: 100%;
   height: min(70vh, 720px);

@@ -434,6 +434,18 @@ function install(scenario: Scenario) {
       }
       return commitConfig();
     },
+    resume_task: (args) => {
+      const task = state.tasks.find((t) => t.id === args.id);
+      if (!task) throw "That task doesn't exist.";
+      Object.assign(task, { status: "doing", detail: null, updated: Date.now() });
+      emit("tasks://changed", null);
+      return null;
+    },
+    attachment_url: (args) => `http://127.0.0.1:5199/tok/${String(args.path).split("/").pop()}`,
+    open_capture_todo_list: (args) => {
+      emit("capture://open-todo-list", args.listId);
+      return null;
+    },
     open_capture_task: (args) => {
       if (!state.tasks.some((task) => task.id === args.id)) throw "That task couldn't be found. Open Work to see your tasks.";
       state.openedCaptureTask = String(args.id);

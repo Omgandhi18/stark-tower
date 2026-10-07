@@ -1,12 +1,21 @@
 import { whenChoices } from "../reminders/reminderModel";
 
-export type CaptureMode = "task" | "reminder";
-export const toggleMode = (mode: CaptureMode): CaptureMode => (mode === "task" ? "reminder" : "task");
+export type CaptureMode = "task" | "reminder" | "todo";
 
-/** A whole leading phrase switches modes; words such as “remind melon” stay tasks. */
+/** The modes in their tab order; Tab moves to the next. */
+export const CAPTURE_MODES: readonly CaptureMode[] = ["task", "reminder", "todo"];
+export const toggleMode = (mode: CaptureMode): CaptureMode => CAPTURE_MODES[(CAPTURE_MODES.indexOf(mode) + 1) % CAPTURE_MODES.length];
+
+/** Leading phrases that switch modes, as whole words: “remind melon” and “todos are broken” stay tasks. */
+const PREFIXES: ReadonlyArray<{ pattern: RegExp; mode: CaptureMode }> = [
+  { pattern: /^\s*remind me(?:\s+|$)/i, mode: "reminder" },
+  { pattern: /^\s*to-?do(?::\s*|\s+|$)/i, mode: "todo" },
+];
+
+/** A whole leading phrase switches modes, and is taken off the text. */
 export function captureText(text: string, mode: CaptureMode): { text: string; mode: CaptureMode } {
-  const prefix = /^\s*remind me(?:\s+|$)/i;
-  return prefix.test(text) ? { text: text.replace(prefix, ""), mode: "reminder" } : { text, mode };
+  const found = PREFIXES.find((p) => p.pattern.test(text));
+  return found ? { text: text.replace(found.pattern, ""), mode: found.mode } : { text, mode };
 }
 
 /** Match the same quick times as the reminder composer, at the end of the message. */

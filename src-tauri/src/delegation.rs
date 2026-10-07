@@ -108,6 +108,10 @@ something is genuinely incomplete.\n\n",
             result
         ));
     }
+    body.push_str(
+        "A part that stopped before finishing can be picked back up where it left off with `continue_task` and its \
+task id; don't delegate it again from scratch.",
+    );
     // If the orchestrator's chat isn't live to synthesize, don't lose the work — post
     // it in that chat and log it instead of dropping it silently.
     if !inject_to_orchestrator(app, conversation, &body) {

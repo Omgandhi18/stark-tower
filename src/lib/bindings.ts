@@ -1176,6 +1176,28 @@ async openCaptureTask(id: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Open a to-do list in the main window from quick capture, and put quick capture away.
+ */
+async openCaptureTodoList(listId: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_capture_todo_list", { listId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The address the built-in browser opens one of Starkline's kept files at (a page an agent made).
+ */
+async attachmentUrl(path: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("attachment_url", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Whether the voices are downloaded (or downloading), and who is speaking.
  */
 async voiceStatus() : Promise<VoiceStatus> {

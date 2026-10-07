@@ -11,3 +11,13 @@ export async function toggleFullscreen(element: HTMLElement): Promise<void> {
   if (document.fullscreenElement) await document.exitFullscreen();
   else await element.requestFullscreen();
 }
+
+/** Put the native window (in a browser preview, the element) into full screen, or take it out. */
+export async function setFullscreen(element: HTMLElement, on: boolean): Promise<void> {
+  if (IS_TAURI) {
+    await getCurrentWindow().setFullscreen(on);
+    return;
+  }
+  if (on && !document.fullscreenElement) await element.requestFullscreen();
+  else if (!on && document.fullscreenElement) await document.exitFullscreen();
+}

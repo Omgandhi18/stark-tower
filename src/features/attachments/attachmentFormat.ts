@@ -73,3 +73,6 @@ export function toBase64(file: Blob): Promise<string> {
     reader.readAsDataURL(file);
   });
 }
+
+/** Kinds that read better filling the window. */
+export const VIEWABLE: readonly AttachmentKind[] = ["image", "video", "pdf", "html", "markdown", "text"];

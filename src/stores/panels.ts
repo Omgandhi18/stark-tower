@@ -20,6 +20,9 @@ interface PanelsState {
   collapsed: Collapsed;
   setCollapsed: (panel: PanelId, collapsed: boolean) => void;
   toggle: (panel: PanelId) => void;
+  /** The tool in a task's side panel (terminal, browser, simulator) fills the task page. */
+  toolExpanded: boolean;
+  setToolExpanded: (expanded: boolean) => void;
 }
 
 export const usePanels = create<PanelsState>((set, get) => {
@@ -33,6 +36,8 @@ export const usePanels = create<PanelsState>((set, get) => {
   };
   return {
     collapsed: saved(),
+    toolExpanded: false,
+    setToolExpanded: (toolExpanded) => set({ toolExpanded }),
     setCollapsed: (panel, value) => apply({ ...get().collapsed, [panel]: value }),
     toggle: (panel) => apply({ ...get().collapsed, [panel]: !get().collapsed[panel] }),
   };

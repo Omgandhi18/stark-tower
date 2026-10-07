@@ -1,46 +1,32 @@
 // Files in the transcript: what the developer attached, and what agents made or
 // shared. Each kind previews in place; every file can be opened in its own app or
 // shown in Finder.
-import { useEffect, useState } from "react";
-import { ExternalLink, FolderOpen, Maximize2 } from "lucide-react";
-import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { Button, Dialog, Markdown, ICON_SIZE, ICON_STROKE, cx } from "../../design";
-import { readAttachmentText } from "../../lib/api";
-import { errorMessage } from "../../lib/errors";
+import { useState } from "react";
+import { Maximize2 } from "lucide-react";
+import { Button, Markdown, ICON_SIZE, ICON_STROKE, cx } from "../../design";
 import type { Attachment } from "../../lib/types";
-import { formatSize, KIND_ICON, KIND_LABEL, sandboxedHtml } from "./attachmentFormat";
+import FileButtons from "./FileButtons";
+import FileViewer from "./FileViewer";
+import { formatSize, KIND_ICON, KIND_LABEL, sandboxedHtml, VIEWABLE } from "./attachmentFormat";
 import { fileUrl } from "./fileUrl";
+import { useFileText } from "./useFileText";
 import "./attachments.css";
 
 /** Text previews show this many lines until expanded. */
 const TEXT_PREVIEW_LINES = 40;
 
-const report = (what: string) => (e: unknown) => console.error(`[attachments] couldn't ${what}`, e);
-
-/** The start of a kept text, Markdown or HTML file. */
-function useFileText(path: string) {
-  const [state, setState] = useState<{ path: string; text: string | null; error: string | null }>({ path, text: null, error: null });
-  useEffect(() => {
-    let current = true;
-    readAttachmentText(path)
-      .then((text) => current && setState({ path, text, error: null }))
-      .catch((e) => current && setState({ path, text: null, error: errorMessage(e, "The file couldn't be read.") }));
-    return () => {
-      current = false;
-    };
-  }, [path]);
-  return state.path === path ? state : { path, text: null, error: null };
-}
-
+/** Open the file elsewhere, or (for what reads better big) fill the window with it. */
 function FileActions({ file }: { file: Attachment }) {
+  const [viewing, setViewing] = useState(false);
   return (
     <span className="attachment-actions">
-      <Button size="sm" variant="ghost" icon={ExternalLink} onClick={() => void openPath(file.path).catch(report("open the file"))}>
-        {file.kind === "html" ? "Open in browser" : "Open"}
-      </Button>
-      <Button size="sm" variant="ghost" icon={FolderOpen} onClick={() => void revealItemInDir(file.path).catch(report("show the file"))}>
-        Show in Finder
-      </Button>
+      {VIEWABLE.includes(file.kind) && (
+        <Button size="sm" variant="ghost" icon={Maximize2} onClick={() => setViewing(true)}>
+          Full screen
+        </Button>
+      )}
+      <FileButtons file={file} />
+      {viewing && <FileViewer file={file} open onClose={() => setViewing(false)} />}
     </span>
   );
 }
@@ -65,6 +51,7 @@ function FileHeader({ file }: { file: Attachment }) {
 
 function ImageView({ file, compact }: { file: Attachment; compact: boolean }) {
   const [open, setOpen] = useState(false);
+  // A thumbnail opens full screen; a card's picture too.
   return (
     <figure className={cx("attachment-image", compact ? "is-compact" : "attachment-card")}>
       {!compact && <FileHeader file={file} />}
@@ -74,21 +61,7 @@ function ImageView({ file, compact }: { file: Attachment; compact: boolean }) {
           <Maximize2 size={ICON_SIZE.sm} strokeWidth={ICON_STROKE} />
         </span>
       </button>
-      <Dialog
-        open={open}
-        onClose={() => setOpen(false)}
-        size="lg"
-        title={file.name}
-        description={`${KIND_LABEL[file.kind]} · ${formatSize(file.size)}`}
-        actions={
-          <>
-            <FileActions file={file} />
-            <Button onClick={() => setOpen(false)}>Close</Button>
-          </>
-        }
-      >
-        <img className="attachment-lightbox" src={fileUrl(file.path)} alt={file.name} />
-      </Dialog>
+      {open && <FileViewer file={file} open onClose={() => setOpen(false)} />}
     </figure>
   );
 }

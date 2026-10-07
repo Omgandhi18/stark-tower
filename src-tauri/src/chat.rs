@@ -808,13 +808,12 @@ fn summarize_tool(name: &str, input: &serde_json::Value) -> String {
 // vocabulary (Bash, Edit, Write, Read, TodoWrite, ...), so the transcript, the
 // task engine and the loop guard behave the same whichever provider runs.
 
-/// The session is ready. A persistent session's id is stored so the chat resumes.
+/// The session is ready. Its id is stored with the conversation, so a chat resumes, and so
+/// does delegated work that stopped and is picked back up.
 pub(crate) fn session_ready(app: &tauri::AppHandle, agent_id: &str, sink: &Sink, session_id: Option<&str>, cwd: Option<String>) {
-    if sink.persistent {
-        if let (Some(c), Some(sid), Some(conv)) = (cwd.as_deref(), session_id, sink.conversation_for(app, agent_id)) {
-            if let Some(state) = app.try_state::<crate::AppState>() {
-                state.ledger.set_conversation_session(conv, sid, c);
-            }
+    if let (Some(c), Some(sid), Some(conv)) = (cwd.as_deref(), session_id, sink.conversation_for(app, agent_id)) {
+        if let Some(state) = app.try_state::<crate::AppState>() {
+            state.ledger.set_conversation_session(conv, sid, c);
         }
     }
     emit(
@@ -1313,7 +1312,8 @@ pub fn sessions_of(app: &tauri::AppHandle, agent_id: &str) -> Vec<i64> {
 // ---- Delegation bridge -----------------------------------------------------
 
 /// Run a one-shot task on a worker to completion, streaming its activity to the
-/// UI (so it's visible on the floor + its chat tab), and return the result text.
+/// UI (so it's visible on the floor + its chat tab), and return the delegated task's id
+/// (when it could be recorded) and the result text.
 /// The task card always closes: done with the result, or blocked with the reason.
 pub fn run_task_blocking(
     app: &tauri::AppHandle,
@@ -1321,11 +1321,11 @@ pub fn run_task_blocking(
     agent_id: &str,
     task: &str,
     cwd: &str,
-) -> Result<String, String> {
+) -> (Option<String>, Result<String, String>) {
     let from = by.agent.as_str();
     // The delegation becomes a child of the delegating chat's task, in its own conversation.
     let Some((child, conversation)) = crate::tasks::begin_child(app, by, agent_id, task, cwd) else {
-        return Err("The delegated task couldn't be recorded.".into());
+        return (None, Err("The delegated task couldn't be recorded.".into()));
     };
     let cwd = child.cwd.as_str();
     let sink = Sink::task(conversation, child.id.clone());
@@ -1343,20 +1343,49 @@ pub fn run_task_blocking(
 
     let context = crate::prompts::workspace_context(app, agent_id, cwd);
     let request = if context.is_empty() { task.to_string() } else { format!("{context}\n\n{task}") };
-    let outcome = run_worker(app, agent_id, &request, cwd, &sink);
-    // A task you stopped tells whoever delegated it so, not whatever the worker had said by then.
-    let outcome = if crate::tasks::end_child(app, &child.id, agent_id, &outcome) { Err(crate::tasks::STOPPED_BY_YOU.to_string()) } else { outcome };
+    let outcome = run_worker(app, agent_id, &request, cwd, &sink, None);
+    (Some(child.id.clone()), settle_worker(app, &child.id, agent_id, conversation, task, outcome))
+}
+
+/// A worker's run ended: its task closes (a task you stopped tells whoever delegated it so, not
+/// whatever the worker had said by then), and its run with it.
+fn settle_worker(app: &tauri::AppHandle, task_id: &str, agent_id: &str, conversation: i64, label: &str, outcome: Result<String, String>) -> Result<String, String> {
+    let outcome = if crate::tasks::end_child(app, task_id, agent_id, &outcome) { Err(crate::tasks::STOPPED_BY_YOU.to_string()) } else { outcome };
     let status = if matches!(&outcome, Ok(r) if !r.trim().is_empty()) { "done" } else { "blocked" };
-    floor_log(app, agent_id, &format!("task-{status}"), &truncate(task, 80));
+    floor_log(app, agent_id, &format!("task-{status}"), &truncate(label, 80));
     runs::ended(app, conversation);
     outcome
 }
 
-/// Spawn a one-shot worker for `task` in `cwd` and wait for its final result.
-fn run_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, cwd: &str, sink: &Sink) -> Result<String, String> {
+/// Pick a delegated task that stopped back up, in its own conversation: the same teammate
+/// carries on with `note` (or "continue where you left off"), resuming its earlier session where
+/// its provider keeps one, else told what it was asked. Returns the result text.
+pub fn continue_task_blocking(app: &tauri::AppHandle, by: &str, task: &crate::ledger::Task, conversation: i64, note: &str) -> Result<String, String> {
+    let agent_id = task.assignee.as_str();
+    let cwd = task.cwd.as_str();
+    let sink = Sink::task(conversation, task.id.clone());
+    let request = if note.trim().is_empty() { "Please continue where you left off." } else { note.trim() };
+    note_in(app, &sink, agent_id, &format!("{} picked this back up", crate::tasks::requester_name(app, by)));
+    record_in(app, &sink, agent_id, "user", "user", Some(request), None, None);
+    floor_log(app, agent_id, "task-doing", &truncate(&task.title, 80));
+    runs::started(app, agent_id, conversation, cwd, AgentStatus::Thinking);
+    let resumable = crate::prompts::agent_engine(app, agent_id).kind == "claude-code";
+    let resume = app.try_state::<crate::AppState>().and_then(|s| s.ledger.conversation_session(conversation)).filter(|_| resumable);
+    let prompt = if resume.is_some() {
+        request.to_string()
+    } else {
+        let context = crate::prompts::workspace_context(app, agent_id, cwd);
+        format!("{context}\n\nYou were asked this earlier and stopped before finishing:\n\n{}\n\n{request}", task.prompt).trim_start().to_string()
+    };
+    let outcome = run_worker(app, agent_id, &prompt, cwd, &sink, resume);
+    settle_worker(app, &task.id, agent_id, conversation, &task.title, outcome)
+}
+
+/// Spawn a one-shot worker for `task` in `cwd` (continuing a saved session, if given) and wait for its final result.
+fn run_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, cwd: &str, sink: &Sink, resume: Option<String>) -> Result<String, String> {
     // Delegated workers also get their skill kit + the ask_human bridge, so
     // their review gates work even when JARVIS delegated the task.
-    let launch = launch_for(app, agent_id, sink.conversation, cwd, None)?;
+    let launch = launch_for(app, agent_id, sink.conversation, cwd, resume)?;
     crate::outputs::started(&sink.actor(agent_id).key(), sink, cwd);
     match launch.engine.kind.as_str() {
         "codex" => return crate::codex::run_once(app, &launch, task, sink),
