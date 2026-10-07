@@ -184,6 +184,7 @@
 .tab:hover { color: var(--text); }
 .tab.is-selected { color: var(--text); border-bottom-color: var(--accent); }
 .tab:focus-visible { outline-offset: -2px; }
+.tab.is-icon-only { position: relative; }
 
 /* ---- Fields ---------------------------------------------------------------------- */
 .field { display: grid; align-content: start; gap: 6px; min-width: 0; }

@@ -43,8 +43,31 @@ pub struct TaskEngine {
 // ---- Pure helpers ------------------------------------------------------------
 
 /// A task's title: the first line of what was asked, kept short.
+/// Labels a request may open with, alone on a line or before the words ("Task: …").
+const TITLE_LABELS: [&str; 8] = ["objective", "task", "goal", "context", "request", "summary", "title", "todo"];
+
+/// What a line of a request says, without a heading's marks or a leading label;
+/// empty when it's only a heading ("OBJECTIVE", "## Goal").
+fn title_words(line: &str) -> &str {
+    let line = line.trim().trim_start_matches('#').trim();
+    if let Some((label, rest)) = line.split_once(':') {
+        if TITLE_LABELS.contains(&label.trim().to_lowercase().as_str()) {
+            return rest.trim();
+        }
+    }
+    let letters = line.chars().filter(|c| c.is_alphabetic());
+    let shouted = letters.clone().count() > 0 && letters.clone().all(char::is_uppercase) && line.split_whitespace().count() <= 2;
+    if shouted || TITLE_LABELS.contains(&line.to_lowercase().as_str()) {
+        ""
+    } else {
+        line
+    }
+}
+
+/// A task's title: the first line of its request that says something.
 pub fn title_from(prompt: &str) -> String {
-    let line = prompt.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("Untitled task");
+    let first = prompt.lines().map(str::trim).find(|l| !l.is_empty());
+    let line = prompt.lines().map(title_words).find(|l| !l.is_empty()).or(first).unwrap_or("Untitled task");
     if line.chars().count() <= TITLE_LIMIT {
         line.to_string()
     } else {
@@ -844,6 +867,13 @@ mod tests {
     fn titles_come_from_the_first_line() {
         assert_eq!(title_from("\n  Fix the login bug\nIt fails on Safari"), "Fix the login bug");
         assert_eq!(title_from("   "), "Untitled task");
+        assert_eq!(title_from("OBJECTIVE\nMerge production into the Expo branch."), "Merge production into the Expo branch.");
+        assert_eq!(title_from("## Goal\n\nShip the refunds feature"), "Ship the refunds feature");
+        assert_eq!(title_from("Task: Fix the login page"), "Fix the login page");
+        assert_eq!(title_from("CONTEXT:\nThe app crashes on launch"), "The app crashes on launch");
+        assert_eq!(title_from("Standup at 10:30, then https://example.com"), "Standup at 10:30, then https://example.com");
+        assert_eq!(title_from("Fix: the button overlaps"), "Fix: the button overlaps", "only known labels are dropped");
+        assert_eq!(title_from("LGTM"), "LGTM", "a request that's only a heading keeps it");
         let long = "a".repeat(200);
         let title = title_from(&long);
         assert_eq!(title.chars().count(), TITLE_LIMIT);

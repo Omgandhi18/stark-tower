@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { PanelBottomClose, Plus, SquareTerminal, X } from "lucide-react";
-import { Button, Dialog, EmptyState, IconButton, InlineCode, Tabs } from "../../design";
+import { PanelBottom, PanelBottomClose, PanelRight, PanelRightClose, Plus, SquareTerminal, X } from "lucide-react";
+import { Button, Dialog, EmptyState, IconButton, InlineCode, Tabs, cx } from "../../design";
 import type { TerminalInfo } from "../../lib/bindings";
-import { useTerminal } from "../../stores/terminal";
+import { useTerminal, type TerminalPlace } from "../../stores/terminal";
 import { clampHeight, MIN_HEIGHT, terminalLabel } from "./terminalModel";
 import { disposeTerminal, getTerminalRuntime } from "./terminalRuntime";
 import "@xterm/xterm/css/xterm.css";
@@ -31,8 +31,21 @@ function TerminalView({ id }: { id: string }) {
   return <div ref={ref} className="terminal-host" />;
 }
 
-export default function TerminalDrawer({ folder, active = true }: { folder: string; active?: boolean }) {
+interface TerminalDrawerProps {
+  folder: string;
+  /** Its screen is the one showing: only one place draws a shell at a time. */
+  active?: boolean;
+  /** Where this one sits: under the screen's main column, or in its side panel. */
+  dock?: TerminalPlace;
+  /** The screen has both places, so the terminal can move between them. */
+  movable?: boolean;
+}
+
+/** The developer's terminals: their tabs and the selected shell, under a conversation or task, or in a task's side panel. */
+export default function TerminalDrawer({ folder, active = true, dock = "bottom", movable = false }: TerminalDrawerProps) {
   const state = useTerminal();
+  const side = dock === "side";
+  const shown = state.open && (side ? state.place === "side" : !movable || state.place === "bottom");
   const ref = useRef<HTMLElement>(null);
   const prefix = useId();
   const [closing, setClosing] = useState<TerminalInfo | null>(null);
@@ -43,11 +56,11 @@ export default function TerminalDrawer({ folder, active = true }: { folder: stri
   const height = clampHeight(state.height, maxHeight / 0.7);
 
   useEffect(() => {
-    if (!state.open || !active) return;
+    if (!shown || !active) return;
     void useTerminal.getState().refresh().catch(() => {
       useTerminal.getState().report("Couldn't find your terminals. Try opening the drawer again.");
     });
-  }, [state.open, active]);
+  }, [shown, active]);
 
   useEffect(() => {
     const column = ref.current?.parentElement;
@@ -57,7 +70,7 @@ export default function TerminalDrawer({ folder, active = true }: { folder: stri
     });
     observer.observe(column);
     return () => observer.disconnect();
-  }, [state.open]);
+  }, [shown]);
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -95,7 +108,9 @@ export default function TerminalDrawer({ folder, active = true }: { folder: stri
     if (event.key !== "Escape" || closing) return;
     event.preventDefault();
     const column = ref.current?.parentElement;
-    const inputs = column?.querySelectorAll<HTMLTextAreaElement>("textarea.chat-input") ?? [];
+    // Beside a task, the message box is in the task's middle column.
+    const around = side ? column?.closest(".task-screen") : column;
+    const inputs = around?.querySelectorAll<HTMLTextAreaElement>("textarea.chat-input") ?? [];
     const composer = [...inputs].find((input) => !input.closest("[inert]"));
     if (composer) composer.focus();
     else column?.closest(".task-screen")?.querySelector<HTMLButtonElement>('button[aria-label="Terminal"]')?.focus();
@@ -116,23 +131,25 @@ export default function TerminalDrawer({ folder, active = true }: { folder: stri
     state.setHeight(clampHeight(ref.current.getBoundingClientRect().bottom - event.clientY, maxHeight / 0.7));
   };
 
-  if (!state.open) return null;
+  if (!shown) return null;
   return (
-    <section ref={ref} className="terminal-drawer" aria-label="Terminal" style={{ height }} onKeyDown={focusComposer}>
-      <div
-        role="separator"
-        aria-label="Resize terminal"
-        aria-orientation="horizontal"
-        tabIndex={0}
-        aria-valuemin={MIN_HEIGHT}
-        aria-valuemax={Math.round(maxHeight)}
-        aria-valuenow={Math.round(height)}
-        className="terminal-resize"
-        onKeyDown={resizeWithKeys}
-        onPointerDown={(event) => event.currentTarget.setPointerCapture(event.pointerId)}
-        onPointerMove={resizeWithPointer}
-        onPointerUp={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
-      />
+    <section ref={ref} className={cx("terminal-drawer", side && "is-side")} aria-label="Terminal" style={side ? undefined : { height }} onKeyDown={focusComposer}>
+      {!side && (
+        <div
+          role="separator"
+          aria-label="Resize terminal"
+          aria-orientation="horizontal"
+          tabIndex={0}
+          aria-valuemin={MIN_HEIGHT}
+          aria-valuemax={Math.round(maxHeight)}
+          aria-valuenow={Math.round(height)}
+          className="terminal-resize"
+          onKeyDown={resizeWithKeys}
+          onPointerDown={(event) => event.currentTarget.setPointerCapture(event.pointerId)}
+          onPointerMove={resizeWithPointer}
+          onPointerUp={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
+        />
+      )}
       <div className="terminal-toolbar">
         <Tabs
           label="Terminals"
@@ -143,7 +160,12 @@ export default function TerminalDrawer({ folder, active = true }: { folder: stri
         />
         <IconButton icon={Plus} label="Open new terminal" disabled={busy} onClick={() => void run(() => state.add(folder))} />
         {selected && <IconButton icon={X} label="Close terminal tab" disabled={busy} onClick={() => void requestClose()} />}
-        <IconButton icon={PanelBottomClose} label="Hide terminal" onClick={state.toggle} />
+        {side ? (
+          <IconButton icon={PanelBottom} label="Move terminal to the bottom" onClick={() => state.moveTo("bottom")} />
+        ) : (
+          movable && <IconButton icon={PanelRight} label="Move terminal to the side panel" onClick={() => state.moveTo("side")} />
+        )}
+        <IconButton icon={side ? PanelRightClose : PanelBottomClose} label="Hide terminal" onClick={state.toggle} />
       </div>
       {state.error && <p className="terminal-note" role="alert">{state.error}</p>}
       {selected ? (
@@ -161,7 +183,7 @@ export default function TerminalDrawer({ folder, active = true }: { folder: stri
         <EmptyState
           icon={SquareTerminal}
           title="Open a terminal in this folder"
-          body="Your shell stays running when you switch chats or hide the drawer."
+          body={`Your shell stays running when you switch chats or hide the ${side ? "terminal" : "drawer"}.`}
           action={<Button disabled={busy} onClick={() => void run(() => state.add(folder))}>Open terminal</Button>}
         />
       )}

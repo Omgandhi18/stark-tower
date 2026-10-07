@@ -16,6 +16,7 @@ import { useWorkspace } from "../../stores/workspace";
 import { engineLabel } from "../agents/display";
 import { startNewChat } from "./chatActions";
 import ContextButton from "../context/ContextButton";
+import MemoryButton from "../agents/MemoryButton";
 import { folderOptions } from "./folders";
 
 /** Who you're talking to, where they work, and a fresh start. */
@@ -87,6 +88,7 @@ export default function ConversationHeader({ agent }: { agent: Agent }) {
           className="conversation-folder"
         />
         <ContextButton agentId={agent.id} name={agent.name} folder={folder} />
+        <MemoryButton agentId={agent.id} name={agent.name} />
         <Button icon={MessageSquarePlus} disabled={starting} onClick={newChat}>
           New chat
         </Button>

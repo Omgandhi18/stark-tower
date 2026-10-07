@@ -223,7 +223,10 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
         return;
     }
 
-    let from = req.get("agentId").and_then(|a| a.as_str()).unwrap_or("");
+    // Only the orchestrator has the delegate tool; bridge scripts from before
+    // delegations named their sender didn't say who it was.
+    let from = req.get("agentId").and_then(|a| a.as_str()).filter(|a| !a.is_empty()).map(str::to_string).unwrap_or_else(|| crate::delegation::orchestrator_id(app));
+    let from = from.as_str();
     let cwd = dir.unwrap_or_else(|| {
         let state = app.state::<crate::AppState>();
         let wd = state.workdirs.lock().unwrap().get(from).cloned();

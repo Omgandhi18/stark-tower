@@ -8,7 +8,10 @@ import Composer from "./Composer";
 import WorkBoard from "./WorkBoard";
 import "./work.css";
 
-/** Work in the middle (for the project chosen in the sidebar), what needs you on the right. Files dropped on it go with the next request. */
+/**
+ * Work in the middle (for the project chosen in the sidebar) with the request box under it,
+ * what needs you on the right. Files dropped on it go with the next request.
+ */
 export default function WorkScreen() {
   const project = useNavigation((s) => s.workProject);
   const [attached, setAttached] = useState<Attachment[]>([]);
@@ -18,8 +21,8 @@ export default function WorkScreen() {
     <div className="work-screen">
       <FileDropZone draft={attachments} className="work-canvas" hint="Drop files to attach them to your request">
         <section className="work-canvas-body" aria-label="Work">
-          <Composer project={project} attachments={attachments} />
           <WorkBoard project={project} />
+          <Composer project={project} attachments={attachments} />
         </section>
       </FileDropZone>
       <AttentionRail />

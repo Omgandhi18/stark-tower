@@ -94,9 +94,9 @@ export default function TaskScreen() {
             {tab === "files" && <ChangesList taskId={task.id} changes={detail.changes} cwd={task.cwd} />}
             {tab === "activity" && <ActivityList events={detail.events} agents={agents} now={now} />}
           </div>
-          <TerminalDrawer folder={task.cwd} active={route === "task"} />
+          <TerminalDrawer folder={task.cwd} active={route === "task"} movable />
         </section>
-        <TaskSideRail taskId={task.id} conversationId={task.conversation_id} reviews={reviews} changes={detail.changes} checks={detail.checks} now={now} onShowFiles={() => setTab("files")} />
+        <TaskSideRail taskId={task.id} folder={task.cwd} active={route === "task"} conversationId={task.conversation_id} reviews={reviews} changes={detail.changes} checks={detail.checks} now={now} onShowFiles={() => setTab("files")} />
       </div>
     </div>
   );

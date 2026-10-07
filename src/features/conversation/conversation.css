@@ -604,14 +604,10 @@
   padding: 4px 8px 8px;
 }
 
-.chat-composer-hint {
+/* Pushes Stop and Send to the right-hand end of the bar. */
+.chat-composer-spacer {
   flex: 1;
   min-width: 0;
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* The agent's model, effort and permissions, each opening its own picker. In a narrow
@@ -659,10 +655,6 @@
   font-size: var(--text-xs);
 }
 .effort-popover .chip-popover-note { margin: 10px -14px 0; padding: 8px 14px 8px; }
-
-.chat-panel.is-compact .chat-composer-hint {
-  visibility: hidden;
-}
 
 /* ---- @ file picker ------------------------------------------------------------- */
 .file-picker {

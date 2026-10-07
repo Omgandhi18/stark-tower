@@ -105,7 +105,7 @@ something is genuinely incomplete.\n\n",
 }
 
 /// The current orchestrator's agent id (falls back to "jarvis").
-fn orchestrator_id(app: &tauri::AppHandle) -> String {
+pub(crate) fn orchestrator_id(app: &tauri::AppHandle) -> String {
     if let Some(state) = app.try_state::<crate::AppState>() {
         let cfg = state.config.lock().unwrap();
         if let Some(a) = cfg.agents.iter().find(|a| a.kind == AgentKind::Orchestrator) {

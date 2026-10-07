@@ -15,7 +15,7 @@
   overflow: hidden;
 }
 
-/* The composer and the board, inside the area files can be dropped on. */
+/* The board, with the composer under it at the bottom, inside the area files can be dropped on. */
 .work-canvas-body {
   display: flex;
   flex-direction: column;
@@ -27,6 +27,13 @@
 
 .composer-wrap {
   flex: none;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Attached files sit above the box. */
+.composer-wrap .attachment-tray {
+  padding: 0 var(--space-2) var(--space-2);
 }
 
 .composer {
@@ -86,9 +93,10 @@
   flex: none;
 }
 
+/* The composer is at the bottom of the screen, so the agent list opens upwards. */
 .mention-list {
   position: absolute;
-  top: calc(100% + 6px);
+  bottom: calc(100% + 6px);
   left: 0;
   right: 0;
   z-index: var(--z-popover);
@@ -136,7 +144,7 @@
 
 .composer-notice {
   min-height: 22px;
-  padding: 2px 4px;
+  padding: 2px 4px var(--space-2);
   color: var(--text-secondary);
   font-size: var(--text-sm);
 }

@@ -482,8 +482,24 @@ button.execution-button:hover {
   background: var(--surface-sunken);
 }
 
+/* Four tabs share a narrow panel: they sit close, and scroll rather than widen the page if they still don't fit. */
 .task-rail .tabs {
-  padding: 0 var(--space-3);
+  flex: none;
+  gap: 0;
+  padding: 0 var(--space-1);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.task-rail .tab {
+  flex: none;
+  gap: 4px;
+  padding: 0 var(--space-2);
+}
+
+/* A terminal needs columns: the panel widens while it's there. */
+.task-rail.has-terminal {
+  width: 460px;
 }
 
 .task-rail-body {
@@ -495,6 +511,14 @@ button.execution-button:hover {
 
 .task-rail-auto-mode {
   margin-bottom: var(--space-3);
+}
+
+/* The terminal fills the panel and scrolls itself. */
+.task-rail-body.is-terminal {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
 }
 
 .rail-changes {
@@ -587,5 +611,9 @@ button.execution-button:hover {
 
   .task-rail {
     width: 300px;
+  }
+
+  .task-rail.has-terminal {
+    width: 380px;
   }
 }
