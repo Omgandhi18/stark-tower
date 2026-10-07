@@ -100,6 +100,47 @@ test("the task page opens a terminal in the task folder", async ({ page }) => {
   expect(opened?.args.folder).toBe(defaultScenario().tasks.find((t) => t.title === "Redesign the settings page")?.cwd);
 });
 
+test("on a task page the terminal moves between the bottom and the side panel, keeping its shell", async ({ page }) => {
+  await openApp(page);
+  await page.getByRole("region", { name: "Running" }).getByRole("button", { name: "Redesign the settings page", exact: true }).click();
+  const rail = page.getByRole("complementary", { name: "Task status" });
+  const sideTab = rail.getByRole("tab", { name: "Terminal" });
+  const headerButton = page.getByRole("button", { name: "Terminal", exact: true });
+
+  await sideTab.click();
+  await rail.getByRole("button", { name: "Open terminal", exact: true }).click();
+  await expect(rail.locator(".xterm-rows")).toContainText("$");
+  await expect(page.getByRole("separator", { name: "Resize terminal" })).toHaveCount(0);
+  await expect(headerButton).toHaveAttribute("aria-pressed", "true");
+  await rail.locator(".xterm-helper-textarea").focus();
+  await page.keyboard.type("echo beside");
+  await page.keyboard.press("Enter");
+  await expect(rail.locator(".xterm-rows")).toContainText("echo beside");
+
+  await rail.getByRole("button", { name: "Move terminal to the bottom" }).click();
+  await expect(sideTab).toHaveAttribute("aria-selected", "false");
+  await expect(page.getByRole("separator", { name: "Resize terminal" })).toBeVisible();
+  await expect(page.locator(".terminal-drawer:not(.is-side) .xterm-rows")).toContainText("echo beside");
+
+  await page.getByRole("button", { name: "Move terminal to the side panel" }).click();
+  await expect(sideTab).toHaveAttribute("aria-selected", "true");
+  await expect(rail.locator(".xterm-rows")).toContainText("echo beside");
+
+  // Another tab hides it; the header button shows it at the side again.
+  await rail.getByRole("tab", { name: /Checks/ }).click();
+  await expect(headerButton).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("region", { name: "Terminal", exact: true })).toHaveCount(0);
+  await headerButton.click();
+  await expect(sideTab).toHaveAttribute("aria-selected", "true");
+  await expect(rail.locator(".xterm-rows")).toContainText("echo beside");
+
+  // A chat has no side panel, so there it opens at the bottom.
+  await page.getByRole("button", { name: "Talk to FRIDAY" }).click();
+  await expect(page.locator(".terminal-drawer:not(.is-side) .xterm-rows")).toContainText("echo beside");
+  expect((await fakeCalls(page)).filter((c) => c.cmd === "terminal_open")).toHaveLength(1);
+  expect((await fakeCalls(page)).filter((c) => c.cmd === "terminal_close")).toHaveLength(0);
+});
+
 test("dragging the terminal leaves the preview panel in place", async ({ page }) => {
   await openFriday(page);
   await page.getByRole("button", { name: "Show the browser and simulator" }).click();

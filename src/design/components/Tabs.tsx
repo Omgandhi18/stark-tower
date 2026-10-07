@@ -1,11 +1,16 @@
 import { useRef, type KeyboardEvent } from "react";
+import type { LucideIcon } from "lucide-react";
 import { cx } from "../cx";
+import { ICON_SIZE, ICON_STROKE } from "../icons";
 import { CountBadge } from "./Badge";
 
 export interface TabItem<T extends string> {
   id: T;
   label: string;
   count?: number;
+  /** Shown before the label; with `iconOnly`, instead of it (the label stays for screen readers and the tooltip). */
+  icon?: LucideIcon;
+  iconOnly?: boolean;
 }
 
 interface TabsProps<T extends string> {
@@ -52,11 +57,13 @@ export function Tabs<T extends string>({ tabs, value, onChange, label, idPrefix,
             aria-selected={selected}
             aria-controls={`${idPrefix}-panel-${tab.id}`}
             tabIndex={selected ? 0 : -1}
-            className={cx("tab", selected && "is-selected")}
+            className={cx("tab", selected && "is-selected", tab.iconOnly && "is-icon-only")}
+            title={tab.iconOnly ? tab.label : undefined}
             onClick={() => onChange(tab.id)}
             onKeyDown={(e) => onKeyDown(e, i)}
           >
-            {tab.label}
+            {tab.icon && <tab.icon aria-hidden size={ICON_SIZE.md} strokeWidth={ICON_STROKE} />}
+            {tab.iconOnly ? <span className="visually-hidden">{tab.label}</span> : tab.label}
             {tab.count !== undefined && <CountBadge count={tab.count} label={tab.label} tone="neutral" />}
           </button>
         );

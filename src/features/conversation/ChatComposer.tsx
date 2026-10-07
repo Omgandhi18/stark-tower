@@ -172,7 +172,7 @@ export default function ChatComposer({ agentId, agentName, folder, pending, answ
         <IconButton icon={AtSign} label="Mention a project file or folder" size="sm" disabled={!folder} onClick={startMention} />
         <ModelChips agentId={agentId} agentName={agentName} />
         <AutoModeChip agentId={agentId} agentName={agentName} />
-        <span className="chat-composer-hint">Enter to send, Shift+Enter for a new line</span>
+        <span className="chat-composer-spacer" aria-hidden />
         {pending && (
           <Button size="sm" variant="secondary" icon={Square} onClick={onStop}>
             Stop

@@ -27,3 +27,5 @@
 .terminal-exited { padding: var(--space-1) var(--space-3); color: var(--text-secondary); font-size: var(--text-xs); }
 .terminal-exited { display: flex; align-items: center; gap: var(--space-2); }
 .terminal-drawer .empty-state { margin: auto; padding: var(--space-3); }
+/* In a side panel it takes the panel's whole height. */
+.terminal-drawer.is-side { flex: 1; min-height: 0; border-top: 0; }
