@@ -20,7 +20,10 @@ type Notice =
   | { kind: "started" | "queued"; taskId: string; name: string }
   | { kind: "error"; text: string };
 
-/** Ask the orchestrator, or @mention any agent, with files attached if you like. ⌘K focuses it from anywhere on Work. */
+/**
+ * Ask the orchestrator, or @mention any agent, with files attached if you like. It sits under
+ * the board, so attached files and the agent list open above it. ⌘K focuses it from anywhere on Work.
+ */
 export default function Composer({ project, attachments }: ComposerProps) {
   const agents = useAgents((s) => s.agents);
   const orchestrator = useAgents(selectOrchestrator);
@@ -106,6 +109,7 @@ export default function Composer({ project, attachments }: ComposerProps) {
 
   return (
     <div className="composer-wrap">
+      <AttachmentTray draft={attachments} />
       <form className={cx("composer", sending && "is-sending")} onSubmit={submit}>
         <Sparkles aria-hidden size={ICON_SIZE.lg} strokeWidth={ICON_STROKE} className="composer-icon" />
         <textarea
@@ -160,7 +164,6 @@ export default function Composer({ project, attachments }: ComposerProps) {
           </ul>
         )}
       </form>
-      <AttachmentTray draft={attachments} />
       <p className="composer-notice" role="status" aria-live="polite">
         {(notice?.kind === "started" || notice?.kind === "queued") && (
           <>
