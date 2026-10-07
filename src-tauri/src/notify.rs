@@ -57,7 +57,7 @@ pub fn review_opened(app: &tauri::AppHandle, review: &ReviewRequest) {
         "questions" => ("question", "has a question"),
         _ => ("review", "needs your review"),
     };
-    let task = crate::tasks::active_task_for(app, &review.agent_id);
+    let task = review.task_id.clone().or_else(|| crate::tasks::active_task_for(app, &review.agent_id));
     let body = if review.kind == "mockup" { String::new() } else { plain(&review.body) };
     add(
         app,

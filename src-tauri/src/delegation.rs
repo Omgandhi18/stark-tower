@@ -4,14 +4,21 @@
 //! or dead-letters them if he's gone. Also the standup mission injector. Split
 //! out of chat.rs; the worker runner (run_task_blocking) stays there.
 
-use crate::agents::{AgentKind, AgentStatus};
+use crate::agents::AgentKind;
+use crate::chat::Sink;
 use tauri::{Emitter, Manager};
 
-/// Register a newly-dispatched worker into JARVIS's current delegation batch.
-/// A delegate arriving after the previous batch fully drained starts a fresh one.
-pub(crate) fn register_delegation(app: &tauri::AppHandle) {
+/// Each of the orchestrator's chats keeps its own batch; 0 holds work from a bridge script that didn't say which.
+fn batch_key(conversation: Option<i64>) -> i64 {
+    conversation.unwrap_or(0)
+}
+
+/// Register a newly-dispatched worker into the delegating chat's current batch.
+/// A delegate arriving after that chat's previous batch fully drained starts a fresh one.
+pub(crate) fn register_delegation(app: &tauri::AppHandle, conversation: Option<i64>) {
     if let Some(state) = app.try_state::<crate::AppState>() {
-        let mut b = state.delegations.lock().unwrap();
+        let mut all = state.delegations.lock().unwrap();
+        let b = all.entry(batch_key(conversation)).or_default();
         if b.sealed && b.pending == 0 {
             let g = b.gen.wrapping_add(1);
             *b = crate::chat::DelegationState::default(); // previous batch done → start fresh
@@ -22,11 +29,13 @@ pub(crate) fn register_delegation(app: &tauri::AppHandle) {
     }
 }
 
-/// Record a finished worker and try to close out the batch.
-pub(crate) fn complete_delegation(app: &tauri::AppHandle, agent: &str, task: &str, result: &str) {
+/// Record a finished worker and try to close out its chat's batch.
+pub(crate) fn complete_delegation(app: &tauri::AppHandle, conversation: Option<i64>, agent: &str, task: &str, result: &str) {
+    let key = batch_key(conversation);
     let mut arm_watchdog = None;
     if let Some(state) = app.try_state::<crate::AppState>() {
-        let mut b = state.delegations.lock().unwrap();
+        let mut all = state.delegations.lock().unwrap();
+        let b = all.entry(key).or_default();
         b.results.push((agent.to_string(), task.to_string(), result.to_string()));
         b.pending = b.pending.saturating_sub(1);
         // Every worker is in but the orchestrator hasn't ended its turn yet. Arm a
@@ -36,7 +45,7 @@ pub(crate) fn complete_delegation(app: &tauri::AppHandle, agent: &str, task: &st
             arm_watchdog = Some(b.gen);
         }
     }
-    try_flush(app);
+    try_flush(app, conversation);
     if let Some(gen) = arm_watchdog {
         let app = app.clone();
         std::thread::spawn(move || {
@@ -44,43 +53,45 @@ pub(crate) fn complete_delegation(app: &tauri::AppHandle, agent: &str, task: &st
             let stale = app
                 .try_state::<crate::AppState>()
                 .map(|s| {
-                    let mut b = s.delegations.lock().unwrap();
-                    if b.gen == gen && !b.sealed && b.pending == 0 && !b.results.is_empty() {
-                        b.sealed = true; // force the seal so try_flush can drain it
-                        true
-                    } else {
-                        false
+                    let mut all = s.delegations.lock().unwrap();
+                    match all.get_mut(&key) {
+                        Some(b) if b.gen == gen && !b.sealed && b.pending == 0 && !b.results.is_empty() => {
+                            b.sealed = true; // force the seal so try_flush can drain it
+                            true
+                        }
+                        _ => false,
                     }
                 })
                 .unwrap_or(false);
             if stale {
                 eprintln!("[delegation] watchdog sealed a batch the orchestrator never closed");
-                try_flush(&app);
+                try_flush(&app, conversation);
             }
         });
     }
 }
 
-/// The orchestrator's delegating turn has ended — seal the batch so it can flush
-/// once every worker is in. Called on the orchestrator's `result` (or on its
+/// The orchestrator's delegating turn in this chat has ended — seal its batch so it can
+/// flush once every worker is in. Called on the orchestrator's `result` (or on its
 /// session exiting mid-turn, so a crash can't strand the workers' output).
-pub(crate) fn seal_batch(app: &tauri::AppHandle) {
+pub(crate) fn seal_batch(app: &tauri::AppHandle, conversation: Option<i64>) {
     if let Some(state) = app.try_state::<crate::AppState>() {
-        state.delegations.lock().unwrap().sealed = true;
+        if let Some(b) = state.delegations.lock().unwrap().get_mut(&batch_key(conversation)) {
+            b.sealed = true;
+        }
     }
-    try_flush(app);
+    try_flush(app, conversation);
 }
 
-/// If the batch is sealed and drained, hand the collected results back to JARVIS
-/// as one follow-up message so he can synthesize a single reply.
-fn try_flush(app: &tauri::AppHandle) {
+/// If the chat's batch is sealed and drained, hand the collected results back to the
+/// orchestrator in that chat as one follow-up message so it can synthesize a single reply.
+fn try_flush(app: &tauri::AppHandle, conversation: Option<i64>) {
     let batch = {
         let Some(state) = app.try_state::<crate::AppState>() else { return };
-        let mut b = state.delegations.lock().unwrap();
-        if b.sealed && b.pending == 0 && !b.results.is_empty() {
-            std::mem::take(&mut *b) // reset to default, take the results
-        } else {
-            return;
+        let mut all = state.delegations.lock().unwrap();
+        match all.get(&batch_key(conversation)) {
+            Some(b) if b.sealed && b.pending == 0 && !b.results.is_empty() => all.remove(&batch_key(conversation)).unwrap_or_default(),
+            _ => return,
         }
     };
 
@@ -97,10 +108,10 @@ something is genuinely incomplete.\n\n",
             result
         ));
     }
-    // If the orchestrator isn't live to synthesize, don't lose the work — surface
-    // it on his tab and log it instead of dropping it silently.
-    if !inject_to_orchestrator(app, &body) {
-        dead_letter(app, &batch);
+    // If the orchestrator's chat isn't live to synthesize, don't lose the work — post
+    // it in that chat and log it instead of dropping it silently.
+    if !inject_to_orchestrator(app, conversation, &body) {
+        dead_letter(app, conversation, &batch);
     }
 }
 
@@ -115,39 +126,26 @@ pub(crate) fn orchestrator_id(app: &tauri::AppHandle) -> String {
     "jarvis".to_string()
 }
 
-/// Feed a message into an agent's live session as a new user turn. Returns false
-/// if the session isn't running. No side effects beyond the write + Thinking.
-fn inject_user_turn(app: &tauri::AppHandle, agent_id: &str, text: &str) -> bool {
-    let Some(state) = app.try_state::<crate::AppState>() else { return false };
-    let mut map = state.chat.sessions.lock().unwrap();
-    let Some(s) = map.get_mut(agent_id) else { return false };
-    if s.send_turn(&crate::chat::UserTurn::plain(text)).is_ok() {
-        drop(map);
-        crate::pty::emit_status(app, agent_id, AgentStatus::Thinking);
-        true
-    } else {
-        false
-    }
-}
-
-/// Deliver a routed inbox message into a recipient's live session as a user turn
-/// and surface it on their tab. Returns false if the recipient has no session.
+/// Deliver a routed inbox message into a recipient's live chat as a user turn and show it
+/// there. Returns false if the recipient has no live chat.
 pub(crate) fn deliver_message(app: &tauri::AppHandle, agent_id: &str, from: &str, body: &str) -> bool {
     let text = format!("[MESSAGE from {}] {}", from.to_uppercase(), body);
-    if inject_user_turn(app, agent_id, &text) {
-        crate::chat::note(app, agent_id, &text);
+    let Some(conversation) = crate::chat::live_chat(app, agent_id) else { return false };
+    if crate::chat::inject(app, agent_id, conversation, &text) {
+        crate::chat::note_in(app, &Sink::chat(conversation), agent_id, &text);
         true
     } else {
         false
     }
 }
 
-/// Feed a message into the orchestrator's live session as a new user turn (used
-/// to deliver delegation results). Returns false if his session isn't running.
-fn inject_to_orchestrator(app: &tauri::AppHandle, text: &str) -> bool {
+/// Feed delegation results into the orchestrator's chat they were delegated from (or, when
+/// that isn't known, its live chat). Returns false if that chat's session isn't running.
+fn inject_to_orchestrator(app: &tauri::AppHandle, conversation: Option<i64>, text: &str) -> bool {
     let oid = orchestrator_id(app);
-    if inject_user_turn(app, &oid, text) {
-        crate::chat::note(app, &oid, "Worker results received. Summarizing them now.");
+    let Some(chat) = conversation.or_else(|| crate::chat::live_chat(app, &oid)) else { return false };
+    if crate::chat::inject(app, &oid, chat, text) {
+        crate::chat::note_in(app, &Sink::chat(chat), &oid, "Worker results received. Summarizing them now.");
         true
     } else {
         false
@@ -163,8 +161,9 @@ pub fn run_standup(app: &tauri::AppHandle) {
 re-engage anyone stalled or blocked, close or reassign tasks that are done, and keep the board \
 accurate. If everything in-flight is on track and nothing needs the user, say so briefly. Do NOT \
 start new work the user didn't ask for.";
-    if inject_user_turn(app, &oid, msg) {
-        crate::chat::note(app, &oid, "Standup: reviewing the board.");
+    let Some(chat) = crate::chat::live_chat(app, &oid) else { return };
+    if crate::chat::inject(app, &oid, chat, msg) {
+        crate::chat::note_in(app, &Sink::chat(chat), &oid, "Standup: reviewing the board.");
         if let Some(state) = app.try_state::<crate::AppState>() {
             let e = state.ledger.record(&oid, "standup", "floor check", 1);
             let _ = app.emit("ledger://entry", e);
@@ -176,17 +175,18 @@ start new work the user didn't ask for.";
 /// Last-resort delivery when the orchestrator's session is gone at flush time:
 /// post the collected results to its tab and the ledger so they're recoverable
 /// rather than silently dropped.
-fn dead_letter(app: &tauri::AppHandle, batch: &crate::chat::DelegationState) {
+fn dead_letter(app: &tauri::AppHandle, conversation: Option<i64>, batch: &crate::chat::DelegationState) {
     let oid = orchestrator_id(app);
+    let sink = conversation.map(Sink::chat).unwrap_or_else(|| Sink::open(app, &oid));
     eprintln!(
         "[delegation] orchestrator offline at flush — dead-lettering {} result(s)",
         batch.results.len()
     );
     let note = "Delegation results arrived while the orchestrator was offline, so they are delivered here instead. Reopen the chat to have them summarized.";
-    crate::chat::note(app, &oid, note);
+    crate::chat::note_in(app, &sink, &oid, note);
     for (agent, task, result) in &batch.results {
         let text = format!("## {}: {}\n{}", agent.to_uppercase(), crate::chat::truncate(task, 80), result);
-        crate::chat::record_in(app, &crate::chat::Sink::chat(), &oid, "text", "agent", Some(&text), None, None);
+        crate::chat::record_in(app, &sink, &oid, "text", "agent", Some(&text), None, None);
     }
     if let Some(state) = app.try_state::<crate::AppState>() {
         let e = state.ledger.record(

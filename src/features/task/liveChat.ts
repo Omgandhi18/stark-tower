@@ -1,18 +1,12 @@
-import { useEffect } from "react";
 import type { Agent, Task } from "../../lib/types";
-import { selectThread, useChats } from "../../stores/chats";
+import { chatKey, type ChatRef } from "../../stores/chats";
 
 /**
- * Whether this task's chat is the one its owner talks in now, so you can talk, point and
- * attach in it here. Loads the owner's thread to find out.
+ * The chat you can talk, point and attach in on this task's page: its own, while it's one of
+ * the owner's chats with you. An agent works in several at once, so every such chat is live; a
+ * delegated task's conversation belongs to the agent that delegated it, and is only shown.
  */
-export function useLiveChat(task: Task, owner: Agent | undefined): boolean {
-  const thread = useChats(selectThread(task.assignee));
-  const hydrate = useChats((s) => s.hydrate);
-
-  useEffect(() => {
-    if (!thread.hydrated) hydrate(task.assignee).catch(() => undefined);
-  }, [hydrate, task.assignee, thread.hydrated]);
-
-  return Boolean(owner) && task.conversation_id !== null && thread.hydrated && !thread.loading && thread.conversationId === task.conversation_id;
+export function taskChat(task: Task, owner: Agent | undefined): ChatRef | null {
+  if (!owner || task.conversation_id === null || task.parent_id !== null) return null;
+  return { agentId: task.assignee, key: chatKey(task.conversation_id) };
 }

@@ -32,10 +32,10 @@ async function fakeApp(answer) {
   return { sock, requests, close: () => server.close() };
 }
 
-/** Start the bridge script and send it one tools/call; resolve with the reply. */
-function callTool(sock, name, args) {
+/** Start the bridge script (with any extra environment) and send it one tools/call; resolve with the reply. */
+function callTool(sock, name, args, extraEnv = {}) {
   const child = spawn(process.execPath, [SCRIPT], {
-    env: { ...process.env, STARK_DELEGATE_SOCK: sock, STARK_AGENT_ID: "friday", STARK_ROLE: "worker", STARK_DELEGATE_TOKEN: TOKEN },
+    env: { ...process.env, STARK_DELEGATE_SOCK: sock, STARK_AGENT_ID: "friday", STARK_ROLE: "worker", STARK_DELEGATE_TOKEN: TOKEN, ...extraEnv },
     stdio: ["pipe", "pipe", "ignore"],
   });
   const lines = readline.createInterface({ input: child.stdout });
@@ -83,6 +83,17 @@ test("delegates as the agent running it, so the work is tied to that agent's tas
     const result = await callTool(app.sock, "delegate", { agent: "karen", task: "Check the contrast" });
     assert.deepEqual(app.requests, [{ type: "delegate", agentId: "friday", agent: "karen", task: "Check the contrast", directory: "", token: TOKEN }]);
     assert.match(result.content[0].text, /Dispatched KAREN/);
+  } finally {
+    app.close();
+  }
+});
+
+test("says which chat it works in, so an agent in several chats is answered in the right one", async () => {
+  const app = await fakeApp(() => ({ result: "Dispatched KAREN — running in the background." }));
+  try {
+    await callTool(app.sock, "delegate", { agent: "karen", task: "Check the contrast" }, { STARK_CONVERSATION_ID: "42" });
+    assert.equal(app.requests[0].conversationId, 42);
+    assert.equal(app.requests[0].agentId, "friday");
   } finally {
     app.close();
   }

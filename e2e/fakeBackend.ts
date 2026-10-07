@@ -125,8 +125,20 @@ function install(scenario: Scenario) {
 
   const conversationOf = (agentId: string) => state.conversations.find((c) => c.id === state.current[agentId]) ?? null;
 
-  const persist = (agentId: string, role: string, fields: Json) => {
-    let id = state.current[agentId];
+  /** How each chat's session is doing: an agent can be busy in one chat and free in another. */
+  const chatStatus: Record<number, string> = {};
+  // The scenario's agents are busy (or not) in the chat each is open in.
+  for (const [agentId, id] of Object.entries(state.current)) chatStatus[id] = state.statuses[agentId] ?? "offline";
+  const setChatStatus = (agentId: string, conversationId: number, status: string) => {
+    chatStatus[conversationId] = status;
+    emit("chat://status", { agentId, conversationId, status });
+    setStatus(agentId, status);
+  };
+  const BUSY = ["working", "thinking", "blocked"];
+
+  /** Save a message in one of the agent's chats (by default the one it's open in). */
+  const persist = (agentId: string, role: string, fields: Json, conversationId?: number) => {
+    let id = conversationId ?? state.current[agentId];
     if (id === undefined) {
       id = nextConversation++;
       state.current[agentId] = id;
@@ -186,22 +198,23 @@ function install(scenario: Scenario) {
   };
 
   /** A short scripted reply so a sent message visibly gets an answer. */
-  const reply = (agentId: string, text: string, taskId?: string) => {
-    setStatus(agentId, "working");
+  const reply = (agentId: string, text: string, taskId?: string, conversation?: number) => {
+    const conversationId = conversation ?? state.current[agentId];
+    setChatStatus(agentId, conversationId, "working");
     const answer = `Got it: "${text}". I'll take care of it.`;
     const steps: Array<() => void> = [
       () => {
         const detail = "src/pages/Settings.tsx";
-        const messageId = persist(agentId, "tool", { tool: "Read", detail });
-        emit("chat://event", { agentId, kind: "tool", tool: "Read", detail, messageId });
+        const messageId = persist(agentId, "tool", { tool: "Read", detail }, conversationId);
+        emit("chat://event", { agentId, kind: "tool", tool: "Read", detail, messageId, conversationId });
       },
       () => {
-        const messageId = persist(agentId, "agent", { text: answer });
-        emit("chat://event", { agentId, kind: "text", text: answer, messageId });
+        const messageId = persist(agentId, "agent", { text: answer }, conversationId);
+        emit("chat://event", { agentId, kind: "text", text: answer, messageId, conversationId });
       },
       () => {
-        emit("chat://event", { agentId, kind: "result" });
-        setStatus(agentId, "idle");
+        emit("chat://event", { agentId, kind: "result", conversationId });
+        setChatStatus(agentId, conversationId, "idle");
         const task = state.tasks.find((t) => t.id === taskId);
         if (task && chatTasks.has(task.id) && task.status === "doing") {
           Object.assign(task, { status: "idle", finished: Date.now(), updated: Date.now(), detail: answer });
@@ -615,7 +628,8 @@ function install(scenario: Scenario) {
     start_task: (args) => {
       const agentId = String(args.agentId);
       const prompt = String(args.prompt);
-      const busy = ["working", "thinking", "blocked"].includes(state.statuses[agentId] ?? "offline");
+      // An agent works in several chats at once: work never waits, it opens a chat beside a busy one.
+      const busy = false;
       const id = `t-new-${state.tasks.length + 1}`;
       const cwd = String(args.dir ?? state.projects.active);
       const now = Date.now();
@@ -647,7 +661,8 @@ function install(scenario: Scenario) {
         const folder = (path: string) => path.replace(/\/+$/, "");
         const inFolder = (c: (typeof state.conversations)[number]) => c.agent_id === agentId && !c.delegated && folder(c.cwd) === folder(cwd);
         const open = conversationOf(agentId);
-        const chat = open && inFolder(open) ? open : [...state.conversations].filter(inFolder).sort((a, b) => b.updated - a.updated)[0];
+        const free = (c: (typeof state.conversations)[number] | null | undefined) => (c && !BUSY.includes(chatStatus[c.id] ?? "offline") ? c : undefined);
+        const chat = free(open && inFolder(open) ? open : [...state.conversations].filter(inFolder).sort((a, b) => b.updated - a.updated)[0]);
         const conversationId = chat?.id ?? nextConversation++;
         if (!chat) {
           state.conversations.unshift({ id: conversationId, agent_id: agentId, title: task.title, cwd, created: now, updated: now, delegated: false, project_folder: cwd, branch: "" });
@@ -656,8 +671,8 @@ function install(scenario: Scenario) {
         state.current[agentId] = conversationId;
         task.conversation_id = conversationId;
         emit("chat://switched", { agentId, conversationId });
-        persist(agentId, "user", { text: prompt });
-        reply(agentId, prompt);
+        persist(agentId, "user", { text: prompt }, conversationId);
+        reply(agentId, prompt, undefined, conversationId);
       }
       emit("tasks://changed", null);
       return task;
@@ -979,6 +994,15 @@ function install(scenario: Scenario) {
       const id = state.current[String(args.agentId)];
       return id === undefined ? [] : (state.transcripts[id] ?? []);
     },
+    conversation_chat: (args) => {
+      const id = Number(args.conversationId);
+      const conversation = state.conversations.find((c) => c.id === id);
+      if (!conversation) return null;
+      // Before any chat had its own state, an agent's status was its open chat's.
+      const waiting = state.reviews.some((r) => r.conversationId === id);
+      const status = waiting ? "blocked" : (chatStatus[id] ?? null);
+      return { conversation, messages: state.transcripts[id] ?? [], status: status === "offline" ? null : status };
+    },
     new_chat: (args) => {
       const agentId = String(args.agentId);
       const id = nextConversation++;
@@ -986,7 +1010,6 @@ function install(scenario: Scenario) {
       state.conversations.unshift({ id, agent_id: agentId, title: "", cwd, created: Date.now(), updated: Date.now(), delegated: false, project_folder: cwd, branch: "" });
       state.transcripts[id] = [];
       state.current[agentId] = id;
-      setStatus(agentId, "offline");
       emit("conversations://changed", null);
       return id;
     },
@@ -996,7 +1019,7 @@ function install(scenario: Scenario) {
       if (!chat) throw "That chat doesn't exist any more.";
       const agentId = chat.agent_id;
       const wasOpen = state.current[agentId] === id;
-      if (wasOpen && ["working", "thinking", "blocked"].includes(state.statuses[agentId] ?? "offline")) {
+      if (BUSY.includes(chatStatus[id] ?? "offline")) {
         const name = state.config.agents.find((a) => a.id === agentId)?.name ?? agentId;
         throw `${name} is working in this chat. Delete it once they've finished.`;
       }
@@ -1035,9 +1058,11 @@ function install(scenario: Scenario) {
       const agentId = String(args.agentId);
       const text = String(args.text);
       const files = (args.attachments as unknown[] | undefined) ?? [];
-      const messageId = persist(agentId, "user", { text, ...(files.length ? { attachments: files } : {}) });
+      // The chat it was written in, else the one the agent is open in.
+      const asked = typeof args.conversationId === "number" ? args.conversationId : undefined;
+      const messageId = persist(agentId, "user", { text, ...(files.length ? { attachments: files } : {}) }, asked);
       // What's asked in a chat continues its open task, or becomes one.
-      const conversationId = state.current[agentId];
+      const conversationId = asked ?? state.current[agentId];
       let task = state.tasks
         .filter((t) => t.conversation_id === conversationId && !["closed", "reviewed"].includes(t.status))
         .sort((a, b) => b.updated - a.updated)[0];
@@ -1047,11 +1072,13 @@ function install(scenario: Scenario) {
         Object.assign(task, { status: "doing", updated: Date.now(), finished: null });
         emit("tasks://changed", null);
       }
-      reply(agentId, text, task.id);
+      reply(agentId, text, task.id, conversationId);
       return messageId;
     },
     chat_stop: (args) => {
-      setStatus(String(args.agentId), "offline");
+      const agentId = String(args.agentId);
+      if (typeof args.conversationId === "number") setChatStatus(agentId, args.conversationId, "offline");
+      else setStatus(agentId, "offline");
       return null;
     },
     list_files: (args) => state.files[String(args.dir)] ?? [],
@@ -1061,8 +1088,8 @@ function install(scenario: Scenario) {
       const decision = String(args.decision);
       const review = state.reviews.find((r) => r.id === args.id);
       if (review?.kind === "questions") {
-        persist(review.agentId, "agent", { text: review.body || review.title });
-        persist(review.agentId, "user", { text: decision });
+        persist(review.agentId, "agent", { text: review.body || review.title }, review.conversationId ?? undefined);
+        persist(review.agentId, "user", { text: decision }, review.conversationId ?? undefined);
       }
       const scopes: Record<string, string> = { "Allow for task": "task", "Allow in project": "project", "Allow everywhere": "everywhere" };
       if (review && scopes[decision] && review.grant) {

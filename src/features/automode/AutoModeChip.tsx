@@ -1,13 +1,13 @@
 import { FastForward, ShieldCheck } from "lucide-react";
 import { Popover } from "../../design";
-import { selectThread, useChats } from "../../stores/chats";
+import { selectThread, useChats, type ChatKey } from "../../stores/chats";
 import Chip from "../conversation/ComposerChip";
 import AutoModeSwitch from "./AutoModeSwitch";
 import { useAutoModeOf } from "./autoMode";
 
 /** Under the message box: whether this conversation asks first or runs in auto mode. */
-export default function AutoModeChip({ agentId, agentName }: { agentId: string; agentName: string }) {
-  const conversationId = useChats((s) => selectThread(agentId)(s).conversationId);
+export default function AutoModeChip({ chatKey, agentName }: { chatKey: ChatKey; agentName: string }) {
+  const conversationId = useChats((s) => selectThread(chatKey)(s).conversationId);
   const on = useAutoModeOf(conversationId);
   if (conversationId === null || on === undefined) return null;
 

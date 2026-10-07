@@ -381,7 +381,7 @@ pub(crate) fn record(
         ts: Local::now().timestamp_millis(),
         agent_id: agent_id.into(),
         conversation_id: sink.conversation_for(app, agent_id),
-        task_id: sink.task_for(app, agent_id),
+        task_id: sink.task_for(app),
         session,
         usage,
     };

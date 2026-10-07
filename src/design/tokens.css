@@ -111,6 +111,8 @@
   /* Layout */
   --topbar-height: 56px;
   --sidenav-width: 184px;
+  /* A collapsed side panel's rail of icons */
+  --rail-width: 56px;
 
   /* Layers */
   --z-sticky: 10;

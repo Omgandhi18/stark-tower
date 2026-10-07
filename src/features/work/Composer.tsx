@@ -17,7 +17,7 @@ interface ComposerProps {
 }
 
 type Notice =
-  | { kind: "started" | "queued"; taskId: string; name: string }
+  | { kind: "started"; taskId: string; name: string }
   | { kind: "error"; text: string };
 
 /**
@@ -77,7 +77,8 @@ export default function Composer({ project, attachments }: ComposerProps) {
       const task = await startTask(routing.agentId, routing.message, project ?? undefined, [...attachments.files]);
       setText("");
       attachments.sent();
-      setNotice({ kind: task.status === "todo" ? "queued" : "started", taskId: task.id, name });
+      // Work starts at once: beside the agent's busy chat, in a new one, if they're working already.
+      setNotice({ kind: "started", taskId: task.id, name });
     } catch (err) {
       setNotice({ kind: "error", text: errorMessage(err, `The task couldn't be handed to ${name}.`) });
     } finally {
@@ -165,9 +166,9 @@ export default function Composer({ project, attachments }: ComposerProps) {
         )}
       </form>
       <p className="composer-notice" role="status" aria-live="polite">
-        {(notice?.kind === "started" || notice?.kind === "queued") && (
+        {notice?.kind === "started" && (
           <>
-            {notice.kind === "started" ? `${notice.name} has started.` : `${notice.name} is busy, so this starts when they finish.`}{" "}
+            {`${notice.name} has started.`}{" "}
             <button type="button" className="link-button" onClick={() => openTask(notice.taskId)}>
               Open task
             </button>

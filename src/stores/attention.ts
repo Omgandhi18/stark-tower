@@ -37,5 +37,10 @@ export const useAttention = create<AttentionState>((set) => ({
 /** Questions an agent asked in conversation (answered from its chat). */
 export const isQuestion = (r: ReviewRequest) => r.kind === "questions";
 
-export const selectQuestionFor = (agentId: string) => (state: AttentionState) =>
-  state.pending.find((r) => r.agentId === agentId && isQuestion(r));
+/** Whether a review came from this chat (or, for one that didn't say, from this agent at all). */
+export const fromChat = (r: ReviewRequest, agentId: string, conversationId: number | null) =>
+  r.agentId === agentId && (conversationId === null || r.conversationId === null || r.conversationId === conversationId);
+
+/** The question an agent is waiting on in this chat (any of its chats, when the chat isn't known). */
+export const selectQuestionFor = (agentId: string, conversationId: number | null = null) => (state: AttentionState) =>
+  state.pending.find((r) => isQuestion(r) && fromChat(r, agentId, conversationId));

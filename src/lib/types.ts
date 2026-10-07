@@ -133,6 +133,13 @@ export interface ChatEvent {
 }
 
 /** An agent now talks in a different conversation (chat://switched). */
+/** One chat's session state, as `chat://status` reports it. */
+export interface ChatStatus {
+  agentId: string;
+  conversationId: number;
+  status: AgentStatus;
+}
+
 export interface ChatSwitch {
   agentId: string;
   conversationId: number;

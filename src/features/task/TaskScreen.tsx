@@ -14,13 +14,12 @@ import TerminalDrawer from "../terminal/TerminalDrawer";
 import { taskState } from "../work/board";
 import ActivityList from "./ActivityList";
 import ChangesList from "./ChangesList";
-import EarlierChats from "./EarlierChats";
-import ExecutionTree from "./ExecutionTree";
 import PlanList from "./PlanList";
 import TaskConversation from "./TaskConversation";
 import TaskHeader from "./TaskHeader";
+import TaskLeftColumn from "./TaskLeftColumn";
 import TaskSideRail from "./TaskSideRail";
-import { useLiveChat } from "./liveChat";
+import { taskChat } from "./liveChat";
 import { useChatOpening } from "./useChatOpening";
 import { useTaskDetail } from "./useTaskDetail";
 import "./task.css";
@@ -109,7 +108,7 @@ export default function TaskScreen() {
   return <TaskWorkspace detail={state.detail} active={route === "task"} now={now} />;
 }
 
-/** One task in full, with its chat live in the middle while it's the one its owner talks in. */
+/** One task in full, with its chat live in the middle. */
 function TaskWorkspace({ detail, active, now }: { detail: TaskDetail; active: boolean; now: number }) {
   const agents = useAgents((s) => s.agents);
   const pending = useAttention((s) => s.pending);
@@ -118,7 +117,7 @@ function TaskWorkspace({ detail, active, now }: { detail: TaskDetail; active: bo
   const [tab, setTab] = useState<CenterTab>("conversation");
   const { task } = detail;
   const owner = agents.find((a) => a.id === task.assignee);
-  const live = useLiveChat(task, owner);
+  const chat = taskChat(task, owner);
   const waitingOnYou = new Set(pending.map((r) => r.agentId));
   const members = new Set([task.assignee, ...detail.children.map((c) => c.assignee)]);
   const reviews = pending.filter((r) => members.has(r.agentId));
@@ -133,12 +132,9 @@ function TaskWorkspace({ detail, active, now }: { detail: TaskDetail; active: bo
 
   return (
     <div className={cx("task-screen", previewing && "has-preview")}>
-      <TaskHeader detail={detail} owner={owner} live={live} requester={requester} state={taskState(task, owner, detail.children, waitingOnYou)} now={now} />
+      <TaskHeader detail={detail} owner={owner} chat={chat} requester={requester} state={taskState(task, owner, detail.children, waitingOnYou)} now={now} />
       <div className="task-body">
-        <div className="task-left">
-          <ExecutionTree detail={detail} waitingOnYou={waitingOnYou} />
-          <EarlierChats agentId={task.assignee} agent={owner} shownChat={task.conversation_id} />
-        </div>
+        <TaskLeftColumn detail={detail} owner={owner} waitingOnYou={waitingOnYou} toolBeside={previewing} />
         <section className="task-center" aria-label="Task">
           <Tabs tabs={tabs} value={tab} onChange={setTab} label="Task sections" idPrefix="task" className="task-tabs" />
           <div role="tabpanel" id={`task-panel-${tab}`} aria-labelledby={`task-tab-${tab}`} className="task-panel">
@@ -154,7 +150,7 @@ function TaskWorkspace({ detail, active, now }: { detail: TaskDetail; active: bo
           folder={task.cwd}
           active={active}
           conversationId={task.conversation_id}
-          pointAgent={live ? task.assignee : null}
+          pointChat={chat}
           reviews={reviews}
           changes={detail.changes}
           checks={detail.checks}

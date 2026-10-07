@@ -86,10 +86,11 @@ pub fn needs_worktree(enabled: bool, repo: bool, writer: bool) -> bool {
     enabled && repo && writer
 }
 
-pub fn writer_in<'a>(tasks: &'a [Task], cwd: &str, agent: &str) -> Option<&'a str> {
+/// Who is already editing `cwd` for another task: another agent, or the same agent in another of its chats.
+pub fn writer_in<'a>(tasks: &'a [Task], cwd: &str, task_id: &str) -> Option<&'a str> {
     tasks
         .iter()
-        .find(|t| t.cwd == cwd && t.assignee != agent && t.parent_id.is_none() && t.status == "doing")
+        .find(|t| t.cwd == cwd && t.id != task_id && t.parent_id.is_none() && t.status == "doing")
         .map(|t| t.assignee.as_str())
 }
 
@@ -258,23 +259,7 @@ pub fn prepare(app: &tauri::AppHandle, task: &Task) -> Result<Task, String> {
         (config.worktrees_enabled, config.worktree_setup.get(&project).cloned().unwrap_or_default())
     };
     let all_tasks = state.ledger.tasks(i64::MAX);
-    let writer = writer_in(&all_tasks, &task.cwd, &task.assignee).map(str::to_string).or_else(|| {
-        let statuses = state.statuses.lock().unwrap();
-        state
-            .workdirs
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|(id, cwd)| {
-                **id != task.assignee
-                    && **cwd == task.cwd
-                    && matches!(
-                        statuses.get(*id),
-                        Some(crate::agents::AgentStatus::Working | crate::agents::AgentStatus::Thinking)
-                    )
-            })
-            .map(|(id, _)| id.clone())
-    });
+    let writer = writer_in(&all_tasks, &task.cwd, &task.id).map(str::to_string).or_else(|| crate::runs::busy_in_folder(app, &task.cwd).into_iter().next());
     let mut cwd = task.cwd.clone();
     let mut kind = "checkout";
     let repo = git(&cwd, &["rev-parse", "--show-toplevel"]).is_ok();
@@ -507,11 +492,13 @@ pub(crate) mod tests {
             r.task("blocked", "friday", "blocked", None),
             r.task("child", "edith", "doing", Some("done")),
         ];
-        assert!(writer_in(&tasks, &r.project, "vision").is_none());
+        assert!(writer_in(&tasks, &r.project, "new").is_none());
         tasks.push(r.task("running", "friday", "doing", None));
-        assert_eq!(writer_in(&tasks, &r.project, "vision"), Some("friday"));
-        assert!(writer_in(&tasks, &r.project, "friday").is_none());
-        assert!(writer_in(&tasks, &format!("{}/nested", r.project), "vision").is_none());
+        assert_eq!(writer_in(&tasks, &r.project, "new"), Some("friday"));
+        assert!(writer_in(&tasks, &r.project, "running").is_none(), "a task isn't in its own way");
+        assert!(writer_in(&tasks, &format!("{}/nested", r.project), "new").is_none());
+        // The same agent in another of its chats is a writer too: a second chat gets its own worktree.
+        assert_eq!(writer_in(&tasks, &r.project, "friday-second-chat"), Some("friday"));
     }
 
     #[test]

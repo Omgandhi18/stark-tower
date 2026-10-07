@@ -35,25 +35,28 @@ fn turns() -> &'static Mutex<HashMap<String, Turn>> {
     TURNS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// An agent's turn began, working in `cwd`, its messages going where `sink` says.
-pub fn started(agent_id: &str, sink: &Sink, cwd: &str) {
+// Turns are kept per run (`runs::run_key`: the agent in one conversation), so an agent working
+// in two chats at once keeps what each turn made apart.
+
+/// A run's turn began, working in `cwd`, its messages going where `sink` says.
+pub fn started(run: &str, sink: &Sink, cwd: &str) {
     let turn = Turn { sink: sink.clone(), cwd: PathBuf::from(cwd), started: SystemTime::now(), written: Vec::new(), said: String::new(), shared: HashSet::new() };
-    turns().lock().unwrap().insert(agent_id.to_string(), turn);
+    turns().lock().unwrap().insert(run.to_string(), turn);
 }
 
-/// Where the agent's current turn posts (its chat, or a delegated task's own conversation).
-pub fn sink_for(agent_id: &str) -> Sink {
-    turns().lock().unwrap().get(agent_id).map(|t| t.sink.clone()).unwrap_or_else(Sink::chat)
+/// Where the run's current turn posts (its chat, or a delegated task's own conversation).
+pub fn sink_for(run: &str) -> Option<Sink> {
+    turns().lock().unwrap().get(run).map(|t| t.sink.clone())
 }
 
-/// The folder the agent's current turn works in, if a turn is going.
-pub fn cwd_for(agent_id: &str) -> Option<PathBuf> {
-    turns().lock().unwrap().get(agent_id).map(|t| t.cwd.clone())
+/// The folder the run's current turn works in, if a turn is going.
+pub fn cwd_for(run: &str) -> Option<PathBuf> {
+    turns().lock().unwrap().get(run).map(|t| t.cwd.clone())
 }
 
 /// The agent wrote or edited a file with its tools.
-pub fn wrote(agent_id: &str, path: &str) {
-    if let Some(turn) = turns().lock().unwrap().get_mut(agent_id) {
+pub fn wrote(run: &str, path: &str) {
+    if let Some(turn) = turns().lock().unwrap().get_mut(run) {
         let path = resolve(&turn.cwd, path);
         if !turn.written.contains(&path) {
             turn.written.push(path);
@@ -62,24 +65,24 @@ pub fn wrote(agent_id: &str, path: &str) {
 }
 
 /// The agent said something (its reply may name files it made).
-pub fn said(agent_id: &str, text: &str) {
-    if let Some(turn) = turns().lock().unwrap().get_mut(agent_id) {
+pub fn said(run: &str, text: &str) {
+    if let Some(turn) = turns().lock().unwrap().get_mut(run) {
         turn.said.push('\n');
         turn.said.push_str(text);
     }
 }
 
 /// The agent shared these files on purpose; the turn's card leaves them out.
-pub fn shared(agent_id: &str, paths: &[PathBuf]) {
-    if let Some(turn) = turns().lock().unwrap().get_mut(agent_id) {
+pub fn shared(run: &str, paths: &[PathBuf]) {
+    if let Some(turn) = turns().lock().unwrap().get_mut(run) {
         turn.shared.extend(paths.iter().cloned());
     }
 }
 
 /// The turn ended: the media and documents it made, oldest mention first, and how
 /// many more there were than the card shows.
-pub fn finished(agent_id: &str) -> (Vec<PathBuf>, usize) {
-    let Some(turn) = turns().lock().unwrap().remove(agent_id) else { return (Vec::new(), 0) };
+pub fn finished(run: &str) -> (Vec<PathBuf>, usize) {
+    let Some(turn) = turns().lock().unwrap().remove(run) else { return (Vec::new(), 0) };
     let since = turn.started.checked_sub(CLOCK_SLACK).unwrap_or(turn.started);
     let named = named_paths(&turn.said).into_iter().map(|p| resolve(&turn.cwd, &p));
     let mut made: Vec<PathBuf> = Vec::new();
@@ -151,7 +154,7 @@ mod tests {
         std::fs::File::options().write(true).open(&old).unwrap().set_modified(earlier).unwrap();
 
         let agent = "outputs-test-agent";
-        started(agent, &Sink::chat(), &dir.to_string_lossy());
+        started(agent, &Sink::chat(1), &dir.to_string_lossy());
         std::fs::write(dir.join("out/chart.png"), b"x").unwrap();
         std::fs::write(dir.join("page.html"), b"<p>").unwrap();
         std::fs::write(dir.join("shared.pdf"), b"%PDF").unwrap();

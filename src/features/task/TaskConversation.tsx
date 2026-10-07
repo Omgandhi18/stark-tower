@@ -1,15 +1,12 @@
-import { useEffect, useState } from "react";
-import { MessagesSquare, Undo2 } from "lucide-react";
-import { Button, EmptyState } from "../../design";
-import { errorMessage } from "../../lib/errors";
+import { useEffect } from "react";
+import { MessagesSquare } from "lucide-react";
+import { EmptyState } from "../../design";
 import type { Agent, StoredMessage, Task } from "../../lib/types";
 import type { ChatMessage, MessageRole } from "../../stores/chats";
 import { useVoices } from "../../stores/voices";
 import ChatPanel from "../conversation/ChatPanel";
 import MessageList from "../conversation/MessageList";
-import { reopenChat } from "../conversation/chatActions";
-import { askedByDeveloper } from "../../lib/requester";
-import { useLiveChat } from "./liveChat";
+import { taskChat } from "./liveChat";
 
 const toMessage = (m: StoredMessage): ChatMessage => ({
   id: m.id,
@@ -28,22 +25,21 @@ interface TaskConversationProps {
 }
 
 /**
- * The owner's conversation for this task. While it's the owner's current chat
- * you can talk in it; an older or delegated one is shown as it happened.
+ * The owner's conversation for this task, live: you can talk in it whatever else the owner is
+ * doing. A delegated task's is shown as it happened; it belongs to the agent that delegated it.
  */
 export default function TaskConversation({ task, owner, messages, requester }: TaskConversationProps) {
-  const [error, setError] = useState<string | null>(null);
-  const live = useLiveChat(task, owner);
+  const chat = taskChat(task, owner);
+  const live = chat !== null;
 
   useEffect(() => {
     useVoices.getState().viewChat("task", live ? task.assignee : null);
     return () => useVoices.getState().viewChat("task", null);
   }, [live, task.assignee]);
 
-  if (live) return <ChatPanel agentId={task.assignee} />;
+  if (chat) return <ChatPanel agentId={chat.agentId} chatKey={chat.key} />;
 
   const agent = owner ?? { id: task.assignee, name: task.assignee, figure: "", accent: "" };
-  const delegated = !askedByDeveloper(task.requested_by);
 
   return (
     <div className="task-transcript">
@@ -53,35 +49,13 @@ export default function TaskConversation({ task, owner, messages, requester }: T
         pending={false}
         empty={<EmptyState icon={MessagesSquare} title="No messages yet" body="The conversation appears here once the task starts." />}
       />
-      <footer className="task-transcript-foot">
-        {delegated ? (
+      {task.parent_id !== null && (
+        <footer className="task-transcript-foot">
           <p>
             {requester} delegated this, and the result goes back to them. {agent.name} works on it on their own.
           </p>
-        ) : (
-          task.conversation_id !== null && (
-            <>
-              <p>{agent.name} has moved on to other work since.</p>
-              <Button
-                icon={Undo2}
-                onClick={() => {
-                  setError(null);
-                  reopenChat(task.assignee, task.conversation_id as number).catch((e) =>
-                    setError(errorMessage(e, "The conversation couldn't be reopened.")),
-                  );
-                }}
-              >
-                Pick this conversation back up
-              </Button>
-            </>
-          )
-        )}
-        {error && (
-          <p className="task-error" role="alert">
-            {error}
-          </p>
-        )}
-      </footer>
+        </footer>
+      )}
     </div>
   );
 }

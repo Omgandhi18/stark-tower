@@ -17,3 +17,5 @@ export { Markdown } from "./components/Markdown";
 export { KeepAlive } from "./components/KeepAlive";
 export { Dialog } from "./components/Dialog";
 export { InlineCode } from "./components/InlineCode";
+export { Rail, RailButton, RailDivider } from "./components/Rail";
+export { usePeek, RAIL_HOME } from "./usePeek";

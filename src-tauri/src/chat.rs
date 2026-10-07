@@ -1,6 +1,7 @@
 use crate::agents::AgentStatus;
 use crate::attachments::{self, Attachment};
 use crate::config::EngineConfig;
+use crate::runs::{self, Actor};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -47,17 +48,20 @@ pub(crate) fn floor_log(app: &tauri::AppHandle, agent_id: &str, kind: &str, deta
     }
 }
 
-/// A persistent headless conversation for one agent, on its provider. No pty,
-/// so no trust dialog and no terminal crash class.
+/// A persistent headless session for one of an agent's chats, on its provider. No pty,
+/// so no trust dialog and no terminal crash class. An agent may have several, one per chat.
 pub struct ChatSession {
+    pub agent_id: String,
     child: Child,
     input: Input,
     pub cwd: String,
-    /// Which spawn this is. A stop, new chat or folder switch replaces the session
-    /// under the same agent id; the replaced session's reader must leave it alone.
+    /// Which spawn this is. A stop or folder switch replaces the session under the same
+    /// conversation; the replaced session's reader must leave it alone.
     gen: u64,
     /// The model and effort it started on, so a change can take effect on the next message.
     settings: String,
+    /// When it was last given a turn: the one idle longest makes way when an agent has too many.
+    last_used: std::time::Instant,
 }
 
 /// What the developer sends in one turn: words, and the files attached to them.
@@ -142,14 +146,20 @@ pub fn kill_all(app: &tauri::AppHandle) {
     }
 }
 
+/// The live chat sessions, by conversation.
 #[derive(Default)]
 pub struct ChatManager {
-    pub sessions: Mutex<HashMap<String, ChatSession>>,
+    pub sessions: Mutex<HashMap<i64, ChatSession>>,
 }
 
-/// One background delegation batch. JARVIS fires off N workers in a turn (each
-/// runs detached and streams to its own tab); when the turn is `sealed` and all
-/// `pending` workers have finished, their `results` are synthesized back to him.
+/// Chat sessions an agent keeps running at once. Past that, the one idle longest stops;
+/// it resumes where it was the next time you write in that chat.
+const LIVE_SESSIONS_PER_AGENT: usize = 4;
+
+/// One background delegation batch, in one of the orchestrator's chats. It fires off N
+/// workers in a turn (each runs detached in its task's own conversation); when the turn
+/// is `sealed` and all `pending` workers have finished, their `results` are synthesized
+/// back into that chat.
 #[derive(Default)]
 pub struct DelegationState {
     pub sealed: bool,
@@ -192,9 +202,9 @@ pub struct ChatEvent {
 #[derive(Clone, Debug, Default)]
 pub struct Sink {
     pub(crate) usage_session: Option<crate::spend::Session>,
-    /// The conversation messages are saved in; None means the agent's active one.
+    /// The conversation messages are saved in; None means the agent's open one.
     pub conversation: Option<i64>,
-    /// The task it belongs to; None means whatever task the agent's chat session is on.
+    /// The task it belongs to; None means whatever task the conversation is on.
     pub task: Option<String>,
     /// A persistent chat session: its session id is saved for resuming, and the
     /// loop breaker may end it.
@@ -206,9 +216,20 @@ impl Sink {
         Self { usage_session: Some(crate::spend::Session::launched(launch)), ..self.clone() }
     }
 
-    /// The agent's ongoing chat session.
-    pub fn chat() -> Sink {
-        Sink { conversation: None, task: None, persistent: true, ..Default::default() }
+    /// One of the agent's chats, with its session.
+    pub fn chat(conversation: i64) -> Sink {
+        Sink { conversation: Some(conversation), task: None, persistent: true, ..Default::default() }
+    }
+
+    /// The chat the agent is open in (where "Talk to" goes), for what isn't from any one session.
+    pub fn open(app: &tauri::AppHandle, agent_id: &str) -> Sink {
+        let conversation = app.try_state::<crate::AppState>().map(|s| s.ledger.active_conversation(agent_id));
+        Sink { conversation, task: None, persistent: true, ..Default::default() }
+    }
+
+    /// Who is acting through this sink.
+    pub fn actor(&self, agent_id: &str) -> Actor {
+        Actor::new(agent_id, self.conversation)
     }
 
     /// A one-shot run for a delegated task, in that task's own conversation.
@@ -221,8 +242,8 @@ impl Sink {
             .or_else(|| app.try_state::<crate::AppState>().map(|s| s.ledger.active_conversation(agent_id)))
     }
 
-    pub(crate) fn task_for(&self, app: &tauri::AppHandle, agent_id: &str) -> Option<String> {
-        self.task.clone().or_else(|| crate::tasks::current(app, agent_id))
+    pub(crate) fn task_for(&self, app: &tauri::AppHandle) -> Option<String> {
+        self.task.clone().or_else(|| self.conversation.and_then(|c| crate::tasks::current_in(app, c)))
     }
 }
 
@@ -277,7 +298,7 @@ fn record_files_in(
             cwd: None,
             message_id,
             conversation_id: conversation,
-            task_id: sink.task_for(app, agent_id),
+            task_id: sink.task_for(app),
             attachments: files.to_vec(),
         },
     );
@@ -305,9 +326,9 @@ pub(crate) fn keep_copies(app: &tauri::AppHandle, paths: &[std::path::PathBuf]) 
     (kept, missed)
 }
 
-/// A system line in the agent's chat: saved and shown.
+/// A system line in the chat the agent is open in: saved and shown.
 pub(crate) fn note(app: &tauri::AppHandle, agent_id: &str, text: &str) {
-    record_in(app, &Sink::chat(), agent_id, "system", "system", Some(text), None, None);
+    record_in(app, &Sink::open(app, agent_id), agent_id, "system", "system", Some(text), None, None);
 }
 
 /// A system line in a particular sink (a delegated task's own conversation).
@@ -330,28 +351,22 @@ pub(crate) fn simple_in(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, kin
             conversation_id: sink.conversation.or_else(|| {
                 app.try_state::<crate::AppState>().and_then(|s| s.ledger.current_conversation(agent_id))
             }),
-            task_id: sink.task_for(app, agent_id),
+            task_id: sink.task_for(app),
             attachments: Vec::new(),
         },
     );
 }
 
-pub(crate) fn simple(app: &tauri::AppHandle, agent_id: &str, kind: &str, text: Option<String>) {
-    simple_in(app, &Sink::chat(), agent_id, kind, text);
-}
-
-/// Save a developer message (and its files) in the agent's active conversation and
-/// send it, starting the session in `cwd` if needed. Returns the stored message's id.
-pub fn send_user_turn(app: &tauri::AppHandle, agent_id: &str, text: &str, files: &[Attachment], cwd: &str) -> Result<Option<i64>, String> {
+/// Save a developer message (and its files) in one of the agent's chats and send it,
+/// starting that chat's session in `cwd` if needed. Returns the stored message's id.
+pub fn send_user_turn(app: &tauri::AppHandle, agent_id: &str, conversation: i64, text: &str, files: &[Attachment], cwd: &str) -> Result<Option<i64>, String> {
     let state = app.state::<crate::AppState>();
     state.workdirs.lock().unwrap().insert(agent_id.to_string(), cwd.to_string());
     let e = state.ledger.record(agent_id, "chat", &truncate(text, 80), 1);
     let _ = app.emit("ledger://entry", e);
-    let conversation = state.ledger.active_conversation(agent_id);
     let message_id = state.ledger.add_message_with(conversation, agent_id, "user", Some(text), None, None, files);
     let _ = app.emit("conversations://changed", ()); // a title/order may have changed
-    let sock = state.sock_path.clone();
-    send(app, agent_id, &UserTurn { text: text.to_string(), attachments: files.to_vec() }, cwd, &sock)?;
+    send(app, agent_id, conversation, &UserTurn { text: text.to_string(), attachments: files.to_vec() }, cwd)?;
     Ok(message_id)
 }
 
@@ -431,12 +446,12 @@ pub fn resolve_program(cmd: &str) -> Option<String> {
     None
 }
 
-/// Inject a steer message into an agent's live session (a new user turn).
-fn steer(app: &tauri::AppHandle, agent_id: &str, text: &str) {
-    if let Some(state) = app.try_state::<crate::AppState>() {
-        if let Some(s) = state.chat.sessions.lock().unwrap().get_mut(agent_id) {
-            let _ = s.send_turn(&UserTurn::plain(text));
-        }
+/// Inject a steer message into a chat's live session (a new user turn).
+fn steer(app: &tauri::AppHandle, conversation: Option<i64>, text: &str) {
+    let (Some(state), Some(c)) = (app.try_state::<crate::AppState>(), conversation) else { return };
+    let mut sessions = state.chat.sessions.lock().unwrap();
+    if let Some(s) = sessions.get_mut(&c) {
+        let _ = s.send_turn(&UserTurn::plain(text));
     }
 }
 
@@ -449,7 +464,7 @@ fn trip_headless_breaker(app: &tauri::AppHandle, agent_id: &str, tool: &str, sin
     let persistent = sink.persistent;
     use crate::breaker::Level;
     // Persistent sessions may be killed (hard_stop); one-shots can't, so cap them.
-    let level = crate::breaker::bump(agent_id, persistent);
+    let level = crate::breaker::bump(&sink.actor(agent_id).key(), persistent);
     let _ = app.emit("breaker://trip", agent_id.to_string());
 
     let (kind, note) = match level {
@@ -476,18 +491,15 @@ fn trip_headless_breaker(app: &tauri::AppHandle, agent_id: &str, tool: &str, sin
     match level {
         Level::Steering => steer(
             app,
-            agent_id,
+            sink.conversation,
             "[STEER] You've repeated the same action several times without progress. Stop, \
 reconsider your approach, and either take a genuinely different step or report what's blocking you.",
         ),
-        Level::Constrained => crate::pty::emit_status(app, agent_id, AgentStatus::Blocked),
+        Level::Constrained => runs::set(app, agent_id, sink.conversation, AgentStatus::Blocked),
         Level::Stopped => {
-            crate::pty::emit_status(app, agent_id, AgentStatus::Blocked);
-            if persistent {
-                if let Some(state) = app.try_state::<crate::AppState>() {
-                    let removed = state.chat.sessions.lock().unwrap().remove(agent_id);
-                    drop(removed); // Drop → group-kill, outside the sessions lock.
-                }
+            runs::set(app, agent_id, sink.conversation, AgentStatus::Blocked);
+            if let (true, Some(c)) = (persistent, sink.conversation) {
+                stop(app, c);
             }
         }
         Level::Healthy => {}
@@ -517,6 +529,8 @@ pub(crate) struct Launch {
     pub model: String,
     pub cwd: String,
     pub agent_id: String,
+    /// The conversation the process works in: a chat's, or a delegated task's own.
+    pub conversation: Option<i64>,
     pub orchestrator: bool,
     pub system_prompt: String,
     /// The provider's own session id to continue, if the conversation has one.
@@ -557,7 +571,7 @@ fn current_settings(app: &tauri::AppHandle, agent_id: &str) -> String {
 }
 
 /// Gather an agent's launch settings; fails when its provider's CLI isn't installed.
-pub(crate) fn launch_for(app: &tauri::AppHandle, agent_id: &str, cwd: &str, resume: Option<String>) -> Result<Launch, String> {
+pub(crate) fn launch_for(app: &tauri::AppHandle, agent_id: &str, conversation: Option<i64>, cwd: &str, resume: Option<String>) -> Result<Launch, String> {
     let engine = engine_for_spawn(app, agent_id);
     let program = resolve_program(&engine.command).ok_or_else(|| missing_engine_error(&engine))?;
     let state = app.state::<crate::AppState>();
@@ -573,6 +587,7 @@ pub(crate) fn launch_for(app: &tauri::AppHandle, agent_id: &str, cwd: &str, resu
         program,
         cwd: cwd.to_string(),
         agent_id: agent_id.to_string(),
+        conversation,
         orchestrator: crate::prompts::agent_is_orchestrator(app, agent_id),
         system_prompt: crate::prompts::system_prompt_for(app, agent_id),
         resume,
@@ -599,16 +614,17 @@ pub(crate) struct BridgeServer {
 
 pub(crate) fn bridge_server(launch: &Launch) -> BridgeServer {
     let role = if launch.orchestrator { "orchestrator" } else { "worker" };
-    BridgeServer {
-        command: launch.node.clone(),
-        args: vec![launch.scripts.mcp.clone()],
-        env: vec![
-            ("STARK_DELEGATE_SOCK".into(), launch.sock_path.clone()),
-            ("STARK_AGENT_ID".into(), launch.agent_id.clone()),
-            ("STARK_ROLE".into(), role.into()),
-            ("STARK_DELEGATE_TOKEN".into(), launch.sock_token.clone()),
-        ],
+    let mut env: Vec<(String, String)> = vec![
+        ("STARK_DELEGATE_SOCK".into(), launch.sock_path.clone()),
+        ("STARK_AGENT_ID".into(), launch.agent_id.clone()),
+        ("STARK_ROLE".into(), role.into()),
+        ("STARK_DELEGATE_TOKEN".into(), launch.sock_token.clone()),
+    ];
+    // Which of the agent's chats is asking, so approvals, questions and delegations land in that chat.
+    if let Some(c) = launch.conversation {
+        env.push(("STARK_CONVERSATION_ID".into(), c.to_string()));
     }
+    BridgeServer { command: launch.node.clone(), args: vec![launch.scripts.mcp.clone()], env }
 }
 
 /// The environment every provider process gets: a PATH that finds Homebrew and
@@ -744,6 +760,10 @@ fn build_headless(launch: &Launch) -> Command {
                 cmd.env("STARK_DELEGATE_SOCK", sock_path);
                 cmd.env("STARK_DELEGATE_TOKEN", sock_token);
                 cmd.env("STARK_AGENT_ID", aid);
+                // The gate hook runs under this process: it says which chat a tool call is from.
+                if let Some(c) = launch.conversation {
+                    cmd.env("STARK_CONVERSATION_ID", c.to_string());
+                }
             }
         }
     } else {
@@ -791,9 +811,8 @@ fn summarize_tool(name: &str, input: &serde_json::Value) -> String {
 /// The session is ready. A persistent session's id is stored so the chat resumes.
 pub(crate) fn session_ready(app: &tauri::AppHandle, agent_id: &str, sink: &Sink, session_id: Option<&str>, cwd: Option<String>) {
     if sink.persistent {
-        if let (Some(c), Some(sid)) = (cwd.as_deref(), session_id) {
+        if let (Some(c), Some(sid), Some(conv)) = (cwd.as_deref(), session_id, sink.conversation_for(app, agent_id)) {
             if let Some(state) = app.try_state::<crate::AppState>() {
-                let conv = state.ledger.active_conversation(agent_id);
                 state.ledger.set_conversation_session(conv, sid, c);
             }
         }
@@ -809,17 +828,20 @@ pub(crate) fn session_ready(app: &tauri::AppHandle, agent_id: &str, sink: &Sink,
             cwd,
             message_id: None,
             conversation_id: sink.conversation_for(app, agent_id),
-            task_id: sink.task_for(app, agent_id),
+            task_id: sink.task_for(app),
             attachments: Vec::new(),
         },
     );
-    crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
+    // A worker is busy from its first word; only a chat's session waits for you once it's up.
+    if sink.persistent {
+        runs::set(app, agent_id, sink.conversation, AgentStatus::Idle);
+    }
 }
 
 /// The agent said something.
 pub(crate) fn said(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, text: &str) {
-    crate::pty::emit_status(app, agent_id, AgentStatus::Working);
-    crate::outputs::said(agent_id, text);
+    runs::set(app, agent_id, sink.conversation, AgentStatus::Working);
+    crate::outputs::said(&sink.actor(agent_id).key(), text);
     if !text.trim().is_empty() {
         record_in(app, sink, agent_id, "text", "agent", Some(text), None, None);
     }
@@ -827,7 +849,7 @@ pub(crate) fn said(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, text: &s
 
 /// The agent's reasoning, where the provider shares it.
 pub(crate) fn thought(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, text: &str) {
-    crate::pty::emit_status(app, agent_id, AgentStatus::Working);
+    runs::set(app, agent_id, sink.conversation, AgentStatus::Working);
     if !text.trim().is_empty() {
         record_in(app, sink, agent_id, "thinking", "thinking", Some(text), None, None);
     }
@@ -835,25 +857,27 @@ pub(crate) fn thought(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, text:
 
 /// The agent is using a tool: shown, told to the task engine, and checked for loops.
 pub(crate) fn tool_called(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, tool_use_id: &str, name: &str, input: &serde_json::Value) {
-    crate::pty::emit_status(app, agent_id, AgentStatus::Working);
+    runs::set(app, agent_id, sink.conversation, AgentStatus::Working);
     let detail = summarize_tool(name, input);
     record_in(app, sink, agent_id, "tool", "tool", None, Some(name), Some(&detail));
-    let task = sink.task_for(app, agent_id);
-    crate::tasks::tool_use(app, agent_id, task.as_deref(), tool_use_id, name, input);
+    let task = sink.task_for(app);
+    let who = sink.actor(agent_id);
+    crate::tasks::tool_use(app, &who, task.as_deref(), tool_use_id, name, input);
+    let key = who.key();
     if matches!(name, "Write" | "Edit" | "MultiEdit" | "NotebookEdit") {
         let path = ["file_path", "notebook_path"].iter().find_map(|k| input.get(*k).and_then(|v| v.as_str())).unwrap_or("");
-        let full = crate::outputs::resolve(&crate::outputs::cwd_for(agent_id).unwrap_or_default(), path);
+        let full = crate::outputs::resolve(&crate::outputs::cwd_for(&key).unwrap_or_default(), path);
         if !path.is_empty() && crate::prompts::is_memory_file(app, &full) {
             // Notes an agent keeps for itself aren't something it made for you: they get a quiet spot of their own.
             let _ = app.emit("memory://changed", serde_json::json!({ "agentId": agent_id }));
         } else if !path.is_empty() {
-            crate::outputs::wrote(agent_id, path);
+            crate::outputs::wrote(&key, path);
         }
     }
     // Runaway loop guard for headless sessions: trip if the same call repeats too often.
     let sig = format!("{name}|{detail}");
-    if crate::breaker::is_runaway(crate::breaker::note_tool_call(agent_id, &sig)) {
-        crate::breaker::reset(agent_id);
+    if crate::breaker::is_runaway(crate::breaker::note_tool_call(&key, &sig)) {
+        crate::breaker::reset(&key);
         trip_headless_breaker(app, agent_id, name, sink);
     }
 }
@@ -881,12 +905,13 @@ pub(crate) fn turn_finished(app: &tauri::AppHandle, sink: &Sink, agent_id: &str,
     if let (true, Some(reply)) = (sink.persistent, text.as_deref()) {
         crate::voices::reply(app, agent_id, reply);
     }
-    let (made, more) = crate::outputs::finished(agent_id);
+    let who = sink.actor(agent_id);
+    let (made, more) = crate::outputs::finished(&who.key());
     // Only files the agent may read without asking: nothing reaches the chat past the gate.
     // Its memory is readable too, but it isn't something it made for you.
     let made: Vec<_> = made
         .into_iter()
-        .filter(|p| !crate::prompts::is_memory_file(app, p) && crate::bridge::may_read_freely(app, agent_id, p))
+        .filter(|p| !crate::prompts::is_memory_file(app, p) && crate::bridge::may_read_freely(app, &who, p))
         .collect();
     if !made.is_empty() {
         let (kept, _) = keep_copies(app, &made);
@@ -904,7 +929,7 @@ pub(crate) fn turn_finished(app: &tauri::AppHandle, sink: &Sink, agent_id: &str,
             cwd: None,
             message_id: None,
             conversation_id: sink.conversation_for(app, agent_id),
-            task_id: sink.task_for(app, agent_id),
+            task_id: sink.task_for(app),
             attachments: Vec::new(),
         },
     );
@@ -912,20 +937,21 @@ pub(crate) fn turn_finished(app: &tauri::AppHandle, sink: &Sink, agent_id: &str,
         "usage://update",
         serde_json::json!({
             "agentId": agent_id,
+            "conversationId": sink.conversation,
             "costUsd": usage.cost_usd.unwrap_or(0.0),
             "contextTokens": usage.context_tokens,
         }),
     );
-    crate::breaker::reset(agent_id); // turn ended cleanly: clear the loop guard
-    crate::breaker::step_down(agent_id); // and de-escalate the ladder one rung
-    crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
+    crate::breaker::reset(&who.key()); // turn ended cleanly: clear the loop guard
+    crate::breaker::step_down(&who.key()); // and de-escalate the ladder one rung
+    runs::set(app, agent_id, sink.conversation, AgentStatus::Idle);
     // The orchestrator's turn just ended: if it dispatched workers this turn, seal
-    // the batch so it flushes back once every worker finishes.
+    // the batch so it flushes back into this chat once every worker finishes.
     if crate::prompts::agent_is_orchestrator(app, agent_id) {
-        crate::delegation::seal_batch(app);
+        crate::delegation::seal_batch(app, sink.conversation);
     }
-    if sink.persistent {
-        crate::tasks::turn_ended(app, agent_id);
+    if let (true, Some(c)) = (sink.persistent, sink.conversation) {
+        crate::tasks::turn_ended(app, agent_id, c);
     }
 }
 
@@ -982,7 +1008,7 @@ fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, si
             }
         }
         "assistant" => {
-            crate::pty::emit_status(app, agent_id, AgentStatus::Working);
+            runs::set(app, agent_id, sink.conversation, AgentStatus::Working);
             if let Some(blocks) = v.pointer("/message/content").and_then(|c| c.as_array()) {
                 for b in blocks {
                     match b.get("type").and_then(|x| x.as_str()) {
@@ -1037,77 +1063,71 @@ fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, si
     }
 }
 
-fn spawn_stderr_pump(app: &tauri::AppHandle, agent_id: &str, stderr: std::process::ChildStderr) {
+fn spawn_stderr_pump(app: &tauri::AppHandle, agent_id: &str, sink: &Sink, stderr: std::process::ChildStderr) {
     let app = app.clone();
     let id = agent_id.to_string();
+    let sink = sink.clone();
     std::thread::spawn(move || {
         let reader = BufReader::new(stderr);
         for line in reader.lines().map_while(Result::ok) {
             let l = line.trim();
             // stream-json prints benign notices to stderr; only surface real errors
             if l.to_lowercase().contains("error") {
-                simple(&app, &id, "error", Some(l.to_string()));
+                simple_in(&app, &sink, &id, "error", Some(l.to_string()));
             }
         }
     });
 }
 
-/// A session's process ended. Only a session that is still current reports its
-/// own end; one that was stopped or replaced (new chat, folder switch) must not
-/// remove, offline or mark as expired the session that took its place.
+/// A chat session's process ended. Only a session that is still current reports its
+/// own end; one that was stopped or replaced (a folder switch) must not remove, mark
+/// offline or as expired the session that took its place.
 /// `expired` means it was resuming a saved session that never came up.
-pub(crate) fn session_finished(app: &tauri::AppHandle, agent_id: &str, gen: u64, expired: bool, orchestrator: bool) {
+pub(crate) fn session_finished(app: &tauri::AppHandle, agent_id: &str, conversation: i64, gen: u64, expired: bool, orchestrator: bool) {
     let ended = {
         let state = app.state::<crate::AppState>();
         let mut map = state.chat.sessions.lock().unwrap();
-        if map.get(agent_id).map(|s| s.gen) == Some(gen) {
-            map.remove(agent_id)
+        if map.get(&conversation).map(|s| s.gen) == Some(gen) {
+            map.remove(&conversation)
         } else {
             None
         }
     };
     if let Some(ended) = ended {
         drop(ended);
+        let sink = Sink::chat(conversation);
         // The stored session no longer resolves (the provider rotated or pruned it).
         // Forget it so the next message starts fresh instead of re-resuming the dead
         // id forever, and tell the developer to resend once.
         if expired {
             if let Some(state) = app.try_state::<crate::AppState>() {
-                let conv = state.ledger.active_conversation(agent_id);
-                state.ledger.forget_conversation_session(conv);
+                state.ledger.forget_conversation_session(conversation);
             }
-            simple(
+            simple_in(
                 app,
+                &sink,
                 agent_id,
                 "system",
                 Some("The previous session expired, so this chat started fresh. Please send your last message again.".into()),
             );
         }
-        simple(app, agent_id, "exit", None);
-        crate::pty::emit_status(app, agent_id, AgentStatus::Offline);
-        crate::tasks::session_ended(app, agent_id, crate::tasks::Ended::Unexpectedly);
+        simple_in(app, &sink, agent_id, "exit", None);
+        runs::ended(app, conversation);
+        crate::tasks::session_ended(app, agent_id, conversation, crate::tasks::Ended::Unexpectedly);
     }
     // If the orchestrator's session ended mid-turn (crash / stop / cwd switch),
     // seal any open delegation batch so pending workers' results aren't
     // stranded waiting for a `result` that will never come.
     if orchestrator {
-        crate::delegation::seal_batch(app);
+        crate::delegation::seal_batch(app, Some(conversation));
     }
 }
 
-/// Start an agent's chat session on its provider, resuming the active
-/// conversation's saved session when there is one.
-pub fn start_session(
-    app: &tauri::AppHandle,
-    agent_id: &str,
-    cwd: &str,
-    sock_path: &str,
-) -> Result<(), String> {
-    let _ = sock_path; // the launch carries the bridge socket
-    let resume = app
-        .try_state::<crate::AppState>()
-        .and_then(|s| s.ledger.conversation_session(s.ledger.active_conversation(agent_id)));
-    let launch = launch_for(app, agent_id, cwd, resume)?;
+/// Start the session for one of an agent's chats on its provider, resuming the chat's
+/// saved session when there is one.
+pub fn start_session(app: &tauri::AppHandle, agent_id: &str, conversation: i64, cwd: &str) -> Result<(), String> {
+    let resume = app.try_state::<crate::AppState>().and_then(|s| s.ledger.conversation_session(conversation));
+    let launch = launch_for(app, agent_id, Some(conversation), cwd, resume)?;
     let settings = settings_key(&launch.model, &launch.effort);
     let gen = SESSION_GEN.fetch_add(1, Ordering::Relaxed);
     let (child, input) = match launch.engine.kind.as_str() {
@@ -1115,27 +1135,45 @@ pub fn start_session(
         "opencode" => crate::opencode::start_chat(app, &launch, gen)?,
         _ => start_claude(app, &launch, gen)?,
     };
-    app.state::<crate::AppState>()
-        .chat
-        .sessions
-        .lock()
-        .unwrap()
-        .insert(agent_id.to_string(), ChatSession { child, input, cwd: cwd.to_string(), gen, settings });
-    crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
+    let session = ChatSession { agent_id: agent_id.to_string(), child, input, cwd: cwd.to_string(), gen, settings, last_used: std::time::Instant::now() };
+    app.state::<crate::AppState>().chat.sessions.lock().unwrap().insert(conversation, session);
+    runs::started(app, agent_id, conversation, cwd, AgentStatus::Idle);
+    make_room(app, agent_id, conversation);
     Ok(())
+}
+
+/// Which of an agent's other sessions stop so it keeps at most `limit`: the idle ones, longest idle first.
+fn surplus(sessions: &[(i64, std::time::Instant, bool)], keep: i64, limit: usize) -> Vec<i64> {
+    let mut idle: Vec<(i64, std::time::Instant)> = sessions.iter().filter(|(c, _, busy)| *c != keep && !busy).map(|(c, t, _)| (*c, *t)).collect();
+    idle.sort_by_key(|(_, t)| *t);
+    idle.into_iter().take(sessions.len().saturating_sub(limit)).map(|(c, _)| c).collect()
+}
+
+/// An agent with too many chat sessions running stops the ones idle longest; each resumes when written to.
+fn make_room(app: &tauri::AppHandle, agent_id: &str, keep: i64) {
+    let mine: Vec<(i64, std::time::Instant)> = {
+        let state = app.state::<crate::AppState>();
+        let sessions = state.chat.sessions.lock().unwrap();
+        sessions.iter().filter(|(_, s)| s.agent_id == agent_id).map(|(c, s)| (*c, s.last_used)).collect()
+    };
+    let with_state: Vec<(i64, std::time::Instant, bool)> = mine.into_iter().map(|(c, t)| (c, t, runs::busy_in(app, c))).collect();
+    for conversation in surplus(&with_state, keep, LIVE_SESSIONS_PER_AGENT) {
+        stop(app, conversation);
+    }
 }
 
 /// Claude Code over stream-json: spawn it and read what it says until it exits.
 fn start_claude(app: &tauri::AppHandle, launch: &Launch, gen: u64) -> Result<(Child, Input), String> {
+    let conversation = launch.conversation.ok_or("A chat session needs its conversation.")?;
+    let mut sink = Sink::chat(conversation).launched(launch);
     let mut child = build_headless(launch).spawn().map_err(|e| e.to_string())?;
     let stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     if let Some(stderr) = child.stderr.take() {
-        spawn_stderr_pump(app, &launch.agent_id, stderr);
+        spawn_stderr_pump(app, &launch.agent_id, &sink, stderr);
     }
     let (app2, id2) = (app.clone(), launch.agent_id.clone());
     let (resumed, orchestrator) = (launch.resume.is_some(), launch.orchestrator);
-    let mut sink = Sink::chat().launched(launch);
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
         let mut saw_init = false;
@@ -1152,29 +1190,23 @@ fn start_claude(app: &tauri::AppHandle, launch: &Launch, gen: u64) -> Result<(Ch
                 saw_init |= init;
             }
         }
-        session_finished(&app2, &id2, gen, resumed && !saw_init, orchestrator);
+        session_finished(&app2, &id2, conversation, gen, resumed && !saw_init, orchestrator);
     });
     Ok((child, Input::StreamJson(stdin)))
 }
 
-/// Send a user message, starting the session (in `cwd`) if needed.
-pub fn send(
-    app: &tauri::AppHandle,
-    agent_id: &str,
-    turn: &UserTurn,
-    cwd: &str,
-    sock_path: &str,
-) -> Result<(), String> {
-    // Start a session if none exists, or restart it if the target directory
-    // changed (so switching an agent to another repo just works), or if its model
-    // or effort changed while it was between turns: the conversation resumes on the
-    // new settings. A turn in progress is never cut short for that; the change waits.
+/// Send a user message into one of an agent's chats, starting its session (in `cwd`) if needed.
+pub fn send(app: &tauri::AppHandle, agent_id: &str, conversation: i64, turn: &UserTurn, cwd: &str) -> Result<(), String> {
+    // Start a session if the chat has none, or restart it if the target directory
+    // changed (so switching a chat to another repo just works), or if the agent's model
+    // or effort changed while the chat was between turns: it resumes on the new
+    // settings. A turn in progress is never cut short for that; the change waits.
     let settings = current_settings(app, agent_id);
+    let busy = runs::busy_in(app, conversation);
     let (need_start, switched) = {
         let state = app.state::<crate::AppState>();
-        let busy = matches!(state.statuses.lock().unwrap().get(agent_id), Some(AgentStatus::Working | AgentStatus::Thinking));
         let map = state.chat.sessions.lock().unwrap();
-        match map.get(agent_id) {
+        match map.get(&conversation) {
             None => (true, false),
             Some(s) if s.cwd != cwd => (true, false),
             Some(s) => {
@@ -1183,15 +1215,17 @@ pub fn send(
             }
         }
     };
+    let sink = Sink::chat(conversation);
     if switched {
-        note(app, agent_id, &switch_note(app, agent_id));
+        note_in(app, &sink, agent_id, &switch_note(app, agent_id));
     }
     if need_start {
         {
             let state = app.state::<crate::AppState>();
-            state.chat.sessions.lock().unwrap().remove(agent_id); // Drop kills old
+            let old = state.chat.sessions.lock().unwrap().remove(&conversation);
+            drop(old); // Drop kills it, outside the lock
         }
-        start_session(app, agent_id, cwd, sock_path)?;
+        start_session(app, agent_id, conversation, cwd)?;
     }
 
     // The orchestrator gets the current team + project map prepended to each turn,
@@ -1209,15 +1243,44 @@ pub fn send(
     }
     let state = app.state::<crate::AppState>();
     let mut map = state.chat.sessions.lock().unwrap();
-    let s = map
-        .get_mut(agent_id)
-        .ok_or_else(|| format!("no chat session for {agent_id}"))?;
+    let s = map.get_mut(&conversation).ok_or_else(|| format!("no chat session for {agent_id}"))?;
     s.send_turn(&content)?;
+    s.last_used = std::time::Instant::now();
     drop(map);
-    crate::outputs::started(agent_id, &Sink::chat(), cwd);
+    crate::outputs::started(&sink.actor(agent_id).key(), &sink, cwd);
 
-    crate::pty::emit_status(app, agent_id, AgentStatus::Thinking);
+    runs::set(app, agent_id, Some(conversation), AgentStatus::Thinking);
     Ok(())
+}
+
+/// Hand a message to a chat's live session as a new user turn, without saving it as yours
+/// (delegation results, a teammate's message, a standup). False when nothing runs there.
+pub(crate) fn inject(app: &tauri::AppHandle, agent_id: &str, conversation: i64, text: &str) -> bool {
+    let Some(state) = app.try_state::<crate::AppState>() else { return false };
+    let mut map = state.chat.sessions.lock().unwrap();
+    let Some(s) = map.get_mut(&conversation) else { return false };
+    if s.send_turn(&UserTurn::plain(text)).is_err() {
+        return false;
+    }
+    s.last_used = std::time::Instant::now();
+    let cwd = s.cwd.clone();
+    drop(map);
+    let sink = Sink::chat(conversation);
+    crate::outputs::started(&sink.actor(agent_id).key(), &sink, &cwd);
+    runs::set(app, agent_id, Some(conversation), AgentStatus::Thinking);
+    true
+}
+
+/// The chat of the agent's that's live for a message not meant for any one of them: the one it's
+/// open in if that has a session, else the one it used last.
+pub(crate) fn live_chat(app: &tauri::AppHandle, agent_id: &str) -> Option<i64> {
+    let state = app.try_state::<crate::AppState>()?;
+    let open = state.ledger.current_conversation(agent_id);
+    let sessions = state.chat.sessions.lock().unwrap();
+    if let Some(c) = open.filter(|c| sessions.contains_key(c)) {
+        return Some(c);
+    }
+    sessions.iter().filter(|(_, s)| s.agent_id == agent_id).max_by_key(|(_, s)| s.last_used).map(|(c, _)| *c)
 }
 
 /// "Now on claude-opus-5-5 at high effort." for the chat, when a session restarts on new settings.
@@ -1233,16 +1296,18 @@ fn switch_note(app: &tauri::AppHandle, agent_id: &str) -> String {
     }
 }
 
-pub fn stop(app: &tauri::AppHandle, agent_id: &str) {
-    let removed = app
-        .state::<crate::AppState>()
-        .chat
-        .sessions
-        .lock()
-        .unwrap()
-        .remove(agent_id);
+/// End one chat's live session. The chat itself stays; writing there again resumes it.
+pub fn stop(app: &tauri::AppHandle, conversation: i64) {
+    let removed = app.state::<crate::AppState>().chat.sessions.lock().unwrap().remove(&conversation);
     drop(removed);
-    crate::pty::emit_status(app, agent_id, AgentStatus::Offline);
+    runs::ended(app, conversation);
+}
+
+/// The conversations an agent has a live chat session in.
+pub fn sessions_of(app: &tauri::AppHandle, agent_id: &str) -> Vec<i64> {
+    let Some(state) = app.try_state::<crate::AppState>() else { return Vec::new() };
+    let sessions = state.chat.sessions.lock().unwrap();
+    sessions.iter().filter(|(_, s)| s.agent_id == agent_id).map(|(c, _)| *c).collect()
 }
 
 // ---- Delegation bridge -----------------------------------------------------
@@ -1252,13 +1317,14 @@ pub fn stop(app: &tauri::AppHandle, agent_id: &str) {
 /// The task card always closes: done with the result, or blocked with the reason.
 pub fn run_task_blocking(
     app: &tauri::AppHandle,
-    from: &str,
+    by: &Actor,
     agent_id: &str,
     task: &str,
     cwd: &str,
 ) -> Result<String, String> {
-    // The delegation becomes a child of the delegator's task, in its own conversation.
-    let Some((child, conversation)) = crate::tasks::begin_child(app, from, agent_id, task, cwd) else {
+    let from = by.agent.as_str();
+    // The delegation becomes a child of the delegating chat's task, in its own conversation.
+    let Some((child, conversation)) = crate::tasks::begin_child(app, by, agent_id, task, cwd) else {
         return Err("The delegated task couldn't be recorded.".into());
     };
     let cwd = child.cwd.as_str();
@@ -1273,7 +1339,7 @@ pub fn run_task_blocking(
         let e = state.ledger.record(from, "delegate", &format!("{from_name} → {worker_name} · {}", truncate(task, 46)), 3);
         let _ = app.emit("ledger://entry", e);
     }
-    crate::pty::emit_status(app, agent_id, AgentStatus::Thinking);
+    runs::started(app, agent_id, conversation, cwd, AgentStatus::Thinking);
 
     let context = crate::prompts::workspace_context(app, agent_id, cwd);
     let request = if context.is_empty() { task.to_string() } else { format!("{context}\n\n{task}") };
@@ -1282,7 +1348,7 @@ pub fn run_task_blocking(
     let outcome = if crate::tasks::end_child(app, &child.id, agent_id, &outcome) { Err(crate::tasks::STOPPED_BY_YOU.to_string()) } else { outcome };
     let status = if matches!(&outcome, Ok(r) if !r.trim().is_empty()) { "done" } else { "blocked" };
     floor_log(app, agent_id, &format!("task-{status}"), &truncate(task, 80));
-    crate::pty::emit_status(app, agent_id, AgentStatus::Idle);
+    runs::ended(app, conversation);
     outcome
 }
 
@@ -1290,8 +1356,8 @@ pub fn run_task_blocking(
 fn run_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, cwd: &str, sink: &Sink) -> Result<String, String> {
     // Delegated workers also get their skill kit + the ask_human bridge, so
     // their review gates work even when JARVIS delegated the task.
-    let launch = launch_for(app, agent_id, cwd, None)?;
-    crate::outputs::started(agent_id, sink, cwd);
+    let launch = launch_for(app, agent_id, sink.conversation, cwd, None)?;
+    crate::outputs::started(&sink.actor(agent_id).key(), sink, cwd);
     match launch.engine.kind.as_str() {
         "codex" => return crate::codex::run_once(app, &launch, task, sink),
         "opencode" => return crate::opencode::run_once(app, &launch, task, sink),
@@ -1336,7 +1402,7 @@ fn drive_worker(app: &tauri::AppHandle, agent_id: &str, task: &str, child: &mut 
     let mut stdin = child.stdin.take().ok_or("The worker has no input stream.")?;
     let stdout = child.stdout.take().ok_or("The worker has no output stream.")?;
     if let Some(stderr) = child.stderr.take() {
-        spawn_stderr_pump(app, agent_id, stderr);
+        spawn_stderr_pump(app, agent_id, &sink, stderr);
     }
 
     let msg = serde_json::json!({
@@ -1382,6 +1448,19 @@ mod tests {
         assert!(is_init(&serde_json::json!({ "type": "system", "subtype": "init", "session_id": "s" })));
         assert!(!is_init(&serde_json::json!({ "type": "system", "subtype": "compact_boundary" })));
         assert!(!is_init(&serde_json::json!({ "type": "assistant" })));
+    }
+
+    #[test]
+    fn an_agent_with_too_many_chat_sessions_stops_the_ones_idle_longest() {
+        let now = std::time::Instant::now();
+        let ago = |s: u64| now - std::time::Duration::from_secs(s);
+        // Five sessions, limit four: the oldest idle one goes; a busy one and the one just used never do.
+        let sessions = [(1, ago(500), true), (2, ago(400), false), (3, ago(300), false), (4, ago(200), false), (5, now, false)];
+        assert_eq!(surplus(&sessions, 5, 4), vec![2]);
+        assert!(surplus(&sessions[..4], 4, 4).is_empty(), "within the limit nothing stops");
+        // Everything idle is busy or kept: it goes over the limit rather than stop work.
+        let busy = [(1, ago(9), true), (2, ago(8), true), (3, ago(7), true), (4, ago(6), true), (5, now, false)];
+        assert!(surplus(&busy, 5, 4).is_empty());
     }
 
     #[test]

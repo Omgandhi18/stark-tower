@@ -249,7 +249,7 @@
   box-shadow: var(--shadow-overlay);
 }
 
-/* ---- Dock: pinned question and composer ---------------------------------------- */
+/* ---- Dock: the composer ------------------------------------------------------------ */
 .chat-dock {
   display: grid;
   /* The column shrinks with the chat (beside the preview, say); cards wrap rather than spill. */
@@ -261,19 +261,21 @@
   padding: 0 var(--chat-gutter) var(--space-5);
 }
 
-.question-card {
+/* ---- What the agent waits on you for, at the end of the chat ------------------------------ */
+/* The same request as in Notifications (its words, then your decision), sized for the chat. */
+.chat-request {
   position: relative;
   display: grid;
   gap: var(--space-2);
-  max-height: 40vh;
-  padding: var(--space-3) var(--space-4) var(--space-4) var(--space-5);
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-4) var(--space-5) 0;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-card);
   background: linear-gradient(var(--tone-soft), var(--tone-soft)), var(--surface-raised);
-  overflow-y: auto;
+  overflow: hidden;
 }
 
-.question-card::before {
+.chat-request::before {
   content: "";
   position: absolute;
   inset: 0 auto 0 0;
@@ -281,31 +283,57 @@
   background: var(--tone);
 }
 
-.question-head {
+.chat-request-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1) var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.chat-request-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--tone);
   font-weight: var(--weight-semibold);
 }
 
-.question-head time {
+.chat-request-head time {
   margin-left: auto;
   color: var(--text-muted);
   font-size: var(--text-xs);
-  font-weight: var(--weight-regular);
 }
 
-.question-title {
-  font-size: var(--text-md);
+.chat-request-title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
   font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+  line-height: var(--leading-tight);
 }
 
-.question-choices {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-top: var(--space-1);
+.chat-request-body {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.chat-request-body .review-mockup {
+  height: min(50vh, 480px);
+}
+
+.chat-request-error {
+  color: var(--state-danger);
+  font-size: var(--text-sm);
+}
+
+/* The decision bar runs the card's full width, under a rule, as in Notifications. */
+.chat-request .decision-bar {
+  margin: var(--space-2) calc(-1 * var(--space-5)) 0;
+  padding: var(--space-3) var(--space-5) var(--space-4);
+  background: color-mix(in srgb, var(--surface-sunken) 70%, transparent);
 }
 
 .chat-composer {

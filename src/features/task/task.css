@@ -1,4 +1,7 @@
 .task-screen {
+  /* The columns either side of the chat; collapsed, each floats out at this width when you rest on its rail. */
+  --task-left-width: 264px;
+  --task-rail-width: 372px;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -109,16 +112,75 @@
 
 /* Left column: who's working on it, then the owner's other chats */
 .task-left {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: var(--task-left-width);
+  flex: none;
+  min-height: 0;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--surface-sunken);
+}
+
+.task-left-inner {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
-  width: 264px;
-  flex: none;
+  flex: 1;
   min-height: 0;
   padding: var(--space-4) var(--space-3);
-  border-right: 1px solid var(--border-subtle);
-  background: var(--surface-sunken);
   overflow-y: auto;
+}
+
+/* ---- Collapsed columns: a rail of icons, and the whole column floating out over the chat while you rest on it */
+.task-left.is-collapsed,
+.task-rail.is-collapsed {
+  width: var(--rail-width);
+}
+
+.task-left.is-collapsed > .rail,
+.task-rail.is-collapsed > .rail {
+  flex: 1;
+}
+
+.task-left.is-collapsed > .task-left-inner,
+.task-rail.is-collapsed > .task-rail-inner {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: var(--z-drawer);
+  background: var(--surface-sunken);
+  box-shadow: var(--shadow-overlay);
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity var(--duration) var(--ease-out), transform var(--duration) var(--ease-out), visibility 0s linear var(--duration);
+}
+
+.task-left.is-collapsed > .task-left-inner {
+  left: 0;
+  width: var(--task-left-width);
+  border-right: 1px solid var(--border-subtle);
+  transform: translateX(-8px);
+}
+
+.task-rail.is-collapsed > .task-rail-inner {
+  right: 0;
+  width: var(--task-rail-width);
+  border-left: 1px solid var(--border-subtle);
+  transform: translateX(8px);
+}
+
+.task-left.is-collapsed > .is-peeking,
+.task-rail.is-collapsed > .is-peeking {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+  transition: opacity var(--duration) var(--ease-out), transform var(--duration) var(--ease-out), visibility 0s;
+}
+
+/* Brought out from the keyboard, focus lands on the column itself; its showing up is the cue. */
+:is(.task-left-inner, .task-rail-inner):focus-visible {
+  outline: none;
 }
 
 .execution,
@@ -132,12 +194,18 @@
   padding: 0 var(--space-2);
 }
 
-.execution-list {
-  /* The portrait's size (ExecutionTree's AVATAR) and its gap to the text; notes under a person line up with their text. */
+/* The tree: who asked and the owner on the trunk, teammates and helpers on branches from the owner. */
+.execution-list,
+.execution-branches {
+  /* The portraits' sizes (ExecutionTree's TRUNK_AVATAR and BRANCH_AVATAR), the gap to their text, and
+     where a branch leaves the trunk: halfway down a branch's portrait. */
   --execution-avatar: 40px;
+  --execution-branch-avatar: 32px;
   --execution-gap: 10px;
-  --execution-indent: calc(var(--space-2) + var(--execution-avatar) + var(--execution-gap));
-  position: relative;
+  --execution-pad: var(--space-2);
+  --execution-trunk: calc(var(--execution-pad) + var(--execution-avatar) / 2);
+  --execution-reach: 14px;
+  --execution-fork: calc(var(--execution-pad) + var(--execution-branch-avatar) / 2);
   display: grid;
   /* The column's width, never a long title's: those shorten instead. */
   grid-template-columns: minmax(0, 1fr);
@@ -147,47 +215,143 @@
   list-style: none;
 }
 
-.execution-node + .execution-node {
+.execution-node {
   position: relative;
+  min-width: 0;
 }
 
-/* The reporting line from each contributor back to the owner (and from the owner back to who asked). */
-.execution-node + .execution-node::before {
-  content: "";
-  position: absolute;
-  top: -8px;
-  left: calc(var(--space-2) + var(--execution-avatar) / 2);
-  width: 1px;
-  height: 22px;
-  background: var(--border-strong);
+.execution-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--execution-avatar) minmax(0, 1fr);
+  align-items: start;
+  column-gap: var(--execution-gap);
+  padding: var(--execution-pad);
+  border-radius: var(--radius-control);
+  transition: background-color var(--duration-fast) var(--ease-out);
 }
 
-.execution-button {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--execution-gap);
-  width: 100%;
-  padding: var(--space-2);
+.execution-card > :not(.execution-open, .execution-portrait, .execution-helper-icon) {
+  grid-column: 2;
+}
+
+/* Placed explicitly: the open button shares their row, and auto-placement would move them aside. */
+.execution-portrait,
+.execution-helper-icon {
+  grid-row: 1 / span 4;
+  grid-column: 1;
+}
+
+/* The task on the page: its owner, marked like the mockup's current row. */
+.execution-card.is-current {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.execution-text {
+  grid-row: 1;
+}
+
+/* The portrait and text open their task, through a button laid over that row (and the card's edge around it). */
+.execution-open {
+  position: relative;
+  grid-row: 1;
+  grid-column: 1 / -1;
+  /* WebKit sizes a button to its content, even as a grid item. */
+  align-self: stretch;
+  justify-self: stretch;
+  margin: calc(-1 * var(--execution-pad)) calc(-1 * var(--execution-pad)) 0;
+  padding: 0;
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
-  text-align: left;
 }
 
-button.execution-button:hover {
+.execution-card.is-openable:has(> .execution-open:hover) {
   background: var(--surface-hover);
 }
 
-.execution-node.is-current .execution-button {
-  background: var(--accent-soft);
+.execution-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* The trunk: from under a portrait down to whoever is next. */
+.execution-card.has-tail::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--execution-trunk) - 0.5px);
+  top: calc(var(--execution-pad) + var(--execution-avatar));
+  bottom: calc(-1 * var(--space-1));
+  width: 1px;
+  background: var(--border-strong);
+}
+
+/* Who asked leads down into the owner's portrait. */
+.execution-list > .execution-node + .execution-node::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--execution-trunk) - 0.5px);
+  top: 0;
+  height: var(--execution-pad);
+  width: 1px;
+  background: var(--border-strong);
+}
+
+/* Branches hang off the owner's trunk. */
+.execution-branches {
+  padding: var(--space-1) 0 0 calc(var(--execution-trunk) + var(--execution-reach));
+}
+
+.execution-branches .execution-card {
+  grid-template-columns: var(--execution-branch-avatar) minmax(0, 1fr);
+}
+
+.execution-branches > .execution-node::before,
+.execution-branches > .execution-node::after {
+  content: "";
+  position: absolute;
+  background: var(--border-strong);
+}
+
+/* The trunk continues past each branch, and stops at the last one. */
+.execution-branches > .execution-node::before {
+  left: calc(-1 * var(--execution-reach) - 0.5px);
+  top: calc(-1 * var(--space-1));
+  bottom: 0;
+  width: 1px;
+}
+
+.execution-branches > .execution-node:last-child::before {
+  bottom: auto;
+  height: calc(var(--space-1) + var(--execution-fork));
+}
+
+.execution-branches > .execution-node::after {
+  left: calc(-1 * var(--execution-reach));
+  top: var(--execution-fork);
+  width: calc(var(--execution-reach) - 2px);
+  height: 1px;
+}
+
+/* Where a branch leaves the trunk, a dot in the colour of how their part is going. */
+.execution-branches .execution-card::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--execution-reach) - 3px);
+  top: calc(var(--execution-fork) - 3px);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tone, var(--text-muted));
+  box-shadow: 0 0 0 2px var(--surface-sunken);
 }
 
 .execution-helper-icon {
   display: grid;
   place-items: center;
-  width: var(--execution-avatar);
-  height: var(--execution-avatar);
-  flex: none;
+  width: var(--execution-branch-avatar);
+  height: var(--execution-branch-avatar);
   border-radius: 50%;
   background: var(--surface-hover);
   color: var(--text-secondary);
@@ -204,11 +368,25 @@ button.execution-button:hover {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
   font-weight: var(--weight-semibold);
 }
 
+.execution-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.execution-name .tag {
+  flex: none;
+  height: 20px;
+  padding: 0 6px;
+}
+
 .execution-line {
-  color: var(--tone, var(--text-secondary));
+  color: var(--text-secondary);
   font-size: var(--text-sm);
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -216,7 +394,16 @@ button.execution-button:hover {
   overflow: hidden;
 }
 
+/* What needs you, or went wrong, reads in its colour; the rest stays quiet, as in the mockup. */
+.execution-card:is(.tone-attention, .tone-danger) .execution-line {
+  color: var(--tone);
+}
+
 .execution-files {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
   color: var(--text-muted);
   font-size: var(--text-xs);
 }
@@ -225,24 +412,25 @@ button.execution-button:hover {
 .execution-tasks {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
-  margin: 0;
-  padding: 0 var(--space-2) var(--space-2) calc(var(--execution-indent) - var(--space-2));
+  gap: 1px;
+  margin: var(--space-2) 0 0 -6px;
+  padding: 0;
   list-style: none;
 }
 
 .execution-task {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: var(--space-2);
   width: 100%;
   min-width: 0;
-  padding: 4px var(--space-2);
+  padding: 3px 6px;
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--text-secondary);
   font-size: var(--text-sm);
+  line-height: var(--leading-tight);
   text-align: left;
 }
 
@@ -253,6 +441,7 @@ button.execution-button:hover {
   height: 6px;
   border-radius: 50%;
   background: var(--tone, var(--text-muted));
+  transform: translateY(-1px);
 }
 
 button.execution-task:hover {
@@ -265,24 +454,59 @@ button.execution-task:hover {
   color: var(--text);
 }
 
+/* Two lines before a title shortens: the column is narrow, and titles start alike. */
 .execution-task-title {
   min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Under a person: the files they've claimed, and a clash with another agent over one. */
 .execution-claims,
 .execution-conflict {
-  margin: 0;
-  padding: 0 var(--space-2) var(--space-2) var(--execution-indent);
+  margin: var(--space-2) 0 0;
   font-size: var(--text-xs);
   overflow-wrap: anywhere;
 }
 
 .execution-claims {
   color: var(--text-muted);
+}
+
+.execution-claims summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: -2px;
+  padding: 1px 2px;
+  border-radius: 4px;
+  list-style: none;
+  cursor: default;
+}
+
+.execution-claims summary::-webkit-details-marker {
+  display: none;
+}
+
+.execution-claims summary:hover {
+  color: var(--text-secondary);
+}
+
+.execution-claims-chevron {
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.execution-claims[open] .execution-claims-chevron {
+  transform: rotate(90deg);
+}
+
+.execution-claims ul {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 0;
+  padding: 0 0 0 18px;
 }
 
 .execution-conflict {
@@ -674,7 +898,7 @@ button.execution-task:hover {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: 372px;
+  width: var(--task-rail-width);
   flex: none;
   min-height: 0;
   border-left: 1px solid var(--border-subtle);
@@ -708,16 +932,17 @@ button.execution-task:hover {
   background: var(--accent-soft);
 }
 
-/* Beside the browser or simulator on a smaller window, the left column gives way to the chat. */
-@media (max-width: 1440px) {
-  .task-screen.has-preview .task-left {
-    display: none;
-  }
+.task-rail-inner {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
 /* Six tabs share a narrow panel, so they sit close. The tools keep to the end of the row and never
    hide: on a small window the status tabs' labels shorten first (and the row scrolls only past that). */
-.task-rail > .tabs {
+.task-rail-inner > .tabs {
   flex: none;
   gap: 0;
   padding: 0 var(--space-1);
@@ -725,30 +950,30 @@ button.execution-task:hover {
   scrollbar-width: none;
 }
 
-.task-rail > .tabs > .tab {
+.task-rail-inner > .tabs > .tab {
   flex: 0 1 auto;
   min-width: 0;
   gap: 4px;
   padding: 0 var(--space-2);
 }
 
-.task-rail > .tabs .tab-label {
+.task-rail-inner > .tabs .tab-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.task-rail > .tabs .count-badge {
+.task-rail-inner > .tabs .count-badge {
   flex: none;
 }
 
-.task-rail > .tabs > .tab.is-icon-only {
+.task-rail-inner > .tabs > .tab.is-icon-only {
   flex: none;
   padding: 0 6px;
 }
 
-.task-rail > .tabs > .tab:not(.is-icon-only) + .tab.is-icon-only {
+.task-rail-inner > .tabs > .tab:not(.is-icon-only) + .tab.is-icon-only {
   margin-left: auto;
 }
 
@@ -860,12 +1085,9 @@ button.execution-task:hover {
 }
 
 @media (max-width: 1360px) {
-  .task-left {
-    width: 228px;
-  }
-
-  .task-rail {
-    width: 340px;
+  .task-screen {
+    --task-left-width: 228px;
+    --task-rail-width: 340px;
   }
 
   .task-rail.has-terminal {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { CircleCheck, CircleX, Globe, ShieldCheck, Smartphone, SquareTerminal } from "lucide-react";
-import { Button, EmptyState, Tabs, cx, ICON_SIZE, ICON_STROKE, type TabItem } from "../../design";
+import { CircleCheck, CircleX, FileDiff, Globe, ListChecks, PanelRightOpen, ShieldCheck, Smartphone, SquareTerminal } from "lucide-react";
+import { Button, EmptyState, Rail, RailButton, RailDivider, Tabs, cx, ICON_SIZE, ICON_STROKE, usePeek, type TabItem } from "../../design";
+import { PANEL_SHORTCUT } from "../../app/panelShortcuts";
 import { formatElapsed, formatRelative } from "../../lib/time";
 import type { CheckRun, FileChange, ReviewRequest } from "../../lib/types";
 import DeliveryActions from "./DeliveryActions";
@@ -10,6 +11,8 @@ import AutoModeSwitch from "../automode/AutoModeSwitch";
 import BrowserView from "../preview/BrowserView";
 import SimulatorView from "../preview/SimulatorView";
 import TerminalDrawer from "../terminal/TerminalDrawer";
+import { usePanels } from "../../stores/panels";
+import type { ChatRef } from "../../stores/chats";
 import { MIN_WIDTH, usePreview } from "../../stores/preview";
 import { useTerminal } from "../../stores/terminal";
 import { clampRailWidth, isPreviewTab, railTab, type RailTab, type StatusTab } from "./railModel";
@@ -27,8 +30,8 @@ interface TaskSideRailProps {
   active: boolean;
   /** The conversation the task works in: its auto mode is switched here. */
   conversationId: number | null;
-  /** Whose chat pointing at the page or simulator adds to: the owner's, while you can talk in it here. */
-  pointAgent: string | null;
+  /** The chat pointing at the page or simulator adds to: the task's own, while you can talk in it here. */
+  pointChat: ChatRef | null;
   reviews: readonly ReviewRequest[];
   changes: readonly FileChange[];
   checks: readonly CheckRun[];
@@ -58,22 +61,58 @@ function useOneToolAtATime() {
   }, []);
 }
 
+const terminalAtSide = (terminal: { open: boolean; place: string }) => terminal.open && terminal.place === "side";
+
+/**
+ * A tool needs the panel's room: one opening (here, on the rail, from the header, or by an agent)
+ * brings a collapsed panel back, and collapsing the panel puts its tool away.
+ */
+function useToolsNeedRoom() {
+  useEffect(() => {
+    const expand = () => {
+      if (usePanels.getState().collapsed.taskRight) usePanels.getState().setCollapsed("taskRight", false);
+    };
+    if (usePreview.getState().open || terminalAtSide(useTerminal.getState())) expand();
+    const stopPreview = usePreview.subscribe((next, previous) => {
+      if (next.open && !(previous.open && next.tab === previous.tab)) expand();
+    });
+    const stopTerminal = useTerminal.subscribe((next, previous) => {
+      if (terminalAtSide(next) && !terminalAtSide(previous)) expand();
+    });
+    const stopPanels = usePanels.subscribe((next, previous) => {
+      if (!next.collapsed.taskRight || previous.collapsed.taskRight) return;
+      if (terminalAtSide(useTerminal.getState())) useTerminal.getState().setOpen(false);
+      usePreview.getState().close();
+    });
+    return () => {
+      stopPreview();
+      stopTerminal();
+      stopPanels();
+    };
+  }, []);
+}
+
 /**
  * What the task needs from you, what it changed and how its checks went; and the tools you
  * share with the agents: the terminal (if you put it here), the built-in browser and the iOS Simulator.
+ * Collapsed, it's a rail of the same, with their counts: resting on it brings the panel out over the chat.
  */
-export default function TaskSideRail({ taskId, folder, active, conversationId, pointAgent, reviews, changes, checks, now, onShowFiles }: TaskSideRailProps) {
+export default function TaskSideRail({ taskId, folder, active, conversationId, pointChat, reviews, changes, checks, now, onShowFiles }: TaskSideRailProps) {
   const [chosen, setChosen] = useState<StatusTab>(reviews.length ? "attention" : "checks");
   // The Terminal tab is the terminal's side place: it's open there exactly when the terminal is shown at the side.
   const terminalHere = useTerminal((s) => s.open && s.place === "side");
   const previewOpen = usePreview((s) => s.open);
   const previewTab = usePreview((s) => s.tab);
   const width = usePreview((s) => s.width);
-  const tab = railTab(chosen, terminalHere, { open: previewOpen, tab: previewTab });
+  const collapsed = usePanels((s) => s.collapsed.taskRight);
+  const setCollapsed = usePanels((s) => s.setCollapsed);
+  const { ref, panelRef, peeking, open, handlers } = usePeek<HTMLElement>(collapsed);
+  // Collapsed, a tool is never drawn: the browser and simulator are native views that don't hide with the page.
+  const tab = collapsed ? chosen : railTab(chosen, terminalHere, { open: previewOpen, tab: previewTab });
   const previewing = isPreviewTab(tab);
-  const ref = useRef<HTMLElement>(null);
   const drag = useRef<{ x: number; width: number } | null>(null);
   useOneToolAtATime();
+  useToolsNeedRoom();
 
   const setTab = (next: RailTab) => {
     if (next === "terminal") useTerminal.getState().moveTo("side");
@@ -115,13 +154,20 @@ export default function TaskSideRail({ taskId, folder, active, conversationId, p
     { id: "simulator", label: "Simulator", icon: Smartphone, iconOnly: true },
   ];
   const summary = changeSummary(changes);
+  const failed = checks.filter((run) => !run.passed).length;
+  const shortcut = PANEL_SHORTCUT.taskRight;
+  const peekAt = (next: StatusTab) => (fromKeyboard: boolean) => {
+    setChosen(next);
+    open(fromKeyboard);
+  };
 
   return (
     <aside
       ref={ref}
-      className={cx("task-rail", tab === "terminal" && "has-terminal", previewing && "has-preview")}
+      className={cx("task-rail", collapsed && "is-collapsed", tab === "terminal" && "has-terminal", previewing && "has-preview")}
       style={previewing ? { width } : undefined}
       aria-label="Task side panel"
+      {...handlers}
     >
       {previewing && (
         <div
@@ -138,86 +184,106 @@ export default function TaskSideRail({ taskId, folder, active, conversationId, p
           onKeyDown={resizeWithKeys}
         />
       )}
-      <Tabs tabs={tabs} value={tab} onChange={setTab} label="Task side panel" idPrefix="task-rail" />
-      <div role="tabpanel" id={`task-rail-panel-${tab}`} aria-labelledby={`task-rail-tab-${tab}`} className={cx("task-rail-body", (tab === "terminal" || previewing) && "is-tool")}>
-        {tab === "terminal" && <TerminalDrawer folder={folder} active={active} dock="side" movable />}
-        {tab === "browser" && <BrowserView active={active} agentId={pointAgent} folder={folder} />}
-        {tab === "simulator" && <SimulatorView active={active} agentId={pointAgent} />}
-        {tab === "attention" && conversationId !== null && <AutoModeSwitch conversationId={conversationId} className="task-rail-auto-mode" />}
-        {tab === "attention" &&
-          (reviews.length === 0 ? (
-            <EmptyState compact icon={ShieldCheck} title="Nothing needs you" body="Approvals and questions from this task's agents show up here." />
-          ) : (
-            <div className="attention-list">
-              {reviews.map((review) => (
-                <AttentionCard key={review.id} review={review} now={now} />
-              ))}
-            </div>
-          ))}
-
-        {tab === "changes" && <DeliveryActions taskId={taskId} changes={changes} />}
-        {tab === "changes" &&
-          (changes.length === 0 ? (
-            <EmptyState compact icon={CircleCheck} title="No uncommitted changes" body="The folder matches its last commit." />
-          ) : (
-            <div className="rail-changes">
-              <p className="delivery-note">Everything uncommitted in the task’s folder, including changes made outside this task.</p>
-              <p className="rail-changes-summary">
-                {summary.added} added, {summary.modified} modified, {summary.deleted} deleted
-                <span className="tabular">
-                  <span className="is-add"> +{summary.linesAdded}</span>
-                  <span className="is-remove"> −{summary.linesRemoved}</span>
-                </span>
-              </p>
-              <ul className="rail-change-list">
-                {changes.slice(0, TOP_CHANGES).map((c) => (
-                  <li key={c.path} aria-label={`Changes to ${c.path}`}>
-                    <span className={cx("change-letter", `is-${c.status}`)}>{changeLetter(c)}</span>
-                    <span className="mono rail-change-path" title={c.path}>
-                      {c.path}
-                    </span>
-                    <DiscardFile taskId={taskId} change={c} />
-                  </li>
+      {collapsed && (
+        <Rail label="Task side panel, collapsed">
+          <RailButton home icon={PanelRightOpen} label="Expand the side panel" title={`Expand the side panel  ${shortcut}`} onClick={() => setCollapsed("taskRight", false)} />
+          <RailButton icon={ShieldCheck} label="Attention" count={reviews.length} tone="attention" onClick={peekAt("attention")} />
+          <RailButton icon={FileDiff} label="Changes" count={changes.length} onClick={peekAt("changes")} />
+          <RailButton
+            icon={failed ? CircleX : ListChecks}
+            label={failed ? "Checks failed" : "Checks"}
+            count={failed || checks.length}
+            tone={failed ? "danger" : "neutral"}
+            onClick={peekAt("checks")}
+          />
+          <RailDivider />
+          <RailButton icon={SquareTerminal} label="Terminal" onClick={() => useTerminal.getState().moveTo("side")} />
+          <RailButton icon={Globe} label="Browser" onClick={() => usePreview.getState().show("browser")} />
+          <RailButton icon={Smartphone} label="Simulator" onClick={() => usePreview.getState().show("simulator")} />
+        </Rail>
+      )}
+      <div ref={panelRef} className={cx("task-rail-inner", peeking && "is-peeking")} tabIndex={collapsed ? -1 : undefined}>
+        <Tabs tabs={tabs} value={tab} onChange={setTab} label="Task side panel" idPrefix="task-rail" />
+        <div role="tabpanel" id={`task-rail-panel-${tab}`} aria-labelledby={`task-rail-tab-${tab}`} className={cx("task-rail-body", (tab === "terminal" || previewing) && "is-tool")}>
+          {tab === "terminal" && <TerminalDrawer folder={folder} active={active} dock="side" movable />}
+          {tab === "browser" && <BrowserView active={active} chat={pointChat} folder={folder} />}
+          {tab === "simulator" && <SimulatorView active={active} chat={pointChat} />}
+          {tab === "attention" && conversationId !== null && <AutoModeSwitch conversationId={conversationId} className="task-rail-auto-mode" />}
+          {tab === "attention" &&
+            (reviews.length === 0 ? (
+              <EmptyState compact icon={ShieldCheck} title="Nothing needs you" body="Approvals and questions from this task's agents show up here." />
+            ) : (
+              <div className="attention-list">
+                {reviews.map((review) => (
+                  <AttentionCard key={review.id} review={review} now={now} />
                 ))}
-              </ul>
-              <Button size="sm" variant="ghost" onClick={onShowFiles}>
-                {changes.length > TOP_CHANGES ? `See all ${changes.length} files` : "See the changes"}
-              </Button>
-            </div>
-          ))}
+              </div>
+            ))}
 
-        {tab === "checks" &&
-          (checks.length === 0 ? (
-            <EmptyState
-              compact
-              icon={CircleCheck}
-              title="No checks run yet"
-              body="When the owner runs tests, a type check, lint or a build, whether it passed shows up here."
-            />
-          ) : (
-            <ul className="check-runs">
-              {[...checks].reverse().map((run) => {
-                const Icon = run.passed ? CircleCheck : CircleX;
-                return (
-                  <li key={run.command} className={cx("check-run", run.passed ? "tone-success" : "tone-danger")}>
-                    <Icon aria-hidden size={ICON_SIZE.md} strokeWidth={ICON_STROKE} className="check-run-icon" />
-                    <span className="check-run-text">
-                      <span className="check-run-kind">
-                        {run.kind} {run.passed ? "passed" : "failed"}
+          {tab === "changes" && <DeliveryActions taskId={taskId} changes={changes} />}
+          {tab === "changes" &&
+            (changes.length === 0 ? (
+              <EmptyState compact icon={CircleCheck} title="No uncommitted changes" body="The folder matches its last commit." />
+            ) : (
+              <div className="rail-changes">
+                <p className="delivery-note">Everything uncommitted in the task’s folder, including changes made outside this task.</p>
+                <p className="rail-changes-summary">
+                  {summary.added} added, {summary.modified} modified, {summary.deleted} deleted
+                  <span className="tabular">
+                    <span className="is-add"> +{summary.linesAdded}</span>
+                    <span className="is-remove"> −{summary.linesRemoved}</span>
+                  </span>
+                </p>
+                <ul className="rail-change-list">
+                  {changes.slice(0, TOP_CHANGES).map((c) => (
+                    <li key={c.path} aria-label={`Changes to ${c.path}`}>
+                      <span className={cx("change-letter", `is-${c.status}`)}>{changeLetter(c)}</span>
+                      <span className="mono rail-change-path" title={c.path}>
+                        {c.path}
                       </span>
-                      <span className="check-run-command mono" title={run.command}>
-                        {run.command}
+                      <DiscardFile taskId={taskId} change={c} />
+                    </li>
+                  ))}
+                </ul>
+                <Button size="sm" variant="ghost" onClick={onShowFiles}>
+                  {changes.length > TOP_CHANGES ? `See all ${changes.length} files` : "See the changes"}
+                </Button>
+              </div>
+            ))}
+
+          {tab === "checks" &&
+            (checks.length === 0 ? (
+              <EmptyState
+                compact
+                icon={CircleCheck}
+                title="No checks run yet"
+                body="When the owner runs tests, a type check, lint or a build, whether it passed shows up here."
+              />
+            ) : (
+              <ul className="check-runs">
+                {[...checks].reverse().map((run) => {
+                  const Icon = run.passed ? CircleCheck : CircleX;
+                  return (
+                    <li key={run.command} className={cx("check-run", run.passed ? "tone-success" : "tone-danger")}>
+                      <Icon aria-hidden size={ICON_SIZE.md} strokeWidth={ICON_STROKE} className="check-run-icon" />
+                      <span className="check-run-text">
+                        <span className="check-run-kind">
+                          {run.kind} {run.passed ? "passed" : "failed"}
+                        </span>
+                        <span className="check-run-command mono" title={run.command}>
+                          {run.command}
+                        </span>
                       </span>
-                    </span>
-                    <span className="check-run-time">
-                      {formatRelative(run.at, now)}
-                      {run.duration_ms !== null && <span className="tabular">, took {formatElapsed(run.duration_ms)}</span>}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          ))}
+                      <span className="check-run-time">
+                        {formatRelative(run.at, now)}
+                        {run.duration_ms !== null && <span className="tabular">, took {formatElapsed(run.duration_ms)}</span>}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            ))}
+        </div>
       </div>
     </aside>
   );

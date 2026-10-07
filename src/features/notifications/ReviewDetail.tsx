@@ -1,14 +1,14 @@
 import { useState } from "react";
-import { FolderOpen, Scale } from "lucide-react";
-import { portraitKey, InlineCode, Markdown, Portrait, cx, ICON_SIZE, ICON_STROKE } from "../../design";
+import { portraitKey, Portrait, cx, ICON_SIZE, ICON_STROKE } from "../../design";
 import { errorMessage } from "../../lib/errors";
 import { formatRelative } from "../../lib/time";
-import { isPermissionRequest, type Agent, type ReviewRequest } from "../../lib/types";
+import type { Agent, ReviewRequest } from "../../lib/types";
 import { useAttention } from "../../stores/attention";
 import { useNavigation } from "../../stores/navigation";
 import { useWorkspace } from "../../stores/workspace";
-import { presentReview, tierNote } from "../attention/presentation";
+import { presentReview } from "../attention/presentation";
 import DecisionBar from "./DecisionBar";
+import ReviewBody from "./ReviewBody";
 
 interface ReviewDetailProps {
   review: ReviewRequest;
@@ -66,35 +66,7 @@ export default function ReviewDetail({ review, agent, now }: ReviewDetailProps) 
       )}
 
       <div className="review-detail-body">
-        {isPermissionRequest(review) ? (
-          <div className="review-command">
-            {review.command && <code className="selectable">{review.command}</code>}
-            {review.cwd && (
-              <p className="review-command-cwd">
-                <FolderOpen aria-hidden size={ICON_SIZE.sm} strokeWidth={ICON_STROKE} />
-                <span className="mono selectable">{review.cwd}</span>
-              </p>
-            )}
-            {review.body && (
-              <p className="review-reason">
-                <InlineCode text={review.body} />
-              </p>
-            )}
-            {review.rule && (
-              <p className="review-rule">
-                <Scale aria-hidden size={ICON_SIZE.sm} strokeWidth={ICON_STROKE} />
-                <span>
-                  Rule: {review.rule}
-                  {tierNote(review.tier) && <span className="review-tier"> · {tierNote(review.tier)}</span>}
-                </span>
-              </p>
-            )}
-          </div>
-        ) : review.kind === "mockup" ? (
-          <iframe className="review-mockup" srcDoc={review.body} sandbox="allow-scripts" title={review.title} />
-        ) : (
-          review.body && <Markdown text={review.body} />
-        )}
+        <ReviewBody review={review} />
       </div>
 
       {error && (

@@ -38,7 +38,7 @@ export default function EarlierChats({ agentId, agent, shownChat }: EarlierChats
   const open = async (chat: Conversation) => {
     setError(null);
     try {
-      openTask(await openChatTask(chat, agent));
+      openTask(await openChatTask(chat));
     } catch (e) {
       setError(errorMessage(e, "That chat couldn't be opened."));
     }

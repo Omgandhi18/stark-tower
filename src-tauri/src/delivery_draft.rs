@@ -16,7 +16,7 @@ pub fn cancel(token: &str) {
     }
 }
 pub fn write(app: &tauri::AppHandle, agent: &str, cwd: &str, prompt: &str, token: &str) -> Result<String, String> {
-    let mut launch = crate::chat::launch_for(app, agent, cwd, None)?;
+    let mut launch = crate::chat::launch_for(app, agent, None, cwd, None)?;
     launch
         .system_prompt
         .push_str("\nFor this private draft, write text only. Never call any tools, read files, or change anything. All evidence is in the request.");

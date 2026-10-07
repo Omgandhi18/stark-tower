@@ -907,26 +907,32 @@ async requestAssist(from: string, to: string, note: string, cols: number, rows: 
  * Chat with an agent (headless Claude Code). Starts a session in `dir` (or the
  * agent's recorded workdir / current project) on first message.
  */
-async chatSend(agentId: string, text: string, dir: string | null, attachments: Attachment[]) : Promise<Result<number | null, string>> {
+async chatSend(agentId: string, text: string, dir: string | null, attachments: Attachment[], conversationId: number | null) : Promise<Result<number | null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("chat_send", { agentId, text, dir, attachments }) };
+    return { status: "ok", data: await TAURI_INVOKE("chat_send", { agentId, text, dir, attachments, conversationId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
 /**
- * End the agent's live session. Saved chats are never deleted here; starting a
- * fresh conversation is `new_chat`.
+ * End one of an agent's chat sessions, or (with no chat named) all of them. Saved chats are
+ * never deleted here; writing in the chat again resumes it.
  */
-async chatStop(agentId: string) : Promise<void> {
-    await TAURI_INVOKE("chat_stop", { agentId });
+async chatStop(agentId: string, conversationId: number | null) : Promise<void> {
+    await TAURI_INVOKE("chat_stop", { agentId, conversationId });
 },
 /**
  * The persisted transcript for an agent's active conversation (for rehydration).
  */
 async getChat(agentId: string, limit: number | null) : Promise<StoredMessage[]> {
     return await TAURI_INVOKE("get_chat", { agentId, limit });
+},
+/**
+ * One chat by id, for a page showing that chat (an agent can be talking in several).
+ */
+async conversationChat(conversationId: number, limit: number | null) : Promise<ConversationChat | null> {
+    return await TAURI_INVOKE("conversation_chat", { conversationId, limit });
 },
 /**
  * The agent's current saved chat, if it has one, so the UI can restore the folder
@@ -942,16 +948,16 @@ async listConversations() : Promise<Conversation[]> {
     return await TAURI_INVOKE("list_conversations");
 },
 /**
- * Start a fresh conversation with an agent (ends the live session so the next
- * message begins a genuinely new chat), in `cwd` (a project folder) or where the
- * agent works now. Returns the new conversation id.
+ * Start a fresh conversation with an agent, in `cwd` (a project folder) or where the agent
+ * works now. Its other chats carry on: an agent works in several at once. Returns the new
+ * conversation id.
  */
 async newChat(agentId: string, cwd: string | null) : Promise<number> {
     return await TAURI_INVOKE("new_chat", { agentId, cwd });
 },
 /**
- * Reopen a saved conversation: make it active, end the live session, and point
- * the agent's workdir at the conversation's dir so the next message resumes it.
+ * Reopen a saved conversation: make it the agent's open chat (where "Talk to" goes) and point
+ * the agent's workdir at its folder. Its other chats keep their sessions.
  */
 async openConversation(conversationId: number) : Promise<void> {
     await TAURI_INVOKE("open_conversation", { conversationId });
@@ -1451,6 +1457,14 @@ export type Conversation = { id: number; agent_id: string; title: string; cwd: s
  * A teammate's delegation ran here, not a chat the developer had.
  */
 delegated: boolean; project_folder: string; branch: string }
+/**
+ * One chat, as the UI shows it: the conversation, its transcript, and how its session is doing.
+ */
+export type ConversationChat = { conversation: Conversation; messages: StoredMessage[]; 
+/**
+ * What its session is doing; None when nothing runs in it.
+ */
+status: AgentStatus | null }
 export type ConversationSpend = { total: SpendTotal; context_tokens: number }
 export type DeliveryInfo = { branch: string; default_branch: string; new_branch: string; host: Host | null; pushed: boolean; request_url: string | null; request_title: string }
 export type DispatchResult = { agent_id: string; name: string; spawned: boolean }

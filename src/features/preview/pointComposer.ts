@@ -1,21 +1,23 @@
 import type { Attachment } from "../../lib/types";
 import { selectQuestionFor, useAttention } from "../../stores/attention";
-import { useChats } from "../../stores/chats";
+import { useChats, type ChatRef } from "../../stores/chats";
 import { insertPoint } from "./pointModel";
 
 /** Use the composer beside this panel, even when another thread opens during the request. */
-export function addPoint(agentId: string, text: string, attachment?: Attachment | null, conversationId?: number | null) {
-  if (selectQuestionFor(agentId)(useAttention.getState())) throw new Error("Answer the agent’s question first, then add this reference to the chat.");
-  const input = Array.from(document.querySelectorAll<HTMLTextAreaElement>("textarea[data-chat-agent]")).find((el) => el.dataset.chatAgent === agentId);
+export function addPoint(chat: ChatRef, text: string, attachment?: Attachment | null, conversationId?: number | null) {
   const chats = useChats.getState();
-  if (conversationId !== undefined && (chats.threads[agentId]?.conversationId ?? null) !== conversationId)
+  const thread = chats.threads[chat.key];
+  if (selectQuestionFor(chat.agentId, thread?.conversationId ?? null)(useAttention.getState()))
+    throw new Error("Answer the agent’s question first, then add this reference to the chat.");
+  const input = Array.from(document.querySelectorAll<HTMLTextAreaElement>("textarea[data-chat-key]")).find((el) => el.dataset.chatKey === chat.key);
+  if (conversationId !== undefined && (thread?.conversationId ?? null) !== conversationId)
     throw new Error("That chat changed. Point at the element again to add it to this chat.");
-  const draft = chats.threads[agentId]?.draft ?? "";
+  const draft = thread?.draft ?? "";
   const next = text
     ? insertPoint(draft, text, input?.selectionStart ?? draft.length, input?.selectionEnd ?? draft.length)
     : { text: draft, caret: input?.selectionStart ?? draft.length };
-  chats.setDraft(agentId, next.text);
-  if (attachment) chats.updateFiles(agentId, (files) => (files.some((file) => file.path === attachment.path) ? [...files] : [...files, attachment]));
+  chats.setDraft(chat.key, next.text);
+  if (attachment) chats.updateFiles(chat.key, (files) => (files.some((file) => file.path === attachment.path) ? [...files] : [...files, attachment]));
   window.requestAnimationFrame(() => {
     input?.focus();
     input?.setSelectionRange(next.caret, next.caret);

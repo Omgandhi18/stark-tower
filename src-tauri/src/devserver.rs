@@ -586,13 +586,8 @@ fn recent_lines(lines: &[String], budget: usize) -> String {
 
 pub fn act(app: &tauri::AppHandle, agent: &str, action: &str, args: &Value) -> Result<crate::browser::Outcome, String> {
     let state = app.state::<crate::AppState>();
-    let folder = state
-        .workdirs
-        .lock()
-        .unwrap()
-        .get(agent)
-        .cloned()
-        .unwrap_or_else(|| state.project.lock().unwrap().clone());
+    // The folder of the chat the agent asks from: its dev server, not another chat's.
+    let folder = crate::runs::cwd(app, &crate::bridge::actor_for(agent, args)).unwrap_or_else(|| state.project.lock().unwrap().clone());
     let manager = app.state::<DevServers>();
     let result = match action {
         "list" => serde_json::to_string(&manager.list()),
@@ -609,7 +604,7 @@ pub fn act(app: &tauri::AppHandle, agent: &str, action: &str, args: &Value) -> R
             } else {
                 resolve(app, &folder, None, args.get("command").and_then(Value::as_str))?
             };
-            let verdict = crate::bridge::decide(app, agent, "Bash", &json!({ "command": gate_command(&option) }));
+            let verdict = crate::bridge::decide(app, &crate::bridge::actor_for(agent, args), "Bash", &json!({ "command": gate_command(&option) }));
             if !verdict.approved {
                 return Err(verdict.reason);
             }

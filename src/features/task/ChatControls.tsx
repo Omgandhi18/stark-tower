@@ -6,7 +6,7 @@ import { Button, SelectField } from "../../design";
 import { errorMessage } from "../../lib/errors";
 import { formatTokens } from "../../lib/format";
 import type { Agent } from "../../lib/types";
-import { selectThread, useChats } from "../../stores/chats";
+import { selectThread, useChats, type ChatRef } from "../../stores/chats";
 import { useNavigation } from "../../stores/navigation";
 import { useSpend } from "../../stores/spend";
 import { useWorkspace } from "../../stores/workspace";
@@ -15,11 +15,11 @@ import { folderOptions } from "../conversation/folders";
 import { reportedCost } from "../spend/spendModel";
 
 /** Where the agent's next message in this chat runs. */
-export function ChatFolderSelect({ agentId }: { agentId: string }) {
+export function ChatFolderSelect({ chat }: { chat: ChatRef }) {
   const worktrees = useWorkspace((s) => s.worktrees);
   const projects = useWorkspace((s) => s.projects);
   const activeProject = useWorkspace((s) => s.activeProject);
-  const chatFolder = useChats((s) => selectThread(agentId)(s).folder);
+  const chatFolder = useChats((s) => selectThread(chat.key)(s).folder);
   const folder = chatFolder || activeProject;
   return (
     <SelectField
@@ -28,7 +28,7 @@ export function ChatFolderSelect({ agentId }: { agentId: string }) {
       icon={FolderOpen}
       value={folder}
       options={folderOptions(projects, folder, worktrees)}
-      onChange={(path) => useChats.getState().setFolder(agentId, path)}
+      onChange={(path) => useChats.getState().setFolder(chat.key, path)}
       className="task-chat-folder"
     />
   );

@@ -40,9 +40,8 @@ export default function ProjectChats({ path, name }: { path: string; name: strin
 
   const open = async (chat: Conversation) => {
     setError(null);
-    const agent = agents.find((a) => a.id === chat.agent_id);
     try {
-      openTask(await openChatTask(chat, agent));
+      openTask(await openChatTask(chat));
     } catch (e) {
       setError(errorMessage(e, "That chat couldn't be opened."));
     }

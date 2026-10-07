@@ -372,11 +372,11 @@ pub enum Outcome {
 }
 
 /// An agent may use a page on this Mac freely; any other page is network access.
-fn allowed(app: &tauri::AppHandle, agent_id: &str, url: &str) -> Result<(), String> {
+fn allowed(app: &tauri::AppHandle, who: &crate::runs::Actor, url: &str) -> Result<(), String> {
     if url.is_empty() || url == BLANK || crate::gate::is_local_url(url) {
         return Ok(());
     }
-    let verdict = crate::bridge::decide(app, agent_id, "WebFetch", &json!({ "url": url }));
+    let verdict = crate::bridge::decide(app, who, "WebFetch", &json!({ "url": url }));
     if verdict.approved {
         Ok(())
     } else {
@@ -434,7 +434,7 @@ pub fn act(app: &tauri::AppHandle, agent_id: &str, action: &str, args: &Value) -
     match action {
         "open" => {
             let url = address(args.get("url").and_then(|u| u.as_str()).unwrap_or(""))?;
-            allowed(app, agent_id, &url)?;
+            allowed(app, &crate::bridge::actor_for(agent_id, args), &url)?;
             navigate(app, &url)?;
             let _ = app.emit("browser://reveal", json!({ "agentId": agent_id }));
             settle(app);
@@ -446,11 +446,11 @@ pub fn act(app: &tauri::AppHandle, agent_id: &str, action: &str, args: &Value) -
             Ok(Outcome::Text(describe(&page(app))))
         }
         "read" => {
-            allowed(app, agent_id, &current)?;
+            allowed(app, &crate::bridge::actor_for(agent_id, args), &current)?;
             Ok(Outcome::Text(format_read(&run(app, READ)?)))
         }
         "click" => {
-            allowed(app, agent_id, &current)?;
+            allowed(app, &crate::bridge::actor_for(agent_id, args), &current)?;
             let target = target_of(args)?;
             let clicked = run(
                 app,
@@ -463,7 +463,7 @@ pub fn act(app: &tauri::AppHandle, agent_id: &str, action: &str, args: &Value) -
             Ok(Outcome::Text(format!("Clicked \"{what}\". {}", describe(&page(app)))))
         }
         "type" => {
-            allowed(app, agent_id, &current)?;
+            allowed(app, &crate::bridge::actor_for(agent_id, args), &current)?;
             let target = target_of(args)?;
             let text = json!(args.get("text").and_then(|t| t.as_str()).unwrap_or(""));
             let submit = args.get("submit").and_then(|s| s.as_bool()).unwrap_or(false);
@@ -494,7 +494,7 @@ pub fn act(app: &tauri::AppHandle, agent_id: &str, action: &str, args: &Value) -
             Ok(Outcome::Text(format!("Typed into \"{into}\"{}. {}", if submit { " and submitted" } else { "" }, describe(&page(app)))))
         }
         "run_js" => {
-            allowed(app, agent_id, &current)?;
+            allowed(app, &crate::bridge::actor_for(agent_id, args), &current)?;
             let script = args.get("script").and_then(|s| s.as_str()).unwrap_or("").trim();
             if script.is_empty() {
                 return Err("Give the JavaScript to run as `script`: an expression, or statements inside (() => { ... })().".into());
@@ -503,7 +503,7 @@ pub fn act(app: &tauri::AppHandle, agent_id: &str, action: &str, args: &Value) -
             Ok(Outcome::Text(crate::chat::truncate(&value.to_string(), 12_000)))
         }
         "console" => {
-            allowed(app, agent_id, &current)?;
+            allowed(app, &crate::bridge::actor_for(agent_id, args), &current)?;
             let lines = run(app, "(window.__starkConsole || []).slice(-100)")?;
             let lines = lines.as_array().cloned().unwrap_or_default();
             if lines.is_empty() {
@@ -517,7 +517,7 @@ pub fn act(app: &tauri::AppHandle, agent_id: &str, action: &str, args: &Value) -
             Ok(Outcome::Text(text))
         }
         "screenshot" => {
-            allowed(app, agent_id, &current)?;
+            allowed(app, &crate::bridge::actor_for(agent_id, args), &current)?;
             let jpeg = snapshot(app)?;
             Ok(Outcome::Image { jpeg, caption: describe(&page(app)) })
         }

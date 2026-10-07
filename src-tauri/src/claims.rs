@@ -1,4 +1,5 @@
 //! File reservations for agents collaborating in one workspace.
+use crate::runs::Actor;
 use serde::Serialize;
 use std::path::{Component, Path, PathBuf};
 use tauri::{Emitter, Manager};
@@ -313,17 +314,12 @@ pub fn peers(app: &tauri::AppHandle, workspace: &str, agent: &str) -> Vec<String
         .filter(|c| c.agent_id != agent)
         .map(|c| c.agent_id)
         .collect();
-    let sessions: Vec<String> = state.chat.sessions.lock().unwrap().keys().cloned().collect();
     let terminals: Vec<String> = state.pty.sessions.lock().unwrap().keys().cloned().collect();
     let dirs = state.workdirs.lock().unwrap().clone();
     let statuses = state.statuses.lock().unwrap().clone();
     let busy = |id: &String| matches!(statuses.get(id), Some(AgentStatus::Working | AgentStatus::Thinking | AgentStatus::Blocked));
-    peers.extend(
-        sessions
-            .into_iter()
-            .chain(terminals)
-            .filter(|id| id != agent && busy(id) && dirs.get(id).is_some_and(|cwd| cwd == workspace)),
-    );
+    peers.extend(terminals.into_iter().filter(|id| id != agent && busy(id) && dirs.get(id).is_some_and(|cwd| cwd == workspace)));
+    peers.extend(crate::runs::busy_in_folder(app, workspace).into_iter().filter(|id| id != agent));
     peers.extend(state.ledger.running_in(workspace).into_iter().filter(|assignee| assignee != agent));
     peers.sort();
     peers.dedup();
@@ -334,21 +330,22 @@ pub fn shared(app: &tauri::AppHandle, workspace: &str, agent: &str) -> bool {
     !peers(app, workspace, agent).is_empty()
 }
 
-fn owner(app: &tauri::AppHandle, agent: &str) -> String {
+fn owner(app: &tauri::AppHandle, who: &Actor) -> String {
     let state = app.state::<crate::AppState>();
-    let mut task = crate::tasks::active_task_for(app, agent).and_then(|id| state.ledger.task(&id));
+    let mut task = crate::tasks::task_of(app, who).and_then(|id| state.ledger.task(&id));
     while let Some(parent) = task.as_ref().and_then(|t| t.parent_id.clone()) {
         task = state.ledger.task(&parent);
     }
-    task.map(|t| t.assignee).unwrap_or_else(|| agent.into())
+    task.map(|t| t.assignee).unwrap_or_else(|| who.agent.clone())
 }
 
 /// Records a refusal in the agent's task. A conflict with another agent ("claim_refused") is also a
 /// notification; a step the agent takes itself ("claim_needed": claim a shared file first, leave git to
 /// the owner) is only history.
-pub fn report(app: &tauri::AppHandle, agent: &str, workspace: &str, refusal: &Refusal) {
+pub fn report(app: &tauri::AppHandle, who: &Actor, workspace: &str, refusal: &Refusal) {
     let state = app.state::<crate::AppState>();
-    let task = crate::tasks::active_task_for(app, agent);
+    let agent = who.agent.as_str();
+    let task = crate::tasks::task_of(app, who);
     let name = |id: &str| crate::prompts::agent_name(app, id);
     let who = name(agent);
     if let Some(id) = &task {
@@ -406,9 +403,10 @@ fn changed(app: &tauri::AppHandle) {
     let _ = app.emit("tasks://changed", ());
 }
 
-pub fn check(app: &tauri::AppHandle, agent: &str, tool: &str, input: &serde_json::Value) -> Result<(), String> {
+pub fn check(app: &tauri::AppHandle, who: &Actor, tool: &str, input: &serde_json::Value) -> Result<(), String> {
     let state = app.state::<crate::AppState>();
-    let Some(workspace) = state.workdirs.lock().unwrap().get(agent).cloned() else {
+    let agent = who.agent.as_str();
+    let Some(workspace) = crate::runs::cwd(app, who) else {
         return Ok(());
     };
     let sharing = shared(app, &workspace, agent);
@@ -419,20 +417,20 @@ pub fn check(app: &tauri::AppHandle, agent: &str, tool: &str, input: &serde_json
             .and_then(|path| state.claims.lock().unwrap().check_edit(&workspace, &path, agent, sharing).err())
     } else if tool == "Bash" && sharing {
         let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
-        let owner = owner(app, agent);
+        let owner = owner(app, who);
         state.claims.lock().unwrap().check_command(&workspace, agent, &owner, command).err()
     } else {
         None
     };
     let Some(refusal) = refused else { return Ok(()) };
-    report(app, agent, &workspace, &refusal);
-    Err(told(app, agent, &refusal))
+    report(app, who, &workspace, &refusal);
+    Err(told(app, who, &refusal))
 }
 
 /// The refusal as the agent reads it, with everyone named.
-fn told(app: &tauri::AppHandle, agent: &str, refusal: &Refusal) -> String {
+fn told(app: &tauri::AppHandle, who: &Actor, refusal: &Refusal) -> String {
     let name = |id: &str| crate::prompts::agent_name(app, id);
-    refusal.for_agent(&name, &name(&owner(app, agent)))
+    refusal.for_agent(&name, &name(&owner(app, who)))
 }
 
 fn installs_dependencies(command: &str, context: &crate::gate::Context) -> bool {
@@ -474,16 +472,17 @@ fn lockfile_for(command: &str) -> &'static str {
     }
 }
 
-pub fn allowed(app: &tauri::AppHandle, agent: &str, tool: &str, input: &serde_json::Value) -> Result<(), String> {
+pub fn allowed(app: &tauri::AppHandle, who: &Actor, tool: &str, input: &serde_json::Value) -> Result<(), String> {
     // Recheck after a developer approval: a teammate may have reserved a file while waiting.
-    check(app, agent, tool, input)?;
+    check(app, who, tool, input)?;
+    let agent = who.agent.as_str();
     let Some(raw) = edit_path(tool, input) else { return Ok(()) };
     let state = app.state::<crate::AppState>();
-    let Some(workspace) = state.workdirs.lock().unwrap().get(agent).cloned() else {
+    let Some(workspace) = crate::runs::cwd(app, who) else {
         return Ok(());
     };
     let Ok(path) = resolve(&workspace, raw) else { return Ok(()) };
-    let task = crate::tasks::active_task_for(app, agent);
+    let task = crate::tasks::task_of(app, who);
     let conflict = state
         .claims
         .lock()
@@ -491,21 +490,22 @@ pub fn allowed(app: &tauri::AppHandle, agent: &str, tool: &str, input: &serde_js
         .claim(&workspace, &path, agent, task.as_deref(), "edited it", false);
     if let Err(other) = conflict {
         let refusal = Refusal::Claimed { holder: other.agent_id, path: other.path, why: other.reason };
-        report(app, agent, &workspace, &refusal);
-        return Err(told(app, agent, &refusal));
+        report(app, who, &workspace, &refusal);
+        return Err(told(app, who, &refusal));
     }
     changed(app);
     Ok(())
 }
 
-pub fn after_edit(app: &tauri::AppHandle, agent: &str, tool: &str, input: &serde_json::Value) {
+pub fn after_edit(app: &tauri::AppHandle, who: &Actor, tool: &str, input: &serde_json::Value) {
+    let agent = who.agent.as_str();
     let Some(raw) = edit_path(tool, input) else { return };
     let state = app.state::<crate::AppState>();
-    let Some(workspace) = state.workdirs.lock().unwrap().get(agent).cloned() else {
+    let Some(workspace) = crate::runs::cwd(app, who) else {
         return;
     };
     let Ok(path) = resolve(&workspace, raw) else { return };
-    let task = crate::tasks::active_task_for(app, agent);
+    let task = crate::tasks::task_of(app, who);
     let sharing = shared(app, &workspace, agent);
     let problem = {
         let mut claims = state.claims.lock().unwrap();
@@ -529,15 +529,10 @@ pub fn after_edit(app: &tauri::AppHandle, agent: &str, tool: &str, input: &serde
     changed(app);
 }
 
-pub fn tool(app: &tauri::AppHandle, agent: &str, paths: &[String], reason: &str, release: bool) -> Result<String, String> {
+pub fn tool(app: &tauri::AppHandle, who: &Actor, paths: &[String], reason: &str, release: bool) -> Result<String, String> {
     let state = app.state::<crate::AppState>();
-    let workspace = state
-        .workdirs
-        .lock()
-        .unwrap()
-        .get(agent)
-        .cloned()
-        .ok_or("Start work in a folder before claiming files.")?;
+    let agent = who.agent.as_str();
+    let workspace = crate::runs::cwd(app, who).ok_or("Start work in a folder before claiming files.")?;
     let paths: Vec<String> = paths.iter().map(|p| resolve(&workspace, p)).collect::<Result<_, _>>()?;
     if release {
         state.claims.lock().unwrap().release(&workspace, agent, &paths);
@@ -547,7 +542,7 @@ pub fn tool(app: &tauri::AppHandle, agent: &str, paths: &[String], reason: &str,
     if paths.is_empty() || reason.trim().is_empty() {
         return Err("Name files or folders and say why you need them.".into());
     }
-    let task = crate::tasks::active_task_for(app, agent);
+    let task = crate::tasks::task_of(app, who);
     let mut lines = Vec::new();
     for path in paths {
         let result = state.claims.lock().unwrap().claim(&workspace, &path, agent, task.as_deref(), reason, true);
@@ -558,7 +553,7 @@ pub fn tool(app: &tauri::AppHandle, agent: &str, paths: &[String], reason: &str,
                 crate::prompts::agent_name(app, &other.agent_id),
                 other.path,
                 other.reason,
-                crate::prompts::agent_name(app, &owner(app, agent))
+                crate::prompts::agent_name(app, &owner(app, who))
             )),
         }
     }

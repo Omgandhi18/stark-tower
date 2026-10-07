@@ -196,7 +196,7 @@ impl Codex {
                 turns.said.clear();
                 turns.errored = false;
                 turns.usage = TurnUsage::default();
-                crate::pty::emit_status(app, agent, crate::agents::AgentStatus::Thinking);
+                crate::runs::set(app, agent, sink.conversation, crate::agents::AgentStatus::Thinking);
             }
             "item/started" => {
                 let item = params.get("item").cloned().unwrap_or(Value::Null);
@@ -306,7 +306,7 @@ impl Codex {
     fn answer(self: &Arc<Self>, id: Value, method: String, params: Value) {
         let me = self.clone();
         std::thread::spawn(move || {
-            let decide = |tool: &str, input: Value| crate::bridge::decide(&me.app, &me.agent_id, tool, &input).approved;
+            let decide = |tool: &str, input: Value| crate::bridge::decide(&me.app, &me.sink.actor(&me.agent_id), tool, &input).approved;
             let decision = |ok: bool| json!({ "decision": if ok { "accept" } else { "decline" } });
             let reply = match method.as_str() {
                 "item/commandExecution/requestApproval" => decision(decide("Bash", json!({ "command": Self::str_of(&params, "command") }))),
@@ -343,7 +343,7 @@ impl Codex {
         let report = move |reply: crate::rpc::Reply| {
             if let Err(e) = reply {
                 chat::failed(&app, &sink, &agent, &format!("Codex didn't take the message: {e}"));
-                crate::pty::emit_status(&app, &agent, crate::agents::AgentStatus::Idle);
+                crate::runs::set(&app, &agent, sink.conversation, crate::agents::AgentStatus::Idle);
             }
         };
         match active {
@@ -402,8 +402,8 @@ fn connect(app: &tauri::AppHandle, launch: &Launch, sink: Sink, gen: Option<u64>
             if let Some(waiter) = codex.turns.lock().unwrap().finished.take() {
                 let _ = waiter.send(Err(why));
             }
-            if let Some(gen) = gen {
-                chat::session_finished(&codex.app, &codex.agent_id, gen, false, orchestrator);
+            if let (Some(gen), Some(conversation)) = (gen, codex.sink.conversation) {
+                chat::session_finished(&codex.app, &codex.agent_id, conversation, gen, false, orchestrator);
             }
         });
     }
@@ -516,7 +516,8 @@ pub(crate) fn parse_model_list(models: &Value) -> Vec<crate::providers::ModelCho
 
 /// An agent's chat session on Codex.
 pub(crate) fn start_chat(app: &tauri::AppHandle, launch: &Launch, gen: u64) -> Result<(Child, Input), String> {
-    let (mut child, codex) = connect(app, launch, Sink::chat(), Some(gen))?;
+    let conversation = launch.conversation.ok_or("A chat session needs its conversation.")?;
+    let (mut child, codex) = connect(app, launch, Sink::chat(conversation), Some(gen))?;
     let thread = match open_thread(&codex, launch, false) {
         Ok(thread) => thread,
         Err(e) => {
@@ -622,6 +623,7 @@ pub(crate) mod tests {
             model: String::new(),
             cwd: dir.to_string(),
             agent_id: "smoke".into(),
+            conversation: None,
             orchestrator: false,
             system_prompt: "You are being smoke-tested by Starkline. Be brief.".into(),
             resume: None,

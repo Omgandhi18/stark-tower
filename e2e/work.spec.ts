@@ -34,7 +34,7 @@ test.describe("work", () => {
     expect(await fakeCalls(page)).toContainEqual({ cmd: "review_respond", args: { id: "r-command", decision: "Allow" } });
   });
 
-  test("hands work to a busy agent, which queues it", async ({ page }) => {
+  test("hands work to a busy agent, who starts it in a new chat beside the busy one", async ({ page }) => {
     await openApp(page);
     const composer = page.getByRole("textbox", { name: /Ask JARVIS/ });
     await composer.fill("@fri");
@@ -42,10 +42,14 @@ test.describe("work", () => {
     await composer.press("Enter");
     await composer.pressSequentially("tidy the settings copy");
     await composer.press("Enter");
-    await expect(page.getByText("FRIDAY is busy, so this starts when they finish.")).toBeVisible();
+    await expect(page.getByText("FRIDAY has started.")).toBeVisible();
     const start = (await fakeCalls(page)).find((c) => c.cmd === "start_task");
     expect(start?.args).toMatchObject({ agentId: "friday", prompt: "tidy the settings copy" });
-    await expect(page.getByRole("region", { name: "Waiting their turn" }).getByText("tidy the settings copy")).toBeVisible();
+    await page.getByRole("button", { name: "Open task" }).click();
+    const log = page.getByRole("log", { name: "Conversation with FRIDAY" });
+    await expect(log.getByText("tidy the settings copy", { exact: true })).toBeVisible();
+    // Her busy chat carries on: its messages aren't in this one.
+    await expect(log.getByText("Can you redesign the settings page?", { exact: false })).toHaveCount(0);
   });
 
   test("starts a task for an idle agent and opens it", async ({ page }) => {

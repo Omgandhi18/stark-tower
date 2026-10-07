@@ -540,3 +540,71 @@
 .link-button:hover {
   text-decoration: underline;
 }
+
+/* ---- Rails: a collapsed side panel's controls as icons, still working ------------- */
+.rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  min-height: 0;
+  padding: var(--space-3) 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.rail-list {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rail-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  /* WebKit gives buttons padding of their own, which pushes the icon off-centre. */
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-secondary);
+  transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+.rail-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.rail-btn.is-current {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.rail-btn > .rail-badge {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  box-shadow: 0 0 0 2px var(--surface-sunken);
+  pointer-events: none;
+}
+
+.rail-divider {
+  flex: none;
+  width: 24px;
+  height: 1px;
+  margin: var(--space-1) 0;
+  background: var(--border-subtle);
+}

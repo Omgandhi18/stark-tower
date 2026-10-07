@@ -17,7 +17,7 @@ import {
 import { selectQuestionFor, useAttention } from "../../stores/attention";
 import { errorMessage } from "../../lib/errors";
 import type { SimulatorStatus } from "../../lib/types";
-import { useChats } from "../../stores/chats";
+import { useChats, type ChatRef } from "../../stores/chats";
 import { useNavigation } from "../../stores/navigation";
 import SimulatorTools from "./SimulatorTools";
 import { addPoint, markedFrame } from "./pointComposer";
@@ -40,19 +40,22 @@ function onImage(img: HTMLImageElement, clientX: number, clientY: number): [numb
 interface SimulatorViewProps {
   /** Its screen is the one showing, so the device's screen is read. */
   active: boolean;
-  /** Whose chat "Point at something" adds to; null while there's no chat to talk in beside it. */
-  agentId: string | null;
+  /** The chat "Point at something" adds to; null while there's no chat to talk in beside it. */
+  chat: ChatRef | null;
 }
 
 /**
  * The iOS Simulator: pick a device, boot it, and watch its screen, refreshed while the
  * panel shows it. Click to tap, drag to swipe, and type in the box below (with AXe or idb).
  */
-export default function SimulatorView({ active, agentId }: SimulatorViewProps) {
-  const question = useAttention(selectQuestionFor(agentId ?? ""));
+export default function SimulatorView({ active, chat }: SimulatorViewProps) {
+  const agentId = chat?.agentId ?? null;
+  const key = chat?.key ?? null;
+  const conversationId = useChats((s) => (key ? s.threads[key]?.conversationId ?? null : null));
+  const question = useAttention(selectQuestionFor(agentId ?? "", conversationId));
   // Pointing is for one agent's chat while this screen shows: another agent or screen ends it.
   const [pickingFor, setPickingFor] = useState<string | null>(null);
-  const picking = active && agentId !== null && pickingFor === agentId;
+  const picking = active && key !== null && pickingFor === key;
   const chosen = usePreview((s) => s.simulator);
   const choose = usePreview((s) => s.showSimulator);
   const [status, setStatus] = useState<SimulatorStatus | null>(null);
@@ -62,7 +65,7 @@ export default function SimulatorView({ active, agentId }: SimulatorViewProps) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const imageRef = useRef<HTMLImageElement>(null);
-  const press = useRef<{ x: number; y: number; at: [number, number]; picking: boolean; chat: string | null } | null>(null);
+  const press = useRef<{ x: number; y: number; at: [number, number]; picking: boolean; chat: ChatRef | null } | null>(null);
 
   const refresh = useCallback(() => {
     simulatorStatus()
@@ -112,7 +115,7 @@ export default function SimulatorView({ active, agentId }: SimulatorViewProps) {
     const img = imageRef.current;
     if (!img || (!status?.touch && !picking) || busy) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    press.current = { x: e.clientX, y: e.clientY, at: onImage(img, e.clientX, e.clientY), picking, chat: agentId };
+    press.current = { x: e.clientX, y: e.clientY, at: onImage(img, e.clientX, e.clientY), picking, chat };
   };
 
   // A press is a tap where it started, or a swipe to where it ended.
@@ -123,8 +126,8 @@ export default function SimulatorView({ active, agentId }: SimulatorViewProps) {
     if (!img || !start || !device) return;
     if (start.picking) {
       if (!picking || !start.chat) return;
-      const chat = start.chat;
-      const conversationId = useChats.getState().threads[chat]?.conversationId ?? null;
+      const target = start.chat;
+      const pointedIn = useChats.getState().threads[target.key]?.conversationId ?? null;
       setPickingFor(null);
       act(async () => {
         const png = markedFrame(img, start.at[0], start.at[1]);
@@ -132,7 +135,7 @@ export default function SimulatorView({ active, agentId }: SimulatorViewProps) {
           simulatorPoint(device.udid, device.name, start.at[0], start.at[1], img.naturalWidth),
           attachData("simulator-point.png", png),
         ]);
-        addPoint(chat, simulatorPointText(point), attachment, conversationId);
+        addPoint(target, simulatorPointText(point), attachment, pointedIn);
       }, "The simulator point couldn't be added. Try again.");
       return;
     }
@@ -147,8 +150,8 @@ export default function SimulatorView({ active, agentId }: SimulatorViewProps) {
   };
 
   useEffect(() => useAttention.subscribe(state => {
-    if (agentId && selectQuestionFor(agentId)(state)) setPickingFor(null);
-  }), [agentId]);
+    if (agentId && selectQuestionFor(agentId, conversationId)(state)) setPickingFor(null);
+  }), [agentId, conversationId]);
 
   useEffect(() => useNavigation.subscribe((next, previous) => {
     if (next.route !== previous.route) { setPickingFor(null); press.current = null; }
@@ -195,7 +198,7 @@ export default function SimulatorView({ active, agentId }: SimulatorViewProps) {
           }}
           className="simulator-device"
         />
-        <IconButton icon={MousePointerClick} label="Point at something" size="sm" aria-pressed={picking} disabled={!running || !frame || busy || !agentId || Boolean(question)} title={!running ? "Boot this simulator first" : question ? "Answer the agent’s question first, then point at the screen." : undefined} onClick={() => setPickingFor(picking ? null : agentId)} />
+        <IconButton icon={MousePointerClick} label="Point at something" size="sm" aria-pressed={picking} disabled={!running || !frame || busy || !key || Boolean(question)} title={!running ? "Boot this simulator first" : question ? "Answer the agent’s question first, then point at the screen." : undefined} onClick={() => setPickingFor(picking ? null : key)} />
         {running ? (
           <>
             <IconButton icon={Circle} label="Home" size="sm" disabled={busy || !status.touch} onClick={() => act(() => simulatorHome(device.udid), "Home didn't go through.")} />
@@ -214,7 +217,7 @@ export default function SimulatorView({ active, agentId }: SimulatorViewProps) {
           </Button>
         )}
       </div>
-      <SimulatorTools key={device.udid} udid={device.udid} running={running} active={active} agentId={agentId} />
+      <SimulatorTools key={device.udid} udid={device.udid} running={running} active={active} chat={chat} />
       {error && (
         <p className="field-error simulator-error" role="alert">
           <InlineCode text={error} />

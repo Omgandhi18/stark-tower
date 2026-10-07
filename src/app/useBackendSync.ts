@@ -28,6 +28,7 @@ import {
   onRemindersChanged,
   onBugsChanged,
   onChatEvent,
+  onChatStatus,
   onChatSwitched,
   onConfigChanged,
   onConversationsChanged,
@@ -164,6 +165,7 @@ export function useBackendSync() {
         useChats.getState().apply(e);
       }),
       onChatSwitched((s) => useChats.getState().switchTo(s.agentId, s.conversationId)),
+      onChatStatus((s) => useChats.getState().applyStatus(s.conversationId, s.status)),
       onSpendChanged(() => useSpend.getState().changed().catch(report("spending"))),
       onWorkspacesChanged(() => useWorkspace.getState().refreshWorktrees().catch(report("worktrees"))),
       onTasksChanged(() => useWorkspace.getState().refreshTasks().catch(report("tasks"))),

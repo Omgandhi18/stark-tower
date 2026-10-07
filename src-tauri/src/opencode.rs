@@ -246,7 +246,7 @@ impl OpenCode {
                 }
                 let slot = if thinking { &mut turn.thought } else { &mut turn.text };
                 slot.get_or_insert_with(|| (message, String::new())).1.push_str(delta);
-                crate::pty::emit_status(&app, &agent, crate::agents::AgentStatus::Working);
+                crate::runs::set(&app, &agent, sink.conversation, crate::agents::AgentStatus::Working);
             }
             "tool_call" => {
                 self.flush(&mut turn);
@@ -307,7 +307,7 @@ impl OpenCode {
                         Some(streamed) if !described(&own.0, &own.1) => streamed,
                         _ => own,
                     };
-                    let allowed = crate::bridge::decide(&me.app, &me.agent_id, &tool, &input).approved;
+                    let allowed = crate::bridge::decide(&me.app, &me.sink.actor(&me.agent_id), &tool, &input).approved;
                     // Never "always": standing permissions are Starkline's rules, not OpenCode's.
                     let option = if allowed { "once" } else { "reject" };
                     let _ = me.rpc.respond(&id, json!({ "outcome": { "outcome": "selected", "optionId": option } }));
@@ -460,8 +460,8 @@ fn connect(app: &tauri::AppHandle, launch: &Launch, sink: Sink, gen: Option<u64>
             if let Some(waiter) = opencode.turn.lock().unwrap().finished.take() {
                 let _ = waiter.send(Err("OpenCode stopped before it finished.".into()));
             }
-            if let Some(gen) = gen {
-                chat::session_finished(&opencode.app, &opencode.agent_id, gen, false, orchestrator);
+            if let (Some(gen), Some(conversation)) = (gen, opencode.sink.conversation) {
+                chat::session_finished(&opencode.app, &opencode.agent_id, conversation, gen, false, orchestrator);
             }
         });
     }
@@ -531,7 +531,8 @@ fn stop(child: &mut Child) {
 
 /// An agent's chat session on OpenCode.
 pub(crate) fn start_chat(app: &tauri::AppHandle, launch: &Launch, gen: u64) -> Result<(Child, Input), String> {
-    let (mut child, opencode) = connect(app, launch, Sink::chat(), Some(gen))?;
+    let conversation = launch.conversation.ok_or("A chat session needs its conversation.")?;
+    let (mut child, opencode) = connect(app, launch, Sink::chat(conversation), Some(gen))?;
     let session = match open_session(&opencode, launch) {
         Ok(session) => session,
         Err(e) => {

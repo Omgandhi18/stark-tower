@@ -7,6 +7,10 @@
   background: var(--surface-app);
 }
 
+.app-shell.is-nav-collapsed {
+  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+}
+
 /* ---- Top bar ------------------------------------------------------------------- */
 .topbar {
   grid-column: 1 / -1;
@@ -359,11 +363,29 @@
   font-size: var(--text-xs);
 }
 
+/* The update notice and the collapse button keep to the bottom, even with a long list of chats above. */
+.nav-foot {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+  margin: auto calc(-1 * var(--space-2)) calc(-1 * var(--space-3));
+  padding: var(--space-3) var(--space-2);
+  background: var(--nav-surface);
+}
+
+.nav-fold {
+  height: 36px;
+  color: var(--nav-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+}
+
 .nav-update {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  margin-top: auto;
   padding: 10px var(--space-3);
   border: 1px solid var(--nav-border);
   border-radius: var(--radius-card);
@@ -385,9 +407,78 @@
   font-weight: var(--weight-regular);
 }
 
+/* ---- Collapsed sidebar: a rail of the same icons, each still working ------------- */
+/* Every row keeps its height, so nothing moves when resting on the rail brings the names out over the screen. */
+.sidenav.is-rail {
+  position: relative;
+  z-index: var(--z-drawer);
+  width: var(--rail-width);
+  transition: width var(--duration) var(--ease-out), box-shadow var(--duration) var(--ease-out);
+}
+
+.sidenav.is-rail.is-peeking {
+  width: var(--sidenav-width);
+  box-shadow: var(--shadow-overlay);
+}
+
+/* Icons and portraits keep their size in a row too narrow for their names. */
+.sidenav.is-rail :is(.nav-item, .nav-sub-item, .nav-chat, .nav-update) > :is(svg, .portrait) {
+  flex: none;
+}
+
+.sidenav.is-rail :is(.nav-label, .nav-sub-label, .nav-sub-default, .nav-update-text) {
+  transition: opacity var(--duration) var(--ease-out);
+}
+
+.sidenav.is-rail:not(.is-peeking) :is(.nav-label, .nav-sub-label, .nav-sub-default, .nav-update-text) {
+  opacity: 0;
+}
+
+/* Text-only rows and row menus have no icon to leave behind. */
+.sidenav.is-rail:not(.is-peeking) :is(.nav-chats-more, .nav-sub-error) {
+  visibility: hidden;
+}
+
+.sidenav.is-rail:not(.is-peeking) .nav-sub-row > .menu-root {
+  display: none;
+}
+
+.sidenav.is-rail :is(.nav-sub, .nav-chats, .nav-sub-item, .nav-chat) {
+  transition: margin var(--duration) var(--ease-out), padding var(--duration) var(--ease-out), border-color var(--duration) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+/* Nested places line up under the destinations' icons. */
+.sidenav.is-rail:not(.is-peeking) :is(.nav-sub, .nav-chats) {
+  margin-left: 0;
+  padding-left: 0;
+  border-left-color: transparent;
+}
+
+.sidenav.is-rail:not(.is-peeking) .nav-sub-item {
+  padding-left: 13px;
+}
+
+.sidenav.is-rail:not(.is-peeking) .nav-chat {
+  padding-left: 10px;
+}
+
+/* The count of things that need you sits on the bell's corner. */
+.sidenav.is-rail:not(.is-peeking) .nav-item > .count-badge {
+  position: absolute;
+  top: 3px;
+  left: 28px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  box-shadow: 0 0 0 2px var(--nav-surface);
+}
+
 /* ---- Screen area ---------------------------------------------------------------- */
 .app-main {
   position: relative;
+  /* Its own layers stay under the sidebar while that floats out over it. */
+  isolation: isolate;
   min-width: 0;
   min-height: 0;
   overflow: hidden;

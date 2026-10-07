@@ -13,6 +13,9 @@ const AGENT_ID = process.env.STARK_AGENT_ID || "jarvis";
 // Per-launch secret the app expects on every bridge request; without it the app
 // rejects the connection as unauthorized.
 const TOKEN = process.env.STARK_DELEGATE_TOKEN || "";
+// Which of the agent's chats this process works in (an agent can work in several at once),
+// so what it asks for lands in that chat. Older apps didn't set it.
+const CHAT = /^\d+$/.test(process.env.STARK_CONVERSATION_ID || "") ? { conversationId: Number(process.env.STARK_CONVERSATION_ID) } : {};
 // Only the orchestrator gets the delegate tool. STARK_ROLE is set by the app;
 // fall back to the legacy id check if it's somehow missing.
 const IS_ORCH =
@@ -116,7 +119,7 @@ function bridge(payload) {
     const conn = net.createConnection(SOCK);
     let buf = "";
     conn.on("connect", () =>
-      conn.write(JSON.stringify({ ...payload, token: TOKEN }) + "\n"),
+      conn.write(JSON.stringify({ ...payload, ...CHAT, token: TOKEN }) + "\n"),
     );
     conn.on("data", (d) => {
       buf += d.toString();

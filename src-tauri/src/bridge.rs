@@ -3,9 +3,10 @@
 //! drives the session and delegation primitives that still live there.
 
 use crate::agents::{AgentKind, AgentStatus};
-use crate::chat::{run_task_blocking, truncate};
+use crate::chat::{run_task_blocking, truncate, Sink};
 use crate::delegation::{complete_delegation, register_delegation};
 use crate::prompts::resolve_worker_id;
+use crate::runs::{self, Actor};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -53,6 +54,19 @@ fn now_ms() -> f64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as f64)
         .unwrap_or(0.0)
+}
+
+/// Who sent a bridge request: the agent, and which of its chats (the script passes the
+/// conversation its provider process runs in; older scripts didn't).
+pub(crate) fn actor_of(req: &serde_json::Value) -> Actor {
+    let agent = req.get("agentId").and_then(|a| a.as_str()).unwrap_or("");
+    let conversation = req.get("conversationId").and_then(|c| c.as_i64().or_else(|| c.as_str().and_then(|s| s.trim().parse().ok())));
+    Actor::new(agent, conversation)
+}
+
+/// `agent`, in the chat the request came from.
+pub(crate) fn actor_for(agent: &str, req: &serde_json::Value) -> Actor {
+    Actor::new(agent, actor_of(req).conversation)
 }
 
 /// Register a pending review, show it in the UI, and return the channel its
@@ -155,11 +169,11 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
             return;
         }
         Some("claim_files" | "release_files") => {
-            let agent = req.get("agentId").and_then(|v| v.as_str()).unwrap_or("");
+            let who = actor_of(&req);
             let paths = req.get("paths").and_then(|v| v.as_array()).map(|p| p.iter().filter_map(|v| v.as_str().map(str::to_string)).collect::<Vec<_>>()).unwrap_or_default();
             let reason = req.get("reason").and_then(|v| v.as_str()).unwrap_or("");
             let release = req.get("type").and_then(|v| v.as_str()) == Some("release_files");
-            let value = match crate::claims::tool(app, agent, &paths, reason, release) { Ok(result) => serde_json::json!({ "result": result }), Err(error) => serde_json::json!({ "error": error }) };
+            let value = match crate::claims::tool(app, &who, &paths, reason, release) { Ok(result) => serde_json::json!({ "result": result }), Err(error) => serde_json::json!({ "error": error }) };
             reply(&mut writer, value);
             return;
         }
@@ -225,13 +239,12 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
 
     // Only the orchestrator has the delegate tool; bridge scripts from before
     // delegations named their sender didn't say who it was.
-    let from = req.get("agentId").and_then(|a| a.as_str()).filter(|a| !a.is_empty()).map(str::to_string).unwrap_or_else(|| crate::delegation::orchestrator_id(app));
-    let from = from.as_str();
-    let cwd = dir.unwrap_or_else(|| {
-        let state = app.state::<crate::AppState>();
-        let wd = state.workdirs.lock().unwrap().get(from).cloned();
-        wd.unwrap_or_else(|| state.project.lock().unwrap().clone())
-    });
+    let mut by = actor_of(&req);
+    if by.agent.is_empty() {
+        by.agent = crate::delegation::orchestrator_id(app);
+    }
+    // Where the delegating chat works, unless it named another project.
+    let cwd = dir.unwrap_or_else(|| runs::cwd(app, &by).unwrap_or_else(|| app.state::<crate::AppState>().project.lock().unwrap().clone()));
     // record the worker's dir too
     app.state::<crate::AppState>()
         .workdirs
@@ -242,7 +255,7 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
     // Non-blocking: register the worker, ack JARVIS immediately so his turn
     // isn't frozen, then run the worker here (this is already a per-connection
     // background thread) and synthesize results back to him when the batch drains.
-    register_delegation(app);
+    register_delegation(app, by.conversation);
     reply(
         &mut writer,
         serde_json::json!({
@@ -255,9 +268,9 @@ fn handle_delegation(app: &tauri::AppHandle, stream: UnixStream) {
     );
     let _ = writer.flush();
 
-    let result = run_task_blocking(app, from, &agent, &task, &cwd)
+    let result = run_task_blocking(app, &by, &agent, &task, &cwd)
         .unwrap_or_else(|e| format!("(delegation failed: {e})"));
-    complete_delegation(app, &agent, &task, &result);
+    complete_delegation(app, by.conversation, &agent, &task, &result);
 }
 
 /// An agent uses the built-in browser. Screenshots come back as a JPEG for the
@@ -406,11 +419,11 @@ fn handle_roster(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_js
 /// decides. Driven by the `ask_human` MCP tool over the socket.
 fn handle_review(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_json::Value) {
     let id = format!("rv-{}", REVIEW_SEQ.fetch_add(1, Ordering::Relaxed));
-    let agent_id = req
-        .get("agentId")
-        .and_then(|s| s.as_str())
-        .unwrap_or("jarvis")
-        .to_string();
+    let mut who = actor_of(req);
+    if who.agent.is_empty() {
+        who.agent = "jarvis".into();
+    }
+    let agent_id = who.agent.clone();
     let title = req
         .get("title")
         .and_then(|s| s.as_str())
@@ -422,7 +435,7 @@ fn handle_review(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_js
         .and_then(|c| c.as_array())
         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
-    let task = crate::tasks::active_task_for(app, &agent_id);
+    let task = crate::tasks::task_of(app, &who);
     let rx = open_review(
         app,
         ReviewRequest {
@@ -433,10 +446,10 @@ fn handle_review(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_js
             kind: req.get("kind").and_then(|s| s.as_str()).unwrap_or("choice").to_string(),
             choices,
             command: None,
-            cwd: app.state::<crate::AppState>().workdirs.lock().unwrap().get(&agent_id).cloned(),
+            cwd: runs::cwd(app, &who),
             rule: None,
             tier: None,
-            conversation_id: crate::automode::conversation_for(app, &agent_id, task.as_deref()),
+            conversation_id: who.conversation.or_else(|| crate::automode::conversation_for(app, &agent_id, task.as_deref())),
             task_id: task,
             grant: None,
             project: None,
@@ -450,13 +463,13 @@ fn handle_review(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_js
         1,
     );
     let _ = app.emit("ledger://entry", e);
-    crate::pty::emit_status(app, &agent_id, AgentStatus::Blocked);
+    runs::set(app, &agent_id, who.conversation, AgentStatus::Blocked);
 
     // Block until review_respond delivers the decision.
     let decision = rx.recv().unwrap_or_default();
     close_review(app, &id, &outcome_of(&decision));
-    crate::tasks::decision(app, &agent_id, &title, &decision, None);
-    crate::pty::emit_status(app, &agent_id, AgentStatus::Working);
+    crate::tasks::decision(app, &who, &title, &decision, None);
+    runs::set(app, &agent_id, who.conversation, AgentStatus::Working);
 
     let _ = writer.write_all(
         (serde_json::json!({ "result": decision }).to_string() + "\n").as_bytes(),
@@ -491,15 +504,15 @@ fn assess_request(app: &tauri::AppHandle, req: &serde_json::Value) -> (String, s
         .get("input")
         .cloned()
         .unwrap_or_else(|| serde_json::json!({ "command": legacy_command.unwrap_or("") }));
-    let agent_id = req.get("agentId").and_then(|s| s.as_str()).unwrap_or("");
-    let (cwd, assessment) = assess(app, agent_id, &tool, &input);
+    let (cwd, assessment) = assess(app, &actor_of(req), &tool, &input);
     (tool, input, cwd, assessment)
 }
 
-/// The gate's verdict on a tool call by an agent, in the folder it works in.
-fn assess(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_json::Value) -> (Option<String>, crate::gate::Assessment) {
+/// The gate's verdict on a tool call by an agent, in the folder the chat (or delegated task) it acts in works in.
+fn assess(app: &tauri::AppHandle, who: &Actor, tool: &str, input: &serde_json::Value) -> (Option<String>, crate::gate::Assessment) {
     let state = app.state::<crate::AppState>();
-    let cwd = state.workdirs.lock().unwrap().get(agent_id).cloned();
+    let agent_id = who.agent.as_str();
+    let cwd = runs::cwd(app, who);
     let project = cwd.clone().unwrap_or_else(|| state.project.lock().unwrap().clone());
     // The bridge scripts (bundled and in the source tree) and the app's own data
     // (policy, keys) are off limits to agents.
@@ -520,9 +533,9 @@ fn assess(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_json
 /// Whether the agent may read a file without asking: in its project, a temporary folder,
 /// or Starkline's attachments. Only such files are shown in its chat, so sharing can't
 /// carry anything past the gate.
-pub(crate) fn may_read_freely(app: &tauri::AppHandle, agent_id: &str, path: &std::path::Path) -> bool {
+pub(crate) fn may_read_freely(app: &tauri::AppHandle, who: &Actor, path: &std::path::Path) -> bool {
     let input = serde_json::json!({ "file_path": path.to_string_lossy() });
-    assess(app, agent_id, "Read", &input).1.tier == crate::gate::Tier::Automatic
+    assess(app, who, "Read", &input).1.tier == crate::gate::Tier::Automatic
 }
 
 /// An agent shares files it made: Starkline keeps copies and shows them in its chat.
@@ -530,7 +543,8 @@ fn handle_share(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_jso
     let reply = |w: &mut UnixStream, v: serde_json::Value| {
         let _ = w.write_all((v.to_string() + "\n").as_bytes());
     };
-    let from = req.get("agentId").and_then(|s| s.as_str()).unwrap_or("");
+    let who = actor_of(req);
+    let from = who.agent.as_str();
     let caption = req.get("caption").and_then(|s| s.as_str()).map(str::trim).filter(|c| !c.is_empty());
     let asked: Vec<String> = req
         .get("paths")
@@ -541,15 +555,14 @@ fn handle_share(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_jso
         reply(writer, serde_json::json!({ "error": "Name at least one file to share." }));
         return;
     }
-    let cwd = crate::outputs::cwd_for(from)
-        .or_else(|| app.try_state::<crate::AppState>().and_then(|s| s.workdirs.lock().unwrap().get(from).cloned()).map(std::path::PathBuf::from))
-        .unwrap_or_default();
+    let run = who.key();
+    let cwd = crate::outputs::cwd_for(&run).or_else(|| runs::cwd(app, &who).map(std::path::PathBuf::from)).unwrap_or_default();
     let mut refused: Vec<String> = Vec::new();
     let paths: Vec<std::path::PathBuf> = asked
         .iter()
         .map(|raw| crate::outputs::resolve(&cwd, raw))
         .filter(|path| {
-            let free = may_read_freely(app, from, path);
+            let free = may_read_freely(app, &who, path);
             if !free {
                 refused.push(format!("{} is outside the project; save it in the project or a temporary folder to share it.", path.display()));
             }
@@ -557,8 +570,9 @@ fn handle_share(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_jso
         })
         .collect();
     let (kept, missed) = crate::chat::keep_copies(app, &paths);
-    crate::outputs::shared(from, &paths);
-    crate::chat::post_files(app, &crate::outputs::sink_for(from), from, "shared", caption, &kept);
+    crate::outputs::shared(&run, &paths);
+    let sink = crate::outputs::sink_for(&run).unwrap_or_else(|| who.conversation.map(Sink::chat).unwrap_or_else(|| Sink::open(app, from)));
+    crate::chat::post_files(app, &sink, from, "shared", caption, &kept);
     let problems: Vec<String> = refused.into_iter().chain(missed).collect();
     if kept.is_empty() {
         reply(writer, serde_json::json!({ "error": problems.join(" ") }));
@@ -581,9 +595,9 @@ fn files_word(n: usize) -> String {
 /// automatic becomes a permission prompt, which arrives at `handle_approve`.
 fn handle_classify(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_json::Value) {
     let (tool, input, _, a) = assess_request(app, req);
-    let agent = req.get("agentId").and_then(|v| v.as_str()).unwrap_or("");
-    let claim = crate::claims::check(app, agent, &tool, &input).and_then(|_| {
-        if a.tier == crate::gate::Tier::Automatic { crate::claims::allowed(app, agent, &tool, &input) } else { Ok(()) }
+    let who = actor_of(req);
+    let claim = crate::claims::check(app, &who, &tool, &input).and_then(|_| {
+        if a.tier == crate::gate::Tier::Automatic { crate::claims::allowed(app, &who, &tool, &input) } else { Ok(()) }
     });
     let reply = match claim {
         Err(reason) => serde_json::json!({ "tier": "refused", "rule": "File ownership", "reason": reason }),
@@ -648,9 +662,8 @@ pub fn allow_waiting(app: &tauri::AppHandle, conversations: &[i64]) {
 
 /// The bridge script asks for a permission decision on a tool call.
 fn handle_approve(app: &tauri::AppHandle, writer: &mut UnixStream, req: &serde_json::Value) {
-    let agent_id = req.get("agentId").and_then(|s| s.as_str()).unwrap_or("").to_string();
     let (tool, input, _, _) = assess_request(app, req);
-    let verdict = decide(app, &agent_id, &tool, &input);
+    let verdict = decide(app, &actor_of(req), &tool, &input);
     let reply = serde_json::json!({ "approved": verdict.approved, "reason": verdict.reason });
     let _ = writer.write_all((reply.to_string() + "\n").as_bytes());
 }
@@ -671,20 +684,20 @@ impl Verdict {
 /// own; a rule the developer granted may cover the rest; anything else goes to
 /// the developer and BLOCKS until they decide. Every provider comes through here:
 /// Claude Code through the bridge script, Codex and OpenCode from their adapters.
-pub fn decide(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_json::Value) -> Verdict {
-    let agent_id = agent_id.to_string();
+pub fn decide(app: &tauri::AppHandle, who: &Actor, tool: &str, input: &serde_json::Value) -> Verdict {
+    let agent_id = who.agent.clone();
     let (tool, input) = (tool.to_string(), input.clone());
-    let (cwd, assessment) = assess(app, &agent_id, &tool, &input);
+    let (cwd, assessment) = assess(app, who, &tool, &input);
     let state = app.state::<crate::AppState>();
-    if let Err(reason) = crate::claims::check(app, &agent_id, &tool, &input) { return Verdict { approved: false, reason }; }
+    if let Err(reason) = crate::claims::check(app, who, &tool, &input) { return Verdict { approved: false, reason }; }
     if assessment.tier == crate::gate::Tier::Automatic {
-        return match crate::claims::allowed(app, &agent_id, &tool, &input) { Ok(()) => Verdict::allow(), Err(reason) => Verdict { approved: false, reason } };
+        return match crate::claims::allowed(app, who, &tool, &input) { Ok(()) => Verdict::allow(), Err(reason) => Verdict { approved: false, reason } };
     }
 
     let subject = subject_of(&tool, &input);
     let folder = cwd.clone().unwrap_or_else(|| state.project.lock().unwrap().clone());
     let project = project_of(app, &folder);
-    let task = crate::tasks::active_task_for(app, &agent_id);
+    let task = crate::tasks::task_of(app, who);
     let risky = if tool == "Bash" {
         crate::gate::risky_commands(&subject, &crate::gate::Context::for_project(&folder))
     } else {
@@ -703,20 +716,20 @@ pub fn decide(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_
         });
         if let Some(rule) = granted {
             state.ledger.record_rule_use(rule.id);
-            crate::tasks::decision(app, &agent_id, &format!("{} (your rule: {})", truncate(&subject, 80), rule.display), "Allow", Some(true));
+            crate::tasks::decision(app, who, &format!("{} (your rule: {})", truncate(&subject, 80), rule.display), "Allow", Some(true));
             crate::notify::rule_used(app, &agent_id, task.as_deref(), &folder, &rule.display, &subject);
-            return match crate::claims::allowed(app, &agent_id, &tool, &input) { Ok(()) => Verdict::allow(), Err(reason) => Verdict { approved: false, reason } };
+            return match crate::claims::allowed(app, who, &tool, &input) { Ok(()) => Verdict::allow(), Err(reason) => Verdict { approved: false, reason } };
         }
     }
 
     // In auto mode what would ask goes ahead; what never runs on its own still asks.
-    let conversation = crate::automode::conversation_for(app, &agent_id, task.as_deref());
+    let conversation = who.conversation.or_else(|| crate::automode::conversation_for(app, &agent_id, task.as_deref()));
     if crate::automode::allows(app, conversation, assessment.tier) {
         let e = state.ledger.record(&agent_id, "permission", &format!("allowed by auto mode · {}", truncate(&subject, 46)), 1);
         let _ = app.emit("ledger://entry", e);
-        crate::tasks::decision(app, &agent_id, &format!("{} (auto mode)", truncate(&subject, 80)), "Allow", Some(true));
+        crate::tasks::decision(app, who, &format!("{} (auto mode)", truncate(&subject, 80)), "Allow", Some(true));
         crate::notify::auto_mode_used(app, &agent_id, task.as_deref(), &folder, assessment.rule.title(), &subject);
-        return match crate::claims::allowed(app, &agent_id, &tool, &input) { Ok(()) => Verdict::allow(), Err(reason) => Verdict { approved: false, reason } };
+        return match crate::claims::allowed(app, who, &tool, &input) { Ok(()) => Verdict::allow(), Err(reason) => Verdict { approved: false, reason } };
     }
 
     let id = format!("rv-{}", REVIEW_SEQ.fetch_add(1, Ordering::Relaxed));
@@ -745,7 +758,7 @@ pub fn decide(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_
         let _ = app.emit("ledger://entry", e);
     };
     record("awaiting approval");
-    crate::pty::emit_status(app, &agent_id, AgentStatus::Blocked);
+    runs::set(app, &agent_id, who.conversation, AgentStatus::Blocked);
 
     let decision = rx.recv().unwrap_or_default();
     let choice = choice_of(&decision);
@@ -776,20 +789,20 @@ pub fn decide(app: &tauri::AppHandle, agent_id: &str, tool: &str, input: &serde_
         }
     };
     close_review(app, &id, &outcome);
-    crate::pty::emit_status(app, &agent_id, AgentStatus::Working);
+    runs::set(app, &agent_id, who.conversation, AgentStatus::Working);
     if matches!(choice, Choice::Grant(_)) {
         let _ = app.emit("rules://changed", ());
     }
 
     record(if approved { "allowed" } else { "denied" });
-    crate::tasks::decision(app, &agent_id, &format!("{} ({})", truncate(&subject, 80), assessment.rule.title()), &outcome, Some(approved));
+    crate::tasks::decision(app, who, &format!("{} ({})", truncate(&subject, 80), assessment.rule.title()), &outcome, Some(approved));
     let reason = if approved {
         String::new()
     } else {
         format!("The developer didn't allow this ({}). Find another way, or ask them with ask_human.", assessment.rule.label())
     };
     if approved {
-        if let Err(reason) = crate::claims::allowed(app, &agent_id, &tool, &input) { return Verdict { approved: false, reason }; }
+        if let Err(reason) = crate::claims::allowed(app, who, &tool, &input) { return Verdict { approved: false, reason }; }
     }
     Verdict { approved, reason }
 }

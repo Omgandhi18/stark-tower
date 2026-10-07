@@ -1,7 +1,7 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { commands, type AutomationInput, type Bounds, type BrowserPage, type Budget, type CodeReviews, type CommitInput, type ExtraArgs, type MacNotifications, type Output, type PowerState, type ReminderInput, type RequestInput, type Result, type Server, type WorktreeSetup } from "./bindings";
-import type { Attachment, ChatEvent, ChatSwitch, TaskEvent, LedgerEntry, PtyData, ReviewRequest, StatusEvent, UsageUpdate, UpdateStatus } from "./types";
+import type { Attachment, ChatEvent, ChatStatus, ChatSwitch, TaskEvent, LedgerEntry, PtyData, ReviewRequest, StatusEvent, UsageUpdate, UpdateStatus } from "./types";
 
 // Commands are the tauri-specta-generated, typed wrappers (bindings.ts). Fallible
 // Rust commands (Result<T, String>) return a Result here; `ok()` unwraps it back
@@ -202,8 +202,9 @@ export const dispatchTask = (prompt: string, cols: number, rows: number) => ok(c
 
 // ---- Chat (headless Claude Code) ----
 
-export const chatSend = (agentId: string, text: string, dir?: string, attachments: Attachment[] = []) =>
-  ok(commands.chatSend(agentId, text, dir ?? null, attachments));
+/** Send a message in one of the agent's chats (by default the one it's open in). */
+export const chatSend = (agentId: string, text: string, dir?: string, attachments: Attachment[] = [], conversationId?: number | null) =>
+  ok(commands.chatSend(agentId, text, dir ?? null, attachments, conversationId ?? null));
 
 // ---- attachments ----
 
@@ -219,7 +220,14 @@ export const discardAttachments = (attachments: Attachment[]) => commands.discar
 /** The start of a chat's text or HTML file, for its preview. */
 export const readAttachmentText = (path: string) => ok(commands.readAttachmentText(path));
 
-export const chatStop = (agentId: string) => commands.chatStop(agentId);
+/** End one chat's live session, or (with no chat named) all of the agent's. */
+export const chatStop = (agentId: string, conversationId?: number | null) => commands.chatStop(agentId, conversationId ?? null);
+
+/** One chat by id: the conversation, its transcript, and how its session is doing. */
+export const conversationChat = (conversationId: number, limit?: number) => commands.conversationChat(conversationId, limit ?? null);
+
+/** How one chat's session is doing changed (an agent can be busy in one chat and free in another). */
+export const onChatStatus = (cb: (s: ChatStatus) => void): Promise<UnlistenFn> => listen<ChatStatus>("chat://status", (evt) => cb(evt.payload));
 
 /** Load an agent's persisted transcript to rehydrate the chat on reopen. */
 export const getChat = (agentId: string, limit?: number) => commands.getChat(agentId, limit ?? null);

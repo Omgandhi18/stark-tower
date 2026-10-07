@@ -4,6 +4,8 @@ import { useAttention } from "../../stores/attention";
 import { useChats } from "../../stores/chats";
 import { addPoint } from "./pointComposer";
 
+const friday = { agentId: "friday", key: "friday" };
+
 const file: Attachment = { path: "/attachments/movie.mp4", name: "movie.mp4", kind: "video", mime: "video/mp4", size: 100 };
 afterEach(() => {
   useChats.setState({ threads: {} });
@@ -33,7 +35,7 @@ describe("adding preview references to the composer", () => {
         grant: null,
         project: null,
       });
-    expect(() => addPoint("friday", "Point\n", file)).toThrow("Answer the agent’s question first");
+    expect(() => addPoint(friday, "Point\n", file)).toThrow("Answer the agent’s question first");
     expect(useChats.getState().threads.friday.draft).toBe("Keep this draft");
     expect(useChats.getState().threads.friday.files).toEqual([]);
   });
@@ -41,11 +43,11 @@ describe("adding preview references to the composer", () => {
     useChats.getState().setDraft("friday", "Before after");
     useChats.getState().setDraft("edith", "Other chat");
     const input = document.createElement("textarea");
-    input.dataset.chatAgent = "friday";
+    input.dataset.chatKey = "friday";
     input.value = "Before after";
     input.setSelectionRange(7, 7);
     document.body.append(input);
-    addPoint("friday", "Point\n", file);
+    addPoint(friday, "Point\n", file);
     expect(useChats.getState().threads.friday.draft).toBe("Before \nPoint\nafter");
     expect(useChats.getState().threads.friday.files).toEqual([file]);
     expect(useChats.getState().threads.edith.draft).toBe("Other chat");
@@ -53,12 +55,12 @@ describe("adding preview references to the composer", () => {
   it("attaches a recording once without inserting a newline or deleting a selection", () => {
     useChats.getState().setDraft("friday", "Keep this draft");
     const input = document.createElement("textarea");
-    input.dataset.chatAgent = "friday";
+    input.dataset.chatKey = "friday";
     input.value = "Keep this draft";
     input.setSelectionRange(0, 4);
     document.body.append(input);
-    addPoint("friday", "", file);
-    addPoint("friday", "", file);
+    addPoint(friday, "", file);
+    addPoint(friday, "", file);
     expect(useChats.getState().threads.friday.draft).toBe("Keep this draft");
     expect(useChats.getState().threads.friday.files).toEqual([file]);
   });
@@ -66,7 +68,7 @@ describe("adding preview references to the composer", () => {
     useChats.getState().setDraft("friday", "New chat");
     const thread = useChats.getState().threads.friday;
     useChats.setState({ threads: { friday: { ...thread, conversationId: 12 } } });
-    expect(() => addPoint("friday", "Old pick\n", file, 11)).toThrow("That chat changed");
+    expect(() => addPoint(friday, "Old pick\n", file, 11)).toThrow("That chat changed");
     expect(useChats.getState().threads.friday.draft).toBe("New chat");
     expect(useChats.getState().threads.friday.files).toEqual([]);
   });

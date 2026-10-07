@@ -1017,3 +1017,44 @@ The developer asked for "an inbuilt browser and an ios simulator like Claude Des
 - **On one of those tasks, the rest are still there.** A delegated task's owner lists every task they were given from the same parent, this one marked, so you can move between them without going back up. Task details carry them as `siblings`.
 - **Stop, in the task header,** while anything in the task runs. It stops the task and everything still running beneath it: the owner's chat session if it's on the task, and the one-shot workers doing the work it delegated, which were out of reach before (Stop ended only the owner's session, and a delegated task couldn't be stopped at all). Each part that stops is blocked with "You stopped the task before it finished", which is also what the agent that delegated it hears. Workers are now tracked by task, alongside the list app-quit uses.
 - **Verified here.** Rust tests cover how each running part is stopped, and that stopping old work leaves an agent who has moved on alone. Unit tests cover grouping and the state line. WebKit tests stop a delegated part on its own and then a whole task with the work it delegated, and list an agent's tasks under them from both sides.
+
+### 2026-10-07: side panels collapse to rails that still work
+
+The developer asked for "the side panels - all of them including the sidebar" to be collapsible, "but still interactive. so I don't have to expand it to do something."
+
+- **Three panels collapse to a 56-pixel rail of icons:** the sidebar (button at its foot, ⌘B), a task's left column (button beside Execution, ⇧⌘B) and its side panel (Side panel toggle in the task header, beside Terminal, ⌥⌘B; on the panel itself it would have cost the tabs their labels). Each choice is remembered on this Mac.
+- **A rail still does the panel's jobs.** The sidebar's rail is the sidebar itself with the names hidden: every destination, project and chat keeps its icon or portrait in the same row, and Notifications keeps its count. The left column's rail shows everyone on the task as a portrait (the owner marked; anyone with one task of their own opens it), then the owner's earlier chats. The side panel's rail shows Attention, Changes and Checks with their counts (Checks in red with the number failing), then Terminal, Browser and Simulator.
+- **Resting on a rail brings the whole panel out over the screen**, without moving anything under it, after a quarter of a second, so passing over it on the way elsewhere doesn't. It goes away once the pointer has gone for a moment, unless a menu or dialog opened from it is still up. Clicking a status icon brings the panel out on that tab; from the keyboard, focus moves into it and Escape puts it away. Right after you collapse a panel, it stays put until the pointer comes back to it. In the panel that has come out, the collapse button reads "Keep … open".
+- **A tool needs room.** The terminal, browser and simulator open only in a full side panel: opening one (on the rail, from the header, or by an agent) brings a collapsed panel back, and collapsing the panel puts its tool away, since the browser and simulator are native views that don't hide with the page. Beside the browser or simulator on a window up to 1440 pixels wide, the left column now keeps to its rail (still peeking) instead of disappearing.
+- **The Environment room** takes the width the sidebar gives up; at the mockups' window size with the sidebar open it sits where it did.
+- **Verified here.** Unit tests cover which panel each shortcut collapses. WebKit tests collapse each panel, use its rail (a destination, the owner's portrait, a failed check), bring it out on hover and put it away, open the browser from a collapsed panel, and reload with the sidebar still collapsed.
+
+### 2026-10-07: the execution tree drawn as a tree
+
+The developer asked for the execution tree to be "better in UI too". It now follows mockup 02's tree.
+
+- **A trunk and branches.** Who asked (on a delegated task) and the owner sit on the trunk with 40-pixel portraits; the owner's teammates and temporary helpers hang off it on branches, indented, with 32-pixel portraits. A line runs from under each trunk portrait down to the last branch, and where each branch leaves it a dot shows, in the colour of how their part is going.
+- **The task on the page** is the owner's card, marked with the accent tint and an accent bar down its left edge. On a branch the "Delegated" tag is left out (being on a branch says so, and the name needs the room); screen readers still hear it.
+- **Quieter text.** A person's line is in the secondary colour, as in the mockup, except when it needs you or went wrong (then in that colour). Files changed show with a file icon, and not at all at zero. Someone's tasks keep their state dots and may take two lines before shortening. Claimed files fold behind a chevron when there are more than three.
+- **Opening someone's task.** Their portrait and text are one button; their list of tasks, claimed files and a clash stay separate under it.
+- **Verified here.** The WebKit task tests (following a delegation and back, a clash under the agent, an agent's tasks listed once, stopping a delegated part) pass against the new tree, in both the After Hours and Office themes by eye.
+
+### 2026-10-07: an agent works in several chats at once
+
+The developer found that an agent couldn't work in two chats at once ("It gives an error like Jarvis already working in a chat") and asked for it.
+
+- **One session per chat, not per agent.** Each of an agent's chats keeps its own provider session, by conversation: writing in one never ends another's. New chat, opening an earlier chat and deleting an idle chat no longer stop anything. "Talk to" still goes to the chat the agent is open in, which is now just where it last worked (a task starting, or a chat opened).
+- **Work never waits its turn.** Handing work to a busy agent (from Work, a quick capture or an automation) starts it at once: in the agent's chat in that project, or in a new chat beside it while that one is busy. A second chat of the same agent in the same project counts as another writer there, so it gets its own worktree, as a second agent would. Work still waiting from before this change starts at launch.
+- **Everything a session does is kept per chat:** the task it's on, its folder (for the permission gate, claims, dev servers and shared files), what its turn made, the loop guard, and delegation results, which go back into the orchestrator chat that delegated them. The bridge and gate scripts say which chat they're in (`STARK_CONVERSATION_ID`), so an approval, question or delegation lands in that chat and is judged in its folder.
+- **An agent's status is the busiest of its chats** (waiting on you, then working, then thinking, then idle); each chat's own state is reported as `chat://status`, so a chat shows "working" only while it is. A chat that's waiting on you reads as your turn.
+- **At most four live sessions per agent.** Past that, the one idle longest stops; it resumes where it was the next time you write there.
+- **Stop stops one chat.** Stopping a task ends only its chat's session; stopping an agent (turning it off or removing it) ends all of them.
+- **Verified here.** Rust tests cover an agent's status across its chats, the per-chat keys, which session makes way, and stopping one chat while another runs. Script tests cover the chat id reaching the app. Unit tests cover each chat's thread and status. WebKit tests start a new chat while the agent works in another, send into the chat it was written in, and hand work to a busy agent, who starts it in a new chat.
+
+### 2026-10-07: decisions in the chat, as in Notifications
+
+The developer asked for the Notification Centre's decision view "integrated into the chat", and for it to stay in Notifications too.
+
+- **What an agent waits on you for shows at the end of the chat it came from**, in full: the kind and when, the title, everything the agent wrote, and the same decision bar as in Notifications (a note and the options; Deny, Allow once, Allow for this task and Always allow… for an approval; a plan's or mockup's choices). A question with no options says to reply below, where the message box answers it. The pinned question card above the message box is gone.
+- **It stays in Notifications and the task's Attention tab**, and deciding in any of them settles all three. A request from one chat shows only there (one from an older bridge script, which didn't say, shows in each of that agent's chats).
+- **Verified here.** WebKit tests decide JARVIS's "which backend?" choice with a note from his chat and see it leave Notifications, keep it out of FRIDAY's chat, and deny an approval from the chat.

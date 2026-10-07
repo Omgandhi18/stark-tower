@@ -467,7 +467,7 @@ pub fn act(app: &tauri::AppHandle, action: &str, args: &Value) -> Result<crate::
             Ok(Outcome::Text(format!("Went to {}'s home screen.", d.name)))
         }
         "record_start" | "record_stop" | "logs" | "appearance" | "location" | "push" | "status_bar" => {
-            let verdict = crate::bridge::decide(app, &text("agentId"), "mcp__stark__simulator", args);
+            let verdict = crate::bridge::decide(app, &crate::bridge::actor_of(args), "mcp__stark__simulator", args);
             if !verdict.approved {
                 return Err(verdict.reason);
             }

@@ -9,6 +9,8 @@ import net from "node:net";
 const SOCK = process.env.STARK_DELEGATE_SOCK;
 const TOKEN = process.env.STARK_DELEGATE_TOKEN || "";
 const AGENT_ID = process.env.STARK_AGENT_ID || "";
+// The chat the tool call is from, so the gate judges it in that chat's folder.
+const CHAT = /^\d+$/.test(process.env.STARK_CONVERSATION_ID || "") ? { conversationId: Number(process.env.STARK_CONVERSATION_ID) } : {};
 const CHECK_TIMEOUT_MS = 10_000;
 
 function ask(reason) {
@@ -29,7 +31,7 @@ function classify(toolName, input) {
     }, CHECK_TIMEOUT_MS);
     let buf = "";
     conn.on("connect", () =>
-      conn.write(JSON.stringify({ type: "classify", agentId: AGENT_ID, tool_name: toolName, input, token: TOKEN }) + "\n"),
+      conn.write(JSON.stringify({ type: "classify", agentId: AGENT_ID, ...CHAT, tool_name: toolName, input, token: TOKEN }) + "\n"),
     );
     conn.on("data", (d) => {
       buf += d.toString();

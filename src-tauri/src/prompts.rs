@@ -330,7 +330,8 @@ pub(crate) fn workspace_context(app: &tauri::AppHandle, agent: &str, cwd: &str) 
             w.base
         ));
         // A setup that went wrong is worth knowing about; a successful one's output isn't.
-        let task = crate::tasks::active_task_for(app, agent).and_then(|id| state.ledger.task(&id));
+        // The worktree is the task's own, so its task is the one working in it.
+        let task = state.ledger.tasks(200).into_iter().find(|t| t.cwd == cwd && t.assignee == agent && t.parent_id.is_none());
         if let Some(task) = task {
             let events = state.ledger.task_events(&task.id, 400);
             for e in events.iter().filter(|e| e.kind == "workspace" && !e.data.is_empty() && !e.summary.ends_with("finished")) {

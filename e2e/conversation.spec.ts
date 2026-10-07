@@ -112,10 +112,23 @@ test.describe("conversation", () => {
     await expect(earlier.getByRole("button", { name: /^Redesign the settings page/ })).toHaveAttribute("aria-current", "page");
   });
 
-  test("won't start a new chat while the agent works, since that would end their session", async ({ page }) => {
-    await openFriday(page);
+  test("starts a new chat while the agent works in another, and each chat gets its own messages", async ({ page }) => {
+    const log = await openFriday(page);
     await page.getByRole("button", { name: "New chat" }).click();
-    await expect(page.getByRole("alert").filter({ hasText: "FRIDAY is working right now. Start a new chat when they're done." })).toBeVisible();
-    expect((await fakeCalls(page)).some((c) => c.cmd === "new_chat")).toBe(false);
+    await expect(log.getByText("Start a conversation with FRIDAY")).toBeVisible();
+    const fresh = (await fakeCalls(page)).find((c) => c.cmd === "new_chat");
+    expect(fresh).toBeTruthy();
+
+    await page.getByRole("textbox", { name: /Message FRIDAY/ }).fill("Check the pricing page too");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(log.getByText(/Got it: "Check the pricing page too"/)).toBeVisible();
+    const sent = (await fakeCalls(page)).filter((c) => c.cmd === "chat_send").pop();
+    expect(typeof sent?.args.conversationId).toBe("number");
+
+    // The earlier chat, still running, kept its own transcript.
+    const earlier = page.getByRole("region", { name: "Earlier with FRIDAY" });
+    await earlier.getByRole("button", { name: /^Redesign the settings page/ }).click();
+    await expect(log.getByText("Can you redesign the settings page?", { exact: false })).toBeVisible();
+    await expect(log.getByText(/Check the pricing page too/)).toHaveCount(0);
   });
 });

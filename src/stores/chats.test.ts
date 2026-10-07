@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { mockIPC } from "@tauri-apps/api/mocks";
-import { mergeTranscript, messageFor, selectThread, useChats } from "./chats";
+import { chatKey, mergeTranscript, messageFor, selectThread, useChats } from "./chats";
 
 describe("messageFor", () => {
   it("turns session events into readable messages", () => {
@@ -42,7 +42,7 @@ describe("chats store", () => {
       return null;
     });
     const s = useChats.getState();
-    const loading = s.hydrate("friday");
+    const loading = s.hydrate("friday", "friday");
     s.apply({ agentId: "friday", kind: "text", text: "live" });
     await loading;
     const thread = selectThread("friday")(useChats.getState());
@@ -56,7 +56,7 @@ describe("chats store", () => {
     mockIPC(() => {
       throw new Error("database locked");
     });
-    await expect(useChats.getState().hydrate("edith")).rejects.toThrow("database locked");
+    await expect(useChats.getState().hydrate("edith", "edith")).rejects.toThrow("database locked");
     expect(selectThread("edith")(useChats.getState()).loading).toBe(false);
   });
 
@@ -71,7 +71,7 @@ describe("chats store", () => {
     });
     const s = useChats.getState();
     const key = s.pushUser("vision", "fix it");
-    const loading = s.hydrate("vision");
+    const loading = s.hydrate("vision", "vision");
     s.apply({ agentId: "vision", kind: "tool", tool: "Read", detail: "a.ts", messageId: 2 });
     s.confirmStored("vision", key, 1);
     await loading;
@@ -107,7 +107,7 @@ describe("chats store", () => {
       return null;
     });
     const s = useChats.getState();
-    await s.hydrate("karen");
+    await s.hydrate("karen", "karen");
     s.apply({ agentId: "karen", kind: "tool", tool: "Edit", detail: "a.ts", conversationId: 77, messageId: 1 });
     s.apply({ agentId: "karen", kind: "text", text: "hello", conversationId: 5, messageId: 2 });
     expect(selectThread("karen")(useChats.getState()).messages.map((m) => m.text ?? m.tool)).toEqual(["hello"]);
@@ -117,14 +117,37 @@ describe("chats store", () => {
     expect(selectThread("karen")(useChats.getState()).hydrated).toBe(false);
   });
 
+  it("keeps each of an agent's chats apart, and sends a chat's events only to it", async () => {
+    mockIPC((cmd, args) => {
+      const id = (args as { conversationId?: number } | undefined)?.conversationId;
+      if (cmd === "conversation_chat")
+        return { conversation: { id, agent_id: "jarvis", title: "", cwd: id === 7 ? "/w/bi" : "/w/sfa", created: 1, updated: 1 }, messages: [], status: id === 9 ? "working" : null };
+      return null;
+    });
+    const s = useChats.getState();
+    await s.hydrate(chatKey(7), "jarvis");
+    await s.hydrate(chatKey(9), "jarvis");
+    expect(selectThread(chatKey(7))(useChats.getState()).folder).toBe("/w/bi");
+    expect(selectThread(chatKey(9))(useChats.getState()).pending).toBe(true);
+    s.apply({ agentId: "jarvis", kind: "text", text: "bi work", conversationId: 7, messageId: 1 });
+    s.apply({ agentId: "jarvis", kind: "text", text: "sfa work", conversationId: 9, messageId: 2 });
+    expect(selectThread(chatKey(7))(useChats.getState()).messages.map((m) => m.text)).toEqual(["bi work"]);
+    expect(selectThread(chatKey(9))(useChats.getState()).messages.map((m) => m.text)).toEqual(["sfa work"]);
+    // One chat finishing leaves the other still working.
+    s.applyStatus(9, "idle");
+    s.setPending(chatKey(7), true);
+    expect(selectThread(chatKey(9))(useChats.getState()).pending).toBe(false);
+    expect(selectThread(chatKey(7))(useChats.getState()).pending).toBe(true);
+  });
+
   it("hydrates only once", async () => {
     let calls = 0;
     mockIPC((cmd) => {
       if (cmd === "get_chat") calls++;
       return cmd === "get_chat" ? [] : null;
     });
-    await useChats.getState().hydrate("vision");
-    await useChats.getState().hydrate("vision");
+    await useChats.getState().hydrate("vision", "vision");
+    await useChats.getState().hydrate("vision", "vision");
     expect(calls).toBe(1);
   });
 

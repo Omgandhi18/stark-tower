@@ -35,6 +35,7 @@ mod policy;
 mod pty;
 mod reminders;
 mod rpc;
+mod runs;
 mod schedule;
 mod secrets;
 mod simulator;
@@ -92,9 +93,11 @@ pub struct AppState {
     pub reviews: Mutex<HashMap<String, std::sync::mpsc::Sender<String>>>,
     /// What each pending review is about, so the UI can list them again.
     pub pending_reviews: Mutex<HashMap<String, bridge::ReviewRequest>>,
-    /// The current batch of background delegations JARVIS is waiting on, so their
-    /// results can be synthesized back to him in one follow-up when all finish.
-    pub delegations: Mutex<chat::DelegationState>,
+    /// The background delegations each orchestrator chat is waiting on, so their
+    /// results can be synthesized back into that chat in one follow-up when all finish.
+    pub delegations: Mutex<HashMap<i64, chat::DelegationState>>,
+    /// What each conversation's provider process is doing; an agent's status is the busiest of its runs.
+    pub runs: runs::Runs,
     /// User-editable engines + roster (names, personalities, sprites, models).
     /// The single source of truth; `roster` above is a derived cache.
     pub config: Mutex<AppConfig>,
@@ -429,24 +432,30 @@ fn chat_send(
     text: String,
     dir: Option<String>,
     attachments: Vec<attachments::Attachment>,
+    conversation_id: Option<i64>,
 ) -> Result<Option<i64>, String> {
     let files = attachments::checked(&attachments::root(&app), &attachments)?;
+    // The chat it's written in; without one, the chat the agent is open in.
+    let conversation = match conversation_id {
+        Some(id) => {
+            let chat = state.ledger.conversation(id).ok_or("That chat isn't here any more.")?;
+            if chat.agent_id != agent_id {
+                return Err("That chat belongs to another agent.".into());
+            }
+            id
+        }
+        None => state.ledger.active_conversation(&agent_id),
+    };
+    let saved = state.ledger.conversation(conversation).map(|c| c.cwd).filter(|c| !c.trim().is_empty());
     let cwd = dir
         .filter(|d| !d.trim().is_empty())
         .map(|d| shellexpand_home(d.trim()))
-        .unwrap_or_else(|| {
-            state
-                .workdirs
-                .lock()
-                .unwrap()
-                .get(&agent_id)
-                .cloned()
-                .unwrap_or_else(|| current_project(&state))
-        });
+        .or(saved)
+        .unwrap_or_else(|| state.workdirs.lock().unwrap().get(&agent_id).cloned().unwrap_or_else(|| current_project(&state)));
     // A follow-up in a task's conversation picks that task back up; otherwise what was asked becomes one.
-    tasks::developer_message(&app, &agent_id, &text, &cwd);
+    tasks::developer_message(&app, &agent_id, conversation, &text, &cwd);
     // The stored id goes back to the UI, which already shows the message, to avoid a repeat.
-    chat::send_user_turn(&app, &agent_id, &text, &files, &cwd)
+    chat::send_user_turn(&app, &agent_id, conversation, &text, &files, &cwd)
 }
 
 /// Keep copies of files the developer picked or dropped, to send with a message.
@@ -966,9 +975,7 @@ async fn remove_worktree(app: tauri::AppHandle, id: String, force: bool) -> Resu
         let state = app.state::<AppState>();
         let _lock = state.workspace_lock.lock().unwrap();
         let task = state.ledger.task(&id).ok_or("That task doesn't exist.")?;
-        let statuses = state.statuses.lock().unwrap().clone();
-        let workdirs = state.workdirs.lock().unwrap().clone();
-        if workdirs.iter().any(|(agent, cwd)| cwd == &task.cwd && matches!(statuses.get(agent), Some(AgentStatus::Working | AgentStatus::Thinking | AgentStatus::Blocked))) {
+        if !runs::busy_in_folder(&app, &task.cwd).is_empty() {
             return Err("An agent is still using this worktree. Stop its session first.".into());
         }
         workspaces::remove(&state.ledger, &task, force)?;
@@ -995,6 +1002,24 @@ fn get_chat(state: tauri::State<AppState>, agent_id: String, limit: Option<i64>)
     state.ledger.messages(&agent_id, limit.unwrap_or(500))
 }
 
+/// One chat, as the UI shows it: the conversation, its transcript, and how its session is doing.
+#[derive(serde::Serialize, specta::Type)]
+struct ConversationChat {
+    conversation: ledger::Conversation,
+    messages: Vec<StoredMessage>,
+    /// What its session is doing; None when nothing runs in it.
+    status: Option<AgentStatus>,
+}
+
+/// One chat by id, for a page showing that chat (an agent can be talking in several).
+#[tauri::command]
+#[specta::specta]
+fn conversation_chat(app: tauri::AppHandle, state: tauri::State<AppState>, conversation_id: i64, limit: Option<i64>) -> Option<ConversationChat> {
+    let conversation = state.ledger.conversation(conversation_id)?;
+    let messages = state.ledger.conversation_messages(conversation_id, limit.unwrap_or(500));
+    Some(ConversationChat { conversation, messages, status: runs::status_of(&app, conversation_id) })
+}
+
 /// The agent's current saved chat, if it has one, so the UI can restore the folder
 /// it runs in: resuming a Claude session only works from its own folder.
 #[tauri::command]
@@ -1013,11 +1038,18 @@ fn list_conversations(state: tauri::State<AppState>) -> Vec<ledger::Conversation
     state.ledger.conversations(200)
 }
 
-/// End an agent's live session because the developer chose to (stop, new chat,
-/// another chat, removed or turned off). A task it was running is marked blocked.
-fn stop_by_developer(app: &tauri::AppHandle, agent_id: &str) {
-    tasks::session_ended(app, agent_id, tasks::Ended::ByYou);
-    chat::stop(app, agent_id);
+/// End a chat's live session because the developer chose to (stop, or the chat was deleted).
+/// A task it was running is marked blocked.
+fn stop_by_developer(app: &tauri::AppHandle, agent_id: &str, conversation: i64) {
+    tasks::session_ended(app, agent_id, conversation, tasks::Ended::ByYou);
+    chat::stop(app, conversation);
+}
+
+/// End all of an agent's chat sessions (it was removed, turned off or moved to another provider).
+fn stop_agent_by_developer(app: &tauri::AppHandle, agent_id: &str) {
+    for conversation in chat::sessions_of(app, agent_id) {
+        stop_by_developer(app, agent_id, conversation);
+    }
 }
 
 /// Tell the UI an agent now talks in a different conversation.
@@ -1025,13 +1057,12 @@ fn emit_chat_switched(app: &tauri::AppHandle, agent_id: &str, conversation_id: i
     let _ = app.emit("chat://switched", serde_json::json!({ "agentId": agent_id, "conversationId": conversation_id }));
 }
 
-/// Start a fresh conversation with an agent (ends the live session so the next
-/// message begins a genuinely new chat), in `cwd` (a project folder) or where the
-/// agent works now. Returns the new conversation id.
+/// Start a fresh conversation with an agent, in `cwd` (a project folder) or where the agent
+/// works now. Its other chats carry on: an agent works in several at once. Returns the new
+/// conversation id.
 #[tauri::command]
 #[specta::specta]
 fn new_chat(app: tauri::AppHandle, state: tauri::State<AppState>, agent_id: String, cwd: Option<String>) -> i64 {
-    stop_by_developer(&app, &agent_id);
     let cwd = cwd
         .filter(|c| !c.trim().is_empty())
         .or_else(|| state.workdirs.lock().unwrap().get(&agent_id).cloned())
@@ -1052,13 +1083,11 @@ fn delete_conversation(app: tauri::AppHandle, state: tauri::State<AppState>, con
     let chat = state.ledger.conversation(conversation_id).ok_or("That chat doesn't exist any more.")?;
     let agent = chat.agent_id.clone();
     let was_open = state.ledger.current_conversation(&agent) == Some(conversation_id);
-    if was_open {
-        if tasks::is_busy(&app, &agent) {
-            let name = prompts::agent_name(&app, &agent);
-            return Err(format!("{name} is working in this chat. Delete it once they've finished."));
-        }
-        stop_by_developer(&app, &agent);
+    if tasks::is_busy_in(&app, conversation_id) {
+        let name = prompts::agent_name(&app, &agent);
+        return Err(format!("{name} is working in this chat. Delete it once they've finished."));
     }
+    stop_by_developer(&app, &agent, conversation_id);
     let files = state.ledger.conversation_attachments(conversation_id);
     if !state.ledger.delete_conversation(conversation_id) {
         return Err("The chat couldn't be deleted.".into());
@@ -1073,14 +1102,13 @@ fn delete_conversation(app: tauri::AppHandle, state: tauri::State<AppState>, con
     Ok(())
 }
 
-/// Reopen a saved conversation: make it active, end the live session, and point
-/// the agent's workdir at the conversation's dir so the next message resumes it.
+/// Reopen a saved conversation: make it the agent's open chat (where "Talk to" goes) and point
+/// the agent's workdir at its folder. Its other chats keep their sessions.
 #[tauri::command]
 #[specta::specta]
 fn open_conversation(app: tauri::AppHandle, state: tauri::State<AppState>, conversation_id: i64) {
     state.ledger.open_conversation(conversation_id);
     if let Some(c) = state.ledger.conversation(conversation_id) {
-        stop_by_developer(&app, &c.agent_id);
         if !c.cwd.trim().is_empty() {
             state.workdirs.lock().unwrap().insert(c.agent_id.clone(), c.cwd.clone());
         }
@@ -1149,13 +1177,16 @@ fn list_files(dir: String, limit: Option<usize>) -> Vec<PathEntry> {
     out
 }
 
-/// End the agent's live session. Saved chats are never deleted here; starting a
-/// fresh conversation is `new_chat`.
+/// End one of an agent's chat sessions, or (with no chat named) all of them. Saved chats are
+/// never deleted here; writing in the chat again resumes it.
 #[tauri::command]
 #[specta::specta]
-fn chat_stop(app: tauri::AppHandle, agent_id: String) {
+fn chat_stop(app: tauri::AppHandle, agent_id: String, conversation_id: Option<i64>) {
     // Only the live session ends; the transcript stays in saved chats.
-    stop_by_developer(&app, &agent_id);
+    match conversation_id {
+        Some(c) => stop_by_developer(&app, &agent_id, c),
+        None => stop_agent_by_developer(&app, &agent_id),
+    }
 }
 
 /// What the agent runtime can do right now: installed provider CLIs, the data
@@ -1555,9 +1586,9 @@ fn update_agent(
     // A new agent starts at its default tone; the dials always stay in range.
     agent.voice = Some(agent.voice.take().unwrap_or_else(|| voices::default_for(&agent.id)).clamped());
     agent.tone = Some(agent.tone.unwrap_or_else(|| tone::default_for(&agent.id)).clamped());
-    // Turning an agent off ends its live session; its chats are kept.
+    // Turning an agent off ends its live sessions; its chats are kept.
     if !agent.enabled {
-        stop_by_developer(&app, &agent.id);
+        stop_agent_by_developer(&app, &agent.id);
     }
     {
         let mut cfg = state.config.lock().unwrap();
@@ -1590,7 +1621,7 @@ fn cleanup_look(app: &tauri::AppHandle, state: &AppState, old: Option<String>) {
 #[specta::specta]
 fn remove_agent(app: tauri::AppHandle, state: tauri::State<AppState>, id: String) -> AppConfig {
     let old_look = state.config.lock().unwrap().agent(&id).and_then(|a| a.look.clone());
-    stop_by_developer(&app, &id);
+    stop_agent_by_developer(&app, &id);
     {
         let mut cfg = state.config.lock().unwrap();
         cfg.agents.retain(|a| a.id != id);
@@ -1841,7 +1872,7 @@ reversible), and briefly say what you changed. If one is too vague to act on, sa
 
     std::thread::spawn(move || {
         // A run that fails or ends without a result fixed nothing: reopen the bugs.
-        let outcome = chat::run_task_blocking(&app, tasks::BY_DEVELOPER, &maintainer, &task, &repo);
+        let outcome = chat::run_task_blocking(&app, &runs::Actor::new(tasks::BY_DEVELOPER, None), &maintainer, &task, &repo);
         let fixed = matches!(&outcome, Ok(result) if !result.trim().is_empty());
         if let Some(state) = app.try_state::<AppState>() {
             for id in ids {
@@ -2284,6 +2315,7 @@ fn specta_builder() -> tauri_specta::Builder {
             chat_send,
             chat_stop,
             get_chat,
+            conversation_chat,
             active_conversation,
             list_conversations,
             new_chat,
@@ -2418,7 +2450,8 @@ pub fn run() {
                 sock_token: sock_token.clone(),
                 reviews: Mutex::new(HashMap::new()),
                 pending_reviews: Mutex::new(HashMap::new()),
-                delegations: Mutex::new(chat::DelegationState::default()),
+                delegations: Mutex::new(HashMap::new()),
+                runs: runs::Runs::default(),
                 config: Mutex::new(cfg),
                 config_file,
                 oneshot_pids: Mutex::new(HashSet::new()),
@@ -2501,15 +2534,15 @@ fn start_floor_router(app: tauri::AppHandle) {
         for m in floor::route_once(&floor_dir) {
             floor::log_event(&floor_dir, now, &m.from, "message", &format!("→ {} ({})", m.to, m.kind));
         }
-        let live_idle: Vec<String> = {
+        // Agents whose live chat (the one they're open in, else the last used) is free for a message.
+        let live: Vec<String> = {
             let sessions = state.chat.sessions.lock().unwrap();
-            let statuses = state.statuses.lock().unwrap();
-            sessions
-                .keys()
-                .filter(|id| matches!(statuses.get(*id), Some(AgentStatus::Idle)))
-                .cloned()
-                .collect()
+            let mut agents: Vec<String> = sessions.values().map(|s| s.agent_id.clone()).collect();
+            agents.sort();
+            agents.dedup();
+            agents
         };
+        let live_idle = live.into_iter().filter(|id| chat::live_chat(&app, id).is_some_and(|c| runs::status_of(&app, c) == Some(AgentStatus::Idle)));
         for id in live_idle {
             // Archive a message only once it reached the session; otherwise it
             // stays queued for the next pass.

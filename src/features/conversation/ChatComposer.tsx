@@ -2,7 +2,7 @@ import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "re
 import { AtSign, SendHorizontal, Square } from "lucide-react";
 import { Button, IconButton, cx } from "../../design";
 import type { Attachment, PathEntry } from "../../lib/types";
-import { selectThread, useChats } from "../../stores/chats";
+import { selectThread, useChats, type ChatRef } from "../../stores/chats";
 import { AttachButton, AttachmentTray } from "../attachments/AttachmentTray";
 import type { AttachmentDraft } from "../attachments/useAttachmentDraft";
 import AutoModeChip from "../automode/AutoModeChip";
@@ -15,7 +15,8 @@ import { useFolderFiles } from "./useFolderFiles";
 const MAX_INPUT_HEIGHT = 220;
 
 interface ChatComposerProps {
-  agentId: string;
+  /** The chat the message goes to. */
+  chat: ChatRef;
   agentName: string;
   folder: string;
   pending: boolean;
@@ -28,8 +29,9 @@ interface ChatComposerProps {
 }
 
 /** Message box with an @ file picker and attachments (picked, pasted or dropped). Enter sends, Shift+Enter adds a line. */
-export default function ChatComposer({ agentId, agentName, folder, pending, answering, attachments, onSend, onStop }: ChatComposerProps) {
-  const draft = useChats((s) => selectThread(agentId)(s).draft);
+export default function ChatComposer({ chat, agentName, folder, pending, answering, attachments, onSend, onStop }: ChatComposerProps) {
+  const { agentId, key } = chat;
+  const draft = useChats((s) => selectThread(key)(s).draft);
   const setDraft = useChats((s) => s.setDraft);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [mention, setMention] = useState<MentionQuery | null>(null);
@@ -64,7 +66,7 @@ export default function ChatComposer({ agentId, agentName, folder, pending, answ
     if (!mention) return;
     const caret = inputRef.current?.selectionStart ?? draft.length;
     const next = insertMention(draft, mention, caret, entry);
-    setDraft(agentId, next.text);
+    setDraft(key, next.text);
     setMention(null);
     placeCaret(next.caret);
   };
@@ -75,7 +77,7 @@ export default function ChatComposer({ agentId, agentName, folder, pending, answ
     const needsSpace = caret > 0 && !/\s/.test(draft[caret - 1]);
     const insert = `${needsSpace ? " " : ""}@`;
     const text = draft.slice(0, caret) + insert + draft.slice(caret);
-    setDraft(agentId, text);
+    setDraft(key, text);
     updateMention(text, caret + insert.length);
     placeCaret(caret + insert.length);
   };
@@ -87,7 +89,7 @@ export default function ChatComposer({ agentId, agentName, folder, pending, answ
   const submit = () => {
     const text = draft.trim();
     if (!canSend) return;
-    setDraft(agentId, "");
+    setDraft(key, "");
     setMention(null);
     if (sending.length) attachments.sent();
     onSend(text, [...sending]);
@@ -139,7 +141,7 @@ export default function ChatComposer({ agentId, agentName, folder, pending, answ
         />
       )}
       <textarea
-        data-chat-agent={agentId}
+        data-chat-key={key}
         ref={inputRef}
         className="chat-input selectable"
         rows={1}
@@ -151,7 +153,7 @@ export default function ChatComposer({ agentId, agentName, folder, pending, answ
         aria-controls={picking && options.length > 0 ? listId : undefined}
         aria-activedescendant={picking && options.length > 0 ? optionId(listId, index) : undefined}
         onChange={(e) => {
-          setDraft(agentId, e.target.value);
+          setDraft(key, e.target.value);
           updateMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
         }}
         onSelect={(e) => {
@@ -171,7 +173,7 @@ export default function ChatComposer({ agentId, agentName, folder, pending, answ
         <AttachButton draft={attachments} disabled={answering} title={answering ? "Answer the question first, then attach files" : undefined} />
         <IconButton icon={AtSign} label="Mention a project file or folder" size="sm" disabled={!folder} onClick={startMention} />
         <ModelChips agentId={agentId} agentName={agentName} />
-        <AutoModeChip agentId={agentId} agentName={agentName} />
+        <AutoModeChip chatKey={key} agentName={agentName} />
         <span className="chat-composer-spacer" aria-hidden />
         {pending && (
           <Button size="sm" variant="secondary" icon={Square} onClick={onStop}>

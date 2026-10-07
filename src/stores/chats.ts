@@ -1,9 +1,9 @@
-// Every open conversation's messages, keyed by agent. One store so the
-// conversation screen and the Environment's side panel show the same thread,
-// and drafts survive switching screens.
+// Every open chat's messages. An agent can talk in several chats at once, so a thread is kept
+// per chat: `c:<id>` for one conversation (a task's page), or the agent's id for whichever chat
+// it's open in (the Environment's side panel). One store, so drafts survive switching screens.
 import { create } from "zustand";
-import { activeConversation, getChat } from "../lib/api";
-import type { Attachment, ChatEvent } from "../lib/types";
+import { activeConversation, conversationChat, getChat } from "../lib/api";
+import type { AgentStatus, Attachment, ChatEvent, StoredMessage } from "../lib/types";
 
 /** "artifact": files an agent made or shared (`detail` says which). */
 export type MessageRole = "user" | "agent" | "tool" | "thinking" | "error" | "system" | "artifact";
@@ -21,7 +21,23 @@ export interface ChatMessage {
   storedId?: number;
 }
 
+/** Where a chat's thread is kept: `c:<id>` for one conversation, or an agent's id for the chat it's open in. */
+export type ChatKey = string;
+
+export const chatKey = (conversationId: number): ChatKey => `c:${conversationId}`;
+
+/** A chat a view talks in: whose it is, and where its thread is kept. */
+export interface ChatRef {
+  agentId: string;
+  key: ChatKey;
+}
+
+/** The conversation a key names, if it names one. */
+export const conversationOfKey = (key: ChatKey): number | null => (key.startsWith("c:") ? Number(key.slice(2)) : null);
+
 export interface ChatThread {
+  /** Whose chat it is ("" until known). */
+  agentId: string;
   messages: ChatMessage[];
   /** Waiting for the agent's reply. */
   pending: boolean;
@@ -39,30 +55,33 @@ export interface ChatThread {
 }
 
 interface ChatsState {
-  threads: Record<string, ChatThread>;
-  /** Load the agent's saved transcript and folder once. */
-  hydrate: (agentId: string) => Promise<void>;
-  /** Apply a live event from the agent's session. */
+  threads: Record<ChatKey, ChatThread>;
+  /** Load the chat's saved transcript and folder once. */
+  hydrate: (key: ChatKey, agentId: string) => Promise<void>;
+  /** Apply a live event from one of an agent's sessions to every thread showing that chat. */
   apply: (event: ChatEvent) => void;
+  /** A chat's session started or finished working. */
+  applyStatus: (conversationId: number, status: AgentStatus) => void;
   /** Add a message the app produced locally (what you sent, a question you answered, an error). Returns its key. */
-  push: (agentId: string, message: Omit<ChatMessage, "id">) => number;
+  push: (key: ChatKey, message: Omit<ChatMessage, "id">) => number;
   /** Returns the message's key, to confirm once the backend has stored it. */
-  pushUser: (agentId: string, text: string, attachments?: Attachment[]) => number;
+  pushUser: (key: ChatKey, text: string, attachments?: Attachment[]) => number;
   /** A local message was stored as `storedId`; drop it if the saved copy is already shown. */
-  confirmStored: (agentId: string, messageId: number, storedId: number) => void;
-  pushError: (agentId: string, text: string) => void;
-  setPending: (agentId: string, pending: boolean) => void;
-  setDraft: (agentId: string, draft: string) => void;
+  confirmStored: (key: ChatKey, messageId: number, storedId: number) => void;
+  pushError: (key: ChatKey, text: string) => void;
+  setPending: (key: ChatKey, pending: boolean) => void;
+  setDraft: (key: ChatKey, draft: string) => void;
   /** Change the files attached to the message being written. */
-  updateFiles: (agentId: string, update: (current: readonly Attachment[]) => Attachment[]) => void;
-  setFolder: (agentId: string, folder: string) => void;
+  updateFiles: (key: ChatKey, update: (current: readonly Attachment[]) => Attachment[]) => void;
+  setFolder: (key: ChatKey, folder: string) => void;
   /** Forget the thread (a new or reopened conversation); it re-hydrates on next view. */
-  reset: (agentId: string) => void;
-  /** The agent now talks in `conversationId`: a thread showing another conversation starts over. */
+  reset: (key: ChatKey) => void;
+  /** The agent is now open in `conversationId`: its open-chat thread showing another conversation starts over. */
   switchTo: (agentId: string, conversationId: number) => void;
 }
 
 const EMPTY: ChatThread = {
+  agentId: "",
   messages: [],
   pending: false,
   hydrated: false,
@@ -75,6 +94,9 @@ const EMPTY: ChatThread = {
 
 let nextId = 0;
 const id = () => ++nextId;
+
+/** A chat waits for the agent's reply in these states; waiting on you ("blocked") is your turn. */
+const BUSY: readonly AgentStatus[] = ["thinking", "working"];
 
 /** How a live event becomes a message (null: it only changes state). */
 export function messageFor(event: ChatEvent): Omit<ChatMessage, "id"> | null {
@@ -130,40 +152,54 @@ export const belongsTo = (event: ChatEvent, thread: ChatThread) =>
 const holds = (thread: ChatThread, storedId: number | undefined) =>
   storedId !== undefined && thread.messages.some((m) => m.storedId === storedId);
 
+const restore = (rows: readonly StoredMessage[]): ChatMessage[] =>
+  rows.map((r) => ({
+    id: id(),
+    role: r.role as MessageRole,
+    text: r.text ?? undefined,
+    tool: r.tool ?? undefined,
+    detail: r.detail ?? undefined,
+    attachments: r.attachments?.length ? r.attachments : undefined,
+    storedId: r.id,
+  }));
+
+/** A chat's transcript, folder and state from the backend: one conversation, or the one the agent is open in. */
+async function load(key: ChatKey, agentId: string) {
+  const conversation = conversationOfKey(key);
+  if (conversation !== null) {
+    const chat = await conversationChat(conversation);
+    if (!chat) throw new Error("That chat isn't here any more.");
+    return { rows: chat.messages, id: chat.conversation.id, cwd: chat.conversation.cwd, busy: chat.status !== null && BUSY.includes(chat.status) };
+  }
+  const [rows, open] = await Promise.all([getChat(agentId), activeConversation(agentId)]);
+  return { rows, id: open?.id ?? null, cwd: open?.cwd ?? "", busy: null };
+}
+
 export const useChats = create<ChatsState>((set, get) => {
-  const update = (agentId: string, change: (t: ChatThread) => Partial<ChatThread>) =>
+  const update = (key: ChatKey, change: (t: ChatThread) => Partial<ChatThread>) =>
     set((s) => {
-      const thread = s.threads[agentId] ?? EMPTY;
-      return { threads: { ...s.threads, [agentId]: { ...thread, ...change(thread) } } };
+      const thread = s.threads[key] ?? EMPTY;
+      return { threads: { ...s.threads, [key]: { ...thread, ...change(thread) } } };
     });
 
   return {
     threads: {},
-    hydrate: async (agentId) => {
-      if (get().threads[agentId]?.hydrated) return;
-      update(agentId, () => ({ hydrated: true, loading: true }));
-      let rows: Awaited<ReturnType<typeof getChat>>;
-      let conversation: Awaited<ReturnType<typeof activeConversation>>;
+    hydrate: async (key, agentId) => {
+      if (get().threads[key]?.hydrated) return;
+      update(key, () => ({ agentId, hydrated: true, loading: true }));
+      let loaded: Awaited<ReturnType<typeof load>>;
       try {
-        [rows, conversation] = await Promise.all([getChat(agentId), activeConversation(agentId)]);
+        loaded = await load(key, agentId);
       } catch (error) {
-        update(agentId, () => ({ loading: false }));
+        update(key, () => ({ loading: false }));
         throw error;
       }
-      const restored: ChatMessage[] = rows.map((r) => ({
-        id: id(),
-        role: r.role as MessageRole,
-        text: r.text ?? undefined,
-        tool: r.tool ?? undefined,
-        detail: r.detail ?? undefined,
-        attachments: r.attachments?.length ? r.attachments : undefined,
-        storedId: r.id,
-      }));
       // Live events that landed while loading must not be lost, or shown twice.
-      update(agentId, (t) => ({
-        messages: mergeTranscript(restored, t.messages, conversation?.id ?? null),
-        folder: t.folder || conversation?.cwd || "",
-        conversationId: conversation?.id ?? null,
+      update(key, (t) => ({
+        messages: mergeTranscript(restore(loaded.rows), t.messages, loaded.id),
+        folder: t.folder || loaded.cwd || "",
+        conversationId: loaded.id,
+        pending: loaded.busy ?? t.pending,
         loading: false,
       }));
     },
@@ -171,41 +207,54 @@ export const useChats = create<ChatsState>((set, get) => {
       const message = messageFor(event);
       const settles = event.kind === "text" || event.kind === "error" || event.kind === "result" || event.kind === "exit";
       if (!message && !settles) return;
-      const thread = get().threads[event.agentId] ?? EMPTY;
-      // Output from another conversation (a delegated task's own thread) isn't this chat's.
-      if (thread.hydrated && !thread.loading && !belongsTo(event, thread)) return;
-      update(event.agentId, (t) => ({
-        messages:
-          message && !holds(t, message.storedId)
-            ? [...t.messages, { id: id(), ...message, ...(t.loading || !t.hydrated ? { conversationId: event.conversationId } : {}) }]
-            : t.messages,
-        pending: settles ? false : t.pending,
-      }));
+      const own = (key: ChatKey, thread: ChatThread) => {
+        // The agent's open-chat thread collects its events until it knows which chat it shows.
+        if (key === event.agentId) return !thread.hydrated || thread.loading || belongsTo(event, thread);
+        return thread.agentId === event.agentId && thread.conversationId !== null && thread.conversationId === event.conversationId;
+      };
+      const keys = Object.keys(get().threads).filter((key) => own(key, get().threads[key]));
+      if (!keys.includes(event.agentId) && !get().threads[event.agentId]) keys.push(event.agentId);
+      for (const key of keys) {
+        update(key, (t) => ({
+          agentId: event.agentId,
+          messages:
+            message && !holds(t, message.storedId)
+              ? [...t.messages, { id: id(), ...message, ...(t.loading || !t.hydrated ? { conversationId: event.conversationId } : {}) }]
+              : t.messages,
+          pending: settles ? false : t.pending,
+        }));
+      }
     },
-    push: (agentId, message) => {
-      const key = id();
-      update(agentId, (t) => ({ messages: [...t.messages, { id: key, ...message }] }));
-      return key;
+    applyStatus: (conversationId, status) => {
+      const busy = BUSY.includes(status);
+      for (const [key, thread] of Object.entries(get().threads)) {
+        if (thread.conversationId === conversationId && thread.pending !== busy) update(key, () => ({ pending: busy }));
+      }
     },
-    pushUser: (agentId, text, attachments) => get().push(agentId, { role: "user", text, ...(attachments?.length ? { attachments } : {}) }),
-    confirmStored: (agentId, messageId, storedId) =>
-      update(agentId, (t) => ({
+    push: (key, message) => {
+      const messageId = id();
+      update(key, (t) => ({ messages: [...t.messages, { id: messageId, ...message }] }));
+      return messageId;
+    },
+    pushUser: (key, text, attachments) => get().push(key, { role: "user", text, ...(attachments?.length ? { attachments } : {}) }),
+    confirmStored: (key, messageId, storedId) =>
+      update(key, (t) => ({
         messages: holds(t, storedId)
           ? t.messages.filter((m) => m.id !== messageId)
           : t.messages.map((m) => (m.id === messageId ? { ...m, storedId } : m)),
       })),
-    pushError: (agentId, text) => {
-      get().push(agentId, { role: "error", text });
-      get().setPending(agentId, false);
+    pushError: (key, text) => {
+      get().push(key, { role: "error", text });
+      get().setPending(key, false);
     },
-    setPending: (agentId, pending) => update(agentId, () => ({ pending })),
-    setDraft: (agentId, draft) => update(agentId, () => ({ draft })),
-    updateFiles: (agentId, change) => update(agentId, (t) => ({ files: change(t.files) })),
-    setFolder: (agentId, folder) => update(agentId, () => ({ folder })),
-    reset: (agentId) =>
+    setPending: (key, pending) => update(key, () => ({ pending })),
+    setDraft: (key, draft) => update(key, () => ({ draft })),
+    updateFiles: (key, change) => update(key, (t) => ({ files: change(t.files) })),
+    setFolder: (key, folder) => update(key, () => ({ folder })),
+    reset: (key) =>
       set((s) => {
         const threads = { ...s.threads };
-        delete threads[agentId];
+        delete threads[key];
         return { threads };
       }),
     switchTo: (agentId, conversationId) => {
@@ -215,4 +264,4 @@ export const useChats = create<ChatsState>((set, get) => {
   };
 });
 
-export const selectThread = (agentId: string) => (s: ChatsState) => s.threads[agentId] ?? EMPTY;
+export const selectThread = (key: ChatKey) => (s: ChatsState) => s.threads[key] ?? EMPTY;

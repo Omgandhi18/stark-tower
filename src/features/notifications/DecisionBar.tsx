@@ -11,7 +11,8 @@ interface DecisionBarProps {
   agentName: string;
   busy: boolean;
   onDecide: (decision: string) => void;
-  onOpenConversation: () => void;
+  /** Go to the chat to answer there; left out in the chat itself, where the message box answers. */
+  onOpenConversation?: () => void;
 }
 
 /** How you answer: approve or deny a command, pick an option, or write a reply. */
@@ -63,6 +64,14 @@ export default function DecisionBar({ review, agentName, busy, onDecide, onOpenC
   }
 
   const freeAnswer = review.kind === "questions" && review.choices.length === 0;
+  // In the chat, the message box below answers it.
+  if (freeAnswer && !onOpenConversation) {
+    return (
+      <div className="decision-bar">
+        <p className="decision-hint">Reply below to answer {agentName}.</p>
+      </div>
+    );
+  }
   if (freeAnswer) {
     const send = () => note.trim() && onDecide(note.trim());
     return (

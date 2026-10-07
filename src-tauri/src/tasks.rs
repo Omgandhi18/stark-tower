@@ -1,13 +1,14 @@
-//! The task engine. Work the developer hands over starts a task with its own
-//! conversation, or waits in line while its agent is busy. The engine follows
-//! each task through its owner's session (files changed, commands run, the
-//! owner's own plan, checks that passed or failed) and marks it ready for review
-//! when the owner's turn ends with nothing delegated still running.
+//! The task engine. Work the developer hands over starts in the agent's chat in that
+//! project, or in a chat of its own while that one is busy: an agent can work in
+//! several chats at once. The engine follows each task through its chat's session
+//! (files changed, commands run, the owner's own plan, checks that passed or failed)
+//! and marks it ready for review when the owner's turn ends with nothing delegated
+//! still running.
 
-use crate::agents::AgentStatus;
 use crate::ledger::{NewTask, StoredMessage, Task, TaskEvent};
+use crate::runs::Actor;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -32,10 +33,8 @@ struct PendingCheck {
 
 #[derive(Default)]
 pub struct TaskEngine {
-    /// The task each agent's chat session is working on.
-    current: Mutex<HashMap<String, String>>,
-    /// Work waiting for a busy agent, in the order it was asked for.
-    queue: Mutex<HashMap<String, VecDeque<String>>>,
+    /// The task each chat is working on, by conversation.
+    current: Mutex<HashMap<i64, String>>,
     /// Checks in flight, by the provider's tool-use id.
     checks: Mutex<HashMap<String, PendingCheck>>,
     /// Each running task's latest round of work, to tell when it ends whether it changed anything.
@@ -387,29 +386,41 @@ fn settled(app: &tauri::AppHandle, task_id: &str) {
     crate::automations::task_settled(app, task_id);
 }
 
-/// The task an agent's chat session is working on, if any.
-pub fn current(app: &tauri::AppHandle, agent_id: &str) -> Option<String> {
-    engine(app)?.tasks.current.lock().unwrap().get(agent_id).cloned()
+/// The task a chat is working on, if any.
+pub fn current_in(app: &tauri::AppHandle, conversation: i64) -> Option<String> {
+    engine(app)?.tasks.current.lock().unwrap().get(&conversation).cloned()
 }
 
-pub(crate) fn is_busy(app: &tauri::AppHandle, agent_id: &str) -> bool {
+/// Whether a chat is busy: its session working (or waiting on you), or its task still running.
+pub(crate) fn is_busy_in(app: &tauri::AppHandle, conversation: i64) -> bool {
     let Some(state) = engine(app) else { return false };
-    let status = state.statuses.lock().unwrap().get(agent_id).copied();
-    let working = matches!(status, Some(AgentStatus::Working | AgentStatus::Thinking | AgentStatus::Blocked));
-    let on_task = current(app, agent_id)
-        .and_then(|id| state.ledger.task(&id))
-        .is_some_and(|t| t.status == "doing");
-    working || on_task
+    let on_task = current_in(app, conversation).and_then(|id| state.ledger.task(&id)).is_some_and(|t| t.status == "doing");
+    crate::runs::busy_in(app, conversation) || on_task
+}
+
+/// The task someone is acting for: their chat's, a delegated task's own conversation's, else
+/// whatever the agent is on (for a bridge script that didn't say which chat it was).
+pub fn task_of(app: &tauri::AppHandle, who: &Actor) -> Option<String> {
+    let state = engine(app)?;
+    if let Some(c) = who.conversation {
+        if let Some(id) = current_in(app, c) {
+            return Some(id);
+        }
+        if let Some(task) = state.ledger.task_for_conversation(c).filter(|t| t.status == "doing") {
+            return Some(task.id);
+        }
+    }
+    active_task_for(app, &who.agent)
 }
 
 /// After a quit or crash: work that was running stopped with Starkline, and work
-/// that was waiting its turn lines up again and starts as its agents are free.
+/// that was still waiting to start (from before agents could work in several chats) starts now.
 pub fn recover(app: &tauri::AppHandle) {
     let Some(state) = engine(app) else { return };
     let mut tasks = state.ledger.tasks(i64::from(u16::MAX));
     tasks.sort_by_key(|t| t.ts);
     let interrupted = "Starkline closed while this was running.";
-    let mut waiting: Vec<String> = Vec::new();
+    let mut waiting: Vec<Task> = Vec::new();
     for task in tasks {
         match task.status.as_str() {
             "doing" => {
@@ -418,18 +429,13 @@ pub fn recover(app: &tauri::AppHandle) {
                 crate::notify::task_blocked(app, &task, interrupted);
                 settled(app, &task.id);
             }
-            "todo" => {
-                state.tasks.queue.lock().unwrap().entry(task.assignee.clone()).or_default().push_back(task.id.clone());
-                if !waiting.contains(&task.assignee) {
-                    waiting.push(task.assignee.clone());
-                }
-            }
+            "todo" => waiting.push(task),
             _ => {}
         }
     }
     emit_changed(app);
-    for agent in waiting {
-        start_next(app, &agent);
+    for task in waiting {
+        let _ = begin(app, &task);
     }
 }
 
@@ -442,16 +448,13 @@ pub fn resume(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     if task.parent_id.is_some() {
         return Err("A delegated task continues through the agent that delegated it.".into());
     }
-    if is_busy(app, &task.assignee) {
+    if is_busy_in(app, conversation) {
         let name = crate::prompts::agent_name(app, &task.assignee);
-        return Err(format!("{name} is busy right now. Try again when they finish."));
+        return Err(format!("{name} is busy in this chat right now. Try again when they finish."));
     }
-    crate::chat::stop(app, &task.assignee);
-    state.ledger.open_conversation(conversation);
-    let _ = app.emit("chat://switched", serde_json::json!({ "agentId": task.assignee, "conversationId": conversation }));
     let request = "Please continue the task where you left off.";
-    developer_message(app, &task.assignee, request, &task.cwd);
-    crate::chat::send_user_turn(app, &task.assignee, request, &[], &task.cwd)?;
+    developer_message(app, &task.assignee, conversation, request, &task.cwd);
+    crate::chat::send_user_turn(app, &task.assignee, conversation, request, &[], &task.cwd)?;
     Ok(())
 }
 
@@ -465,8 +468,8 @@ pub struct Origin<'a> {
     pub note: &'a str,
 }
 
-/// The developer hands work to an agent, with any files they attached. It starts now,
-/// or waits for the agent to finish.
+/// The developer hands work to an agent, with any files they attached. It starts now: in the
+/// agent's chat in that project, or in a new chat beside it while that one is busy.
 pub fn start(app: &tauri::AppHandle, agent_id: &str, prompt: &str, dir: Option<String>, files: &[crate::attachments::Attachment]) -> Result<Task, String> {
     start_for(app, agent_id, prompt, dir, files, &Origin { requested_by: BY_DEVELOPER, title: None, note: "You asked for this" })
 }
@@ -513,49 +516,36 @@ pub fn start_for(
         state.ledger.set_task_attachments(&id, files);
     }
     event(app, &id, agent_id, "created", origin.note, "");
-    if is_busy(app, agent_id) {
-        state.tasks.queue.lock().unwrap().entry(agent_id.to_string()).or_default().push_back(id.clone());
-        let name = crate::prompts::agent_name(app, agent_id);
-        event(app, &id, agent_id, "queued", &format!("Waiting for {name} to finish their current work"), "");
-        emit_changed(app);
-        return Ok(task);
-    }
     begin(app, &task)?;
     Ok(state.ledger.task(&id).unwrap_or(task))
 }
 
 /// Start a task in the developer's chat with the agent in that project, so a chat keeps
-/// its session until the developer starts a new one. The first request there opens one.
+/// its session until the developer starts a new one. While that chat is busy (or there's
+/// none yet) the task opens a chat of its own, so the agent works on both at once.
 fn begin(app: &tauri::AppHandle, task: &Task) -> Result<(), String> {
     let state = engine(app).ok_or("Starkline isn't ready yet.")?;
     let prepared = crate::workspaces::prepare(app, task)?;
     let task = &prepared;
     let agent = task.assignee.as_str();
-    let conversation = match state.ledger.chat_in(agent, &task.cwd) {
-        Some(chat) if state.ledger.current_conversation(agent) == Some(chat) => chat,
-        Some(chat) => {
-            // Another chat was open: its session ends, and this one's resumes with the request.
-            crate::chat::stop(app, agent);
-            state.ledger.open_conversation(chat);
-            chat
-        }
-        None => {
-            crate::chat::stop(app, agent);
-            state.ledger.new_titled_conversation(agent, &task.cwd, &task.title)
-        }
+    let conversation = match state.ledger.chat_in(agent, &task.cwd).filter(|chat| !is_busy_in(app, *chat)) {
+        Some(chat) => chat,
+        None => state.ledger.new_titled_conversation(agent, &task.cwd, &task.title),
     };
+    // "Talk to" the agent goes to the chat with its latest work.
+    state.ledger.open_conversation(conversation);
     let branch = current_branch(&task.cwd).unwrap_or_default();
     state.ledger.begin_task(&task.id, Some(conversation), &branch);
     start_round(app, &task.id, &task.cwd, false);
-    state.tasks.current.lock().unwrap().insert(agent.to_string(), task.id.clone());
+    state.tasks.current.lock().unwrap().insert(conversation, task.id.clone());
     event(app, &task.id, agent, "started", "Started", "");
     let _ = app.emit("chat://switched", serde_json::json!({ "agentId": agent, "conversationId": conversation }));
     let _ = app.emit("conversations://changed", ());
     emit_changed(app);
     let files = state.ledger.task_attachments(&task.id);
-    if let Err(e) = crate::chat::send_user_turn(app, agent, &task.prompt, &files, &task.cwd) {
+    if let Err(e) = crate::chat::send_user_turn(app, agent, conversation, &task.prompt, &files, &task.cwd) {
         state.ledger.set_task_status(&task.id, "blocked", Some(&e));
-        state.tasks.current.lock().unwrap().remove(agent);
+        state.tasks.current.lock().unwrap().remove(&conversation);
         event(app, &task.id, agent, "status", &format!("Couldn't start: {e}"), "");
         crate::notify::task_blocked(app, task, &e);
         settled(app, &task.id);
@@ -565,29 +555,15 @@ fn begin(app: &tauri::AppHandle, task: &Task) -> Result<(), String> {
     Ok(())
 }
 
-/// Start the next queued task for an agent, if one is waiting.
-fn start_next(app: &tauri::AppHandle, agent_id: &str) {
-    let Some(state) = engine(app) else { return };
-    loop {
-        let next = state.tasks.queue.lock().unwrap().get_mut(agent_id).and_then(|q| q.pop_front());
-        let Some(id) = next else { return };
-        let Some(task) = state.ledger.task(&id).filter(|t| t.status == "todo") else { continue };
-        if begin(app, &task).is_ok() {
-            return;
-        }
-    }
-}
-
-/// The developer wrote in a conversation. If it has open work, that continues; otherwise
+/// The developer wrote in one of an agent's chats. If it has open work, that continues; otherwise
 /// what they asked becomes a task, so every chat can be followed, reviewed and continued.
-pub fn developer_message(app: &tauri::AppHandle, agent_id: &str, text: &str, cwd: &str) {
+pub fn developer_message(app: &tauri::AppHandle, agent_id: &str, conversation: i64, text: &str, cwd: &str) {
     let Some(state) = engine(app) else { return };
-    let conversation = state.ledger.active_conversation(agent_id);
     let Some(task) = state.ledger.task_for_conversation(conversation).or_else(|| chat_task(app, agent_id, conversation, text, "doing", cwd)) else {
-        state.tasks.current.lock().unwrap().remove(agent_id);
+        state.tasks.current.lock().unwrap().remove(&conversation);
         return;
     };
-    state.tasks.current.lock().unwrap().insert(agent_id.to_string(), task.id.clone());
+    state.tasks.current.lock().unwrap().insert(conversation, task.id.clone());
     if task.status != "doing" {
         // A chat's task made before anything was asked takes its title from the first request.
         if task.prompt.trim().is_empty() && !text.trim().is_empty() {
@@ -642,19 +618,16 @@ pub fn for_chat(app: &tauri::AppHandle, conversation: i64) -> Result<Task, Strin
     chat_task(app, &chat.agent_id, conversation, "", "idle", &folder).ok_or_else(|| "The chat couldn't be opened as a task.".into())
 }
 
-/// The owner's turn ended. Its task is ready for review unless delegated work is still running.
-pub fn turn_ended(app: &tauri::AppHandle, agent_id: &str) {
+/// The owner's turn in a chat ended. Its task is ready for review unless delegated work is still running.
+pub fn turn_ended(app: &tauri::AppHandle, agent_id: &str, conversation: i64) {
     let Some(state) = engine(app) else { return };
-    if let Some(task) = current(app, agent_id).and_then(|id| state.ledger.task(&id)) {
+    if let Some(task) = current_in(app, conversation).and_then(|id| state.ledger.task(&id)) {
         if task.status == "doing" {
             let waiting = state.ledger.child_tasks(&task.id).iter().filter(|c| matches!(c.status.as_str(), "doing" | "todo")).count();
             if waiting == 0 {
                 finish_round(app, &task, agent_id);
             }
         }
-    }
-    if !is_busy(app, agent_id) {
-        start_next(app, agent_id);
     }
 }
 
@@ -666,11 +639,15 @@ pub enum Ended {
     Unexpectedly,
 }
 
-/// The owner's session went away. A task still running is blocked, with the reason.
-pub fn session_ended(app: &tauri::AppHandle, agent_id: &str, why: Ended) {
+/// A chat's session went away. A task still running there is blocked, with the reason.
+pub fn session_ended(app: &tauri::AppHandle, agent_id: &str, conversation: i64, why: Ended) {
     let Some(state) = engine(app) else { return };
-    crate::claims::ended(app, agent_id, None);
-    let current = state.tasks.current.lock().unwrap().remove(agent_id);
+    let current = state.tasks.current.lock().unwrap().remove(&conversation);
+    // Its claims go with its task; the agent's own (taken outside any task) once nothing else of theirs runs.
+    crate::claims::ended(app, agent_id, current.as_deref());
+    if crate::runs::of_agent(app, agent_id).iter().all(|(c, _)| *c == conversation) {
+        crate::claims::ended(app, agent_id, None);
+    }
     if let Some(task) = current.and_then(|id| state.ledger.task(&id)) {
         if task.status == "doing" {
             let reason = match why {
@@ -685,9 +662,6 @@ pub fn session_ended(app: &tauri::AppHandle, agent_id: &str, why: Ended) {
             settled(app, &task.id);
             emit_changed(app);
         }
-    }
-    if matches!(why, Ended::Unexpectedly) {
-        start_next(app, agent_id);
     }
 }
 
@@ -711,15 +685,7 @@ pub fn close(app: &tauri::AppHandle, id: &str) {
     let Some(state) = engine(app) else { return };
     let Some(task) = state.ledger.task(id) else { return };
     state.ledger.set_task_status(id, "closed", None);
-    {
-        let mut current = state.tasks.current.lock().unwrap();
-        if current.get(&task.assignee).is_some_and(|t| t == id) {
-            current.remove(&task.assignee);
-        }
-    }
-    for queue in state.tasks.queue.lock().unwrap().values_mut() {
-        queue.retain(|queued| queued != id);
-    }
+    state.tasks.current.lock().unwrap().retain(|_, t| t != id);
     event(app, id, &task.assignee, "status", "Closed by you", "");
     crate::notify::task_settled(app, id, "Closed");
     settled(app, id);
@@ -733,30 +699,33 @@ pub fn time_out(app: &tauri::AppHandle, id: &str, minutes: i64) {
     let Some(task) = state.ledger.task(id).filter(|t| t.status == "doing") else { return };
     let reason = format!("It ran past its {minutes}-minute limit, so Starkline stopped it.");
     state.ledger.set_task_status(id, "blocked", Some(&reason));
-    let was_current = {
+    let running_in = task.conversation_id.filter(|c| {
         let mut current = state.tasks.current.lock().unwrap();
-        let mine = current.get(&task.assignee).is_some_and(|t| t == id);
+        let mine = current.get(c).is_some_and(|t| t == id);
         if mine {
-            current.remove(&task.assignee);
+            current.remove(c);
         }
         mine
-    };
-    if was_current {
-        crate::chat::stop(app, &task.assignee);
+    });
+    if let Some(c) = running_in {
+        crate::chat::stop(app, c);
     }
     event(app, id, &task.assignee, "status", &reason, "");
     crate::notify::task_blocked(app, &task, &reason);
     settled(app, id);
     emit_changed(app);
-    start_next(app, &task.assignee);
 }
 
-/// A delegation becomes a child of the delegating agent's current task, with its own conversation.
-pub fn begin_child(app: &tauri::AppHandle, from: &str, worker: &str, prompt: &str, cwd: &str) -> Option<(Task, i64)> {
+/// A delegation becomes a child of the delegating chat's task, with its own conversation.
+pub fn begin_child(app: &tauri::AppHandle, by: &Actor, worker: &str, prompt: &str, cwd: &str) -> Option<(Task, i64)> {
     let state = engine(app)?;
-    let parent = current(app, from);
+    let from = by.agent.as_str();
+    let parent = match by.conversation {
+        Some(c) => current_in(app, c),
+        None => active_task_for(app, from),
+    };
     // The work this comes from, for its auto mode: the parent task, else whatever the delegating agent is on.
-    let source = parent.clone().or_else(|| active_task_for(app, from));
+    let source = parent.clone().or_else(|| task_of(app, by));
     let inherited = parent.as_deref().and_then(|id| state.ledger.task(id)).map(|t| t.cwd);
     let cwd = inherited.as_deref().unwrap_or(cwd);
     let id = crate::chat::next_task_id();
@@ -832,21 +801,22 @@ pub fn worker_finished(app: &tauri::AppHandle, task: &str) {
 enum Halt {
     /// Delegated work on a one-shot worker: its process ends.
     Worker { task: String, pid: u32 },
-    /// The owner's chat session is on it: the session ends, and the task is blocked.
-    Session { agent: String },
+    /// Its chat's session is on it: the session ends, and the task is blocked.
+    Session { agent: String, conversation: i64 },
     /// Marked running with nothing running it (Starkline restarted, say): only the record changes.
     Mark { task: String },
 }
 
 /// What stopping `tree` (a task and everything delegated beneath it) takes: only parts still running count.
-fn halts(tree: &[Task], worker_of: impl Fn(&str) -> Option<u32>, session_task_of: impl Fn(&str) -> Option<String>) -> Vec<Halt> {
+fn halts(tree: &[Task], worker_of: impl Fn(&str) -> Option<u32>, session_task_of: impl Fn(i64) -> Option<String>) -> Vec<Halt> {
     tree.iter()
         .filter(|t| t.status == "doing")
         .map(|t| {
+            let chat = t.conversation_id.filter(|c| session_task_of(*c).as_deref() == Some(t.id.as_str()));
             if let Some(pid) = worker_of(&t.id) {
                 Halt::Worker { task: t.id.clone(), pid }
-            } else if session_task_of(&t.assignee).as_deref() == Some(t.id.as_str()) {
-                Halt::Session { agent: t.assignee.clone() }
+            } else if let Some(conversation) = chat {
+                Halt::Session { agent: t.assignee.clone(), conversation }
             } else {
                 Halt::Mark { task: t.id.clone() }
             }
@@ -866,7 +836,7 @@ pub fn stop(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
         tree.push(task);
     }
     let workers = state.tasks.workers.lock().unwrap().clone();
-    let plan = halts(&tree, |task| workers.get(task).copied(), |agent| current(app, agent));
+    let plan = halts(&tree, |task| workers.get(task).copied(), |c| current_in(app, c));
     if plan.is_empty() {
         return Err("Nothing in this task is running.".into());
     }
@@ -880,9 +850,9 @@ pub fn stop(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
                     crate::proc::kill_tree(pid);
                 }
             }
-            Halt::Session { agent } => {
-                session_ended(app, &agent, Ended::ByYou);
-                crate::chat::stop(app, &agent);
+            Halt::Session { agent, conversation } => {
+                session_ended(app, &agent, conversation, Ended::ByYou);
+                crate::chat::stop(app, conversation);
             }
             Halt::Mark { task } => {
                 state.ledger.set_task_status(&task, "blocked", Some(STOPPED_BY_YOU));
@@ -898,7 +868,8 @@ pub fn stop(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
 }
 
 /// Something the owner's provider is about to do, as it bears on the task.
-pub fn tool_use(app: &tauri::AppHandle, agent_id: &str, task_id: Option<&str>, tool_use_id: &str, name: &str, input: &serde_json::Value) {
+pub fn tool_use(app: &tauri::AppHandle, who: &Actor, task_id: Option<&str>, tool_use_id: &str, name: &str, input: &serde_json::Value) {
+    let agent_id = who.agent.as_str();
     let Some(task_id) = task_id else { return };
     let Some(state) = engine(app) else { return };
     let cwd = state.ledger.task(task_id).map(|t| t.cwd).unwrap_or_default();
@@ -909,7 +880,7 @@ pub fn tool_use(app: &tauri::AppHandle, agent_id: &str, task_id: Option<&str>, t
             if crate::prompts::is_memory_file(app, Path::new(&path)) {
                 return;
             }
-            if crate::prompts::agent_engine(app, agent_id).kind == "codex" { crate::claims::after_edit(app, agent_id, name, input); }
+            if crate::prompts::agent_engine(app, agent_id).kind == "codex" { crate::claims::after_edit(app, who, name, input); }
             let shown = relative(&path, &cwd);
             let verb = if name == "Write" { "Wrote" } else { "Edited" };
             event(app, task_id, agent_id, "file", &format!("{verb} {shown}"), &serde_json::json!({ "path": shown, "action": verb.to_lowercase() }).to_string());
@@ -942,11 +913,16 @@ pub fn tool_use(app: &tauri::AppHandle, agent_id: &str, task_id: Option<&str>, t
     }
 }
 
-/// The task an agent is working on right now: its chat session's task, else a
-/// delegated task it is running.
+/// The task an agent is working on right now, when which chat isn't known: the one it's open
+/// in, else one of its chats' running tasks, else a delegated task it is running.
 pub fn active_task_for(app: &tauri::AppHandle, agent_id: &str) -> Option<String> {
     let state = engine(app)?;
-    if let Some(id) = current(app, agent_id).filter(|id| state.ledger.task(id).is_some_and(|t| t.status == "doing")) {
+    let running = |id: &String| state.ledger.task(id).is_some_and(|t| t.status == "doing");
+    if let Some(id) = state.ledger.current_conversation(agent_id).and_then(|c| current_in(app, c)).filter(running) {
+        return Some(id);
+    }
+    let mine: Vec<i64> = crate::runs::of_agent(app, agent_id).into_iter().map(|(c, _)| c).collect();
+    if let Some(id) = mine.into_iter().filter_map(|c| current_in(app, c)).find(running) {
         return Some(id);
     }
     state
@@ -959,8 +935,9 @@ pub fn active_task_for(app: &tauri::AppHandle, agent_id: &str) -> Option<String>
 
 /// The developer was asked something (an approval, a question, a review) and
 /// answered: both go into the task's history.
-pub fn decision(app: &tauri::AppHandle, agent_id: &str, asked: &str, answer: &str, approved: Option<bool>) {
-    let Some(task_id) = active_task_for(app, agent_id) else { return };
+pub fn decision(app: &tauri::AppHandle, who: &Actor, asked: &str, answer: &str, approved: Option<bool>) {
+    let agent_id = who.agent.as_str();
+    let Some(task_id) = task_of(app, who) else { return };
     let summary = match approved {
         Some(true) => format!("You allowed: {asked}"),
         Some(false) => format!("You denied: {asked}"),
@@ -1128,22 +1105,38 @@ mod tests {
         }
     }
 
+    fn in_chat(mut t: Task, conversation: i64) -> Task {
+        t.conversation_id = Some(conversation);
+        t
+    }
+
     #[test]
     fn stopping_ends_each_running_part_its_own_way() {
-        let tree = [task("owner", "jarvis", "doing"), task("worker", "friday", "doing"), task("finished", "karen", "done"), task("stale", "vision", "doing")];
+        let tree = [in_chat(task("owner", "jarvis", "doing"), 7), task("worker", "friday", "doing"), task("finished", "karen", "done"), task("stale", "vision", "doing")];
         let workers = |id: &str| (id == "worker").then_some(42);
-        let sessions = |agent: &str| (agent == "jarvis").then(|| "owner".to_string());
+        let sessions = |conversation: i64| (conversation == 7).then(|| "owner".to_string());
         assert_eq!(
             halts(&tree, workers, sessions),
-            [Halt::Session { agent: "jarvis".into() }, Halt::Worker { task: "worker".into(), pid: 42 }, Halt::Mark { task: "stale".into() }]
+            [Halt::Session { agent: "jarvis".into(), conversation: 7 }, Halt::Worker { task: "worker".into(), pid: 42 }, Halt::Mark { task: "stale".into() }]
         );
     }
 
     #[test]
     fn stopping_leaves_an_agent_alone_once_they_have_moved_on() {
-        // JARVIS's session is on newer work now: stopping the old task mustn't end it.
-        assert_eq!(halts(&[task("old", "jarvis", "doing")], |_| None, |_| Some("newer".into())), [Halt::Mark { task: "old".into() }]);
-        assert!(halts(&[task("over", "jarvis", "done")], |_| None, |_| Some("over".into())).is_empty());
+        // That chat's session is on newer work now: stopping the old task mustn't end it.
+        assert_eq!(halts(&[in_chat(task("old", "jarvis", "doing"), 7)], |_| None, |_| Some("newer".into())), [Halt::Mark { task: "old".into() }]);
+        assert!(halts(&[in_chat(task("over", "jarvis", "done"), 7)], |_| None, |_| Some("over".into())).is_empty());
+    }
+
+    #[test]
+    fn stopping_one_chat_leaves_the_agents_other_chats_running() {
+        // JARVIS works in chats 7 and 9 at once; stopping the task in 9 ends only that session.
+        let sessions = |conversation: i64| match conversation {
+            7 => Some("bi".to_string()),
+            9 => Some("sfa".to_string()),
+            _ => None,
+        };
+        assert_eq!(halts(&[in_chat(task("sfa", "jarvis", "doing"), 9)], |_| None, sessions), [Halt::Session { agent: "jarvis".into(), conversation: 9 }]);
     }
 
     #[test]

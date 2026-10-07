@@ -1,17 +1,20 @@
 import { useState } from "react";
-import { ArrowLeft, CheckCheck, Clock, FastForward, Folder, FolderOpen, MessageSquareText, Play, ShieldCheck, Square, SquareTerminal, X } from "lucide-react";
+import { ArrowLeft, CheckCheck, Clock, FastForward, Folder, FolderOpen, MessageSquareText, PanelRight, Play, ShieldCheck, Square, SquareTerminal, X } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { cx, portraitKey, Button, IconButton, OverflowMenu, Portrait, StatusPill, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
+import { PANEL_SHORTCUT } from "../../app/panelShortcuts";
 import { AUTO_MODE_GOES_AHEAD, AUTO_MODE_STILL_ASKS, useAutoModeOf } from "../automode/autoMode";
 import { seeCodeReview, closeTask, resumeTask, reviewTask, stopTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { formatElapsed } from "../../lib/time";
 import type { Agent, TaskDetail } from "../../lib/types";
+import type { ChatRef } from "../../stores/chats";
 import { useConfig } from "../../stores/config";
 import { useNavigation } from "../../stores/navigation";
 import { folderName } from "../../stores/workspace";
 import { providerLabel } from "../agents/display";
+import { usePanels } from "../../stores/panels";
 import { useTerminal } from "../../stores/terminal";
 import ContextButton from "../context/ContextButton";
 import MemoryButton from "../agents/MemoryButton";
@@ -27,17 +30,19 @@ const ASK_FIRST = "Project work runs on its own; installs, branches and files ou
 interface TaskHeaderProps {
   detail: TaskDetail;
   owner: Agent | undefined;
-  /** The task's chat is the one its owner talks in now, so you can talk in it here. */
-  live: boolean;
+  /** The chat you can talk in here, unless it's a delegated task's (only shown). */
+  chat: ChatRef | null;
   requester: string;
   state: { label: string; tone: StateTone };
   now: number;
 }
 
 /** What the task is, who owns it, and where and how long it has been running; and the chat it runs in. */
-export default function TaskHeader({ detail, owner, live, requester, state, now }: TaskHeaderProps) {
+export default function TaskHeader({ detail, owner, chat, requester, state, now }: TaskHeaderProps) {
   const terminalOpen = useTerminal((s) => s.open);
   const toggleTerminal = useTerminal((s) => s.toggle);
+  const sidePanelOpen = usePanels((s) => !s.collapsed.taskRight);
+  const togglePanel = usePanels((s) => s.toggle);
   const config = useConfig((s) => s.config);
   const navigate = useNavigation((s) => s.navigate);
   const openConversation = useNavigation((s) => s.openConversation);
@@ -91,15 +96,22 @@ export default function TaskHeader({ detail, owner, live, requester, state, now 
           All work
         </Button>
         <div className="task-header-actions">
-          {live && <ChatFolderSelect agentId={task.assignee} />}
-          {/* An older or delegated chat is read here; this goes to the one they talk in now. */}
-          {!live && (
+          {chat && <ChatFolderSelect chat={chat} />}
+          {/* A delegated task's chat is read here; this goes to the one they talk in now. */}
+          {!chat && (
             <Button icon={MessageSquareText} onClick={() => openConversation(task.assignee)}>
               Talk to {name}
             </Button>
           )}
           {owner && !task.parent_id && <NewChatButton agent={owner} folder={task.project_folder || task.cwd} onError={setError} />}
           <IconButton icon={SquareTerminal} label="Terminal" aria-pressed={terminalOpen} onClick={toggleTerminal} />
+          <IconButton
+            icon={PanelRight}
+            label="Side panel"
+            title={`Side panel  ${PANEL_SHORTCUT.taskRight}`}
+            pressed={sidePanelOpen}
+            onClick={() => togglePanel("taskRight")}
+          />
           <ContextButton agentId={task.assignee} name={name} folder={task.cwd} taskId={task.id} />
           <MemoryButton agentId={task.assignee} name={name} />
           <RemindMeButton task={task} ownerName={name} />

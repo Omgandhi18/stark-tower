@@ -6,7 +6,7 @@ import { browserGo, browserPicker, browserHide, browserNavigate, browserShow } f
 import { selectQuestionFor, useAttention } from "../../stores/attention";
 import { errorMessage } from "../../lib/errors";
 import { useNavigation } from "../../stores/navigation";
-import { useChats } from "../../stores/chats";
+import { useChats, type ChatRef } from "../../stores/chats";
 import { addPoint } from "./pointComposer";
 import { browserPointText } from "./pointModel";
 import DevServerToolbar from "./DevServerToolbar";
@@ -24,7 +24,8 @@ interface BrowserViewProps {
   /** Its screen is the one showing, so the page is laid over it. */
   active: boolean;
   /** Whose chat "Point at something" adds to; null while there's no chat to talk in beside it. */
-  agentId: string | null;
+  /** The chat pointing adds to; none while there's no chat to talk in here. */
+  chat: ChatRef | null;
   /** The project whose dev server the toolbar runs. */
   folder: string;
 }
@@ -33,15 +34,17 @@ interface BrowserViewProps {
  * The built-in browser: an address bar over a real browser view, which the backend lays over
  * this panel. It follows the panel as it moves and steps aside while anything is drawn over it.
  */
-export default function BrowserView({ active, agentId, folder }: BrowserViewProps) {
+export default function BrowserView({ active, chat, folder }: BrowserViewProps) {
+  const agentId = chat?.agentId ?? null;
+  const key = chat?.key ?? null;
   const page = usePreview((s) => s.page);
   const size = usePreview((s) => s.size);
   const setSize = usePreview((s) => s.setSize);
-  const conversationId = useChats(s => agentId ? s.threads[agentId]?.conversationId ?? null : null);
-  const question = useAttention(selectQuestionFor(agentId ?? ""));
+  const conversationId = useChats(s => key ? s.threads[key]?.conversationId ?? null : null);
+  const question = useAttention(selectQuestionFor(agentId ?? "", conversationId));
   // Pointing is for one agent's chat while this screen shows: another agent or screen ends it.
   const [pickingFor, setPickingFor] = useState<string | null>(null);
-  const picking = active && agentId !== null && pickingFor === agentId;
+  const picking = active && key !== null && pickingFor === key;
   const [outputOpen, setOutputOpen] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
   const [panel, setPanel] = useState({ x: 0, y: 0, width: 0, height: 0 });
@@ -100,25 +103,25 @@ export default function BrowserView({ active, agentId, folder }: BrowserViewProp
   }, [active, hasPage, fitted.zoom, size]);
 
   useEffect(() => useChats.subscribe((next, previous) => {
-    if (agentId && next.threads[agentId]?.conversationId !== previous.threads[agentId]?.conversationId) setPickingFor(null);
-  }), [agentId]);
+    if (key && next.threads[key]?.conversationId !== previous.threads[key]?.conversationId) setPickingFor(null);
+  }), [key]);
 
   useEffect(() => useAttention.subscribe(state => {
-    if (agentId && selectQuestionFor(agentId)(state)) setPickingFor(null);
-  }), [agentId]);
+    if (agentId && selectQuestionFor(agentId, conversationId)(state)) setPickingFor(null);
+  }), [agentId, conversationId]);
 
   useEffect(() => useNavigation.subscribe((next, previous) => {
     if (next.route !== previous.route) setPickingFor(null);
   }), []);
 
   useEffect(() => {
-    if (!picking || !active || !agentId) return;
+    if (!picking || !active || !chat) return;
     let live = true;
     let timer = 0;
     const poll = async () => {
       try {
         const result = await browserPicker("poll");
-        if (result.pick) addPoint(agentId, browserPointText(result.pick), result.attachment, conversationId);
+        if (result.pick) addPoint(chat, browserPointText(result.pick), result.attachment, conversationId);
         if (!live) return;
         if (!result.active) { setPickingFor(null); return; }
         timer = window.setTimeout(poll, 150);
@@ -128,7 +131,7 @@ export default function BrowserView({ active, agentId, folder }: BrowserViewProp
     const escape = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") setPickingFor(null); };
     window.addEventListener("keydown", escape);
     return () => { live = false; window.clearTimeout(timer); window.removeEventListener("keydown", escape); browserPicker("cancel").catch(report("cancel picking")); };
-  }, [picking, active, agentId, conversationId]);
+  }, [picking, active, chat, conversationId]);
 
   const open = (address: string) => {
     setError(null);
@@ -167,7 +170,7 @@ export default function BrowserView({ active, agentId, folder }: BrowserViewProp
           onFocus={(e) => e.currentTarget.select()}
           onKeyDown={onKeyDown}
         />
-        <IconButton icon={MousePointerClick} label="Point at something" size="sm" aria-pressed={picking} disabled={!hasPage || !agentId || Boolean(question)} title={question ? "Answer the agent’s question first, then point at the page." : undefined} onClick={() => { setError(null); setPickingFor(picking ? null : agentId); }} />
+        <IconButton icon={MousePointerClick} label="Point at something" size="sm" aria-pressed={picking} disabled={!hasPage || !key || Boolean(question)} title={question ? "Answer the agent’s question first, then point at the page." : undefined} onClick={() => { setError(null); setPickingFor(picking ? null : key); }} />
         <IconButton icon={ExternalLink} label="Open in your browser" size="sm" disabled={!hasPage} onClick={() => openUrl(page.url).catch(report("open the page outside"))} />
         <span className={cx("browser-progress", page.loading && "is-loading")} aria-hidden />
       </div>

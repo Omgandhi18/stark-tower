@@ -89,17 +89,19 @@ interface MessageListProps {
   pending: boolean;
   /** Shown when there are no messages yet. */
   empty: ReactNode;
+  /** After the messages: what the agent is waiting on you for in this chat. */
+  after?: ReactNode;
 }
 
 /** The transcript: follows new messages unless the reader scrolled back. */
-export default function MessageList({ agent, messages: transcript, pending, empty }: MessageListProps) {
+export default function MessageList({ agent, messages: transcript, pending, empty, after }: MessageListProps) {
   const { scrollerRef, contentRef, atEnd, jumpToEnd } = useStickToBottom();
   const messages = useMemo(() => withoutOwnMemory(transcript, agent.id), [transcript, agent.id]);
   return (
     <div className="message-area">
       <div className="message-scroller" ref={scrollerRef}>
         <div className="message-column" ref={contentRef} role="log" aria-label={`Conversation with ${agent.name}`}>
-        {messages.length === 0 && !pending && empty}
+        {messages.length === 0 && !pending && !after && empty}
         {messages.map((message, i) => (
           <div key={message.id} className="msg-slot">
             {startsAgentRun(messages, i) && (
@@ -111,6 +113,7 @@ export default function MessageList({ agent, messages: transcript, pending, empt
             <MessageRow message={message} agentId={agent.id} />
           </div>
         ))}
+        {after}
         {pending && (
           <div className="msg-pending" role="status">
             <span className="typing-dots" aria-hidden>

@@ -5,6 +5,7 @@ import { Button, Dialog, IconButton, OverflowMenu, SelectField, TextArea, TextFi
 import { onSimulatorLogs, simulatorExtra } from "../../lib/api";
 import type { ExtraState, ExtraArgs } from "../../lib/types";
 import { selectQuestionFor, useAttention } from "../../stores/attention";
+import { useChats, type ChatRef } from "../../stores/chats";
 import { errorMessage } from "../../lib/errors";
 import { useNow } from "../../lib/useNow";
 import { addPoint } from "./pointComposer";
@@ -19,8 +20,10 @@ const PRESETS = [
 ];
 const INITIAL: ExtraState = { recording: null, saved: null, appearance: "", last_bundle: "", status_bar: false, logs: "" };
 
-export default function SimulatorTools({ udid, running, active, agentId }: { udid: string; running: boolean; active: boolean; agentId: string | null }) {
-  const question = useAttention(selectQuestionFor(agentId ?? ""));
+export default function SimulatorTools({ udid, running, active, chat }: { udid: string; running: boolean; active: boolean; chat: ChatRef | null }) {
+  const agentId = chat?.agentId ?? null;
+  const conversationId = useChats((s) => (chat ? s.threads[chat.key]?.conversationId ?? null : null));
+  const question = useAttention(selectQuestionFor(agentId ?? "", conversationId));
   const formId = useId();
   const [state, setState] = useState<ExtraState>(INITIAL);
   const [busy, setBusy] = useState(false);
@@ -197,10 +200,10 @@ export default function SimulatorTools({ udid, running, active, agentId }: { udi
           <span>Recording saved</span>
           <Button
             size="sm"
-            disabled={!agentId || Boolean(question)}
+            disabled={!chat || Boolean(question)}
             title={question ? "Answer the agent’s question first, then add files." : undefined}
             onClick={() => {
-              if (agentId) addPoint(agentId, "", state.saved);
+              if (chat) addPoint(chat, "", state.saved);
             }}
           >
             Add to chat
