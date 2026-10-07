@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::path::{Component, Path};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 
@@ -38,6 +38,17 @@ pub struct TaskEngine {
     queue: Mutex<HashMap<String, VecDeque<String>>>,
     /// Checks in flight, by the provider's tool-use id.
     checks: Mutex<HashMap<String, PendingCheck>>,
+    /// Each running task's latest round of work, to tell when it ends whether it changed anything.
+    rounds: Mutex<HashMap<String, Round>>,
+}
+
+/// A round of work on a task: from the request (or follow-up) to the end of the agent's turn.
+struct Round {
+    started: i64,
+    /// What the task's folder looked like to git when it began; taken in the background.
+    before: Arc<OnceLock<Option<String>>>,
+    /// The task already had changes waiting for review when this round began.
+    ready: bool,
 }
 
 // ---- Pure helpers ------------------------------------------------------------
@@ -228,6 +239,18 @@ fn git(cwd: &str, args: &[&str]) -> Option<String> {
     crate::hosting::run(command, GIT_TIMEOUT, None).ok()
 }
 
+/// What a folder's work looks like to git: its commit, its status (untracked files
+/// included) and the content of its uncommitted changes. None outside a repository.
+fn snapshot(cwd: &str) -> Option<String> {
+    use std::hash::{Hash, Hasher};
+    let status = git(cwd, &["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
+    let head = git(cwd, &["rev-parse", "HEAD"]).unwrap_or_default();
+    let diff = git(cwd, &["diff", "--no-color", "--no-ext-diff", "HEAD"]).unwrap_or_default();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    diff.hash(&mut hasher);
+    Some(format!("{}\n{status}\n{:x}", head.trim(), hasher.finish()))
+}
+
 pub fn current_branch(cwd: &str) -> Option<String> {
     git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"]).map(|b| b.trim().to_string()).filter(|b| !b.is_empty())
 }
@@ -284,6 +307,63 @@ fn event(app: &tauri::AppHandle, task_id: &str, agent_id: &str, kind: &str, summ
 
 fn engine(app: &tauri::AppHandle) -> Option<tauri::State<'_, crate::AppState>> {
     app.try_state::<crate::AppState>()
+}
+
+// ---- Rounds of work: what needs a review ------------------------------------------
+
+/// A task starts a round of work: note when, and what its folder looks like.
+fn start_round(app: &tauri::AppHandle, task_id: &str, cwd: &str, ready: bool) {
+    let Some(state) = engine(app) else { return };
+    let before = Arc::new(OnceLock::new());
+    let round = Round { started: crate::ledger::now_ms(), before: before.clone(), ready };
+    state.tasks.rounds.lock().unwrap().insert(task_id.to_string(), round);
+    let cwd = cwd.to_string();
+    std::thread::spawn(move || {
+        let _ = before.set(snapshot(&cwd));
+    });
+}
+
+/// Whether a file event was for a file in the task's folder (its path is shown relative to it).
+fn in_task_folder(data: &str) -> bool {
+    let path = serde_json::from_str::<serde_json::Value>(data).ok().and_then(|v| v.get("path").and_then(|p| p.as_str()).map(str::to_string)).unwrap_or_default();
+    !path.is_empty() && !path.starts_with('/') && !path.starts_with('~')
+}
+
+/// What a round changed that's worth a look: files the agent wrote in the task's folder,
+/// the folder's commit or uncommitted changes, or work it delegated that changed something.
+fn round_outcome(wrote: bool, delegated: bool, before: Option<&Option<String>>, after: Option<String>) -> bool {
+    let moved = matches!((before, after), (Some(Some(before)), Some(after)) if *before != after);
+    wrote || delegated || moved
+}
+
+/// Whether a task's round, now over, left anything to review. Talking alone doesn't.
+fn round_changed(app: &tauri::AppHandle, task: &Task) -> bool {
+    let Some(state) = engine(app) else { return true };
+    let Some(round) = state.tasks.rounds.lock().unwrap().remove(&task.id) else {
+        // Without a record of the round (Starkline restarted while it ran), assume there's something to see.
+        return true;
+    };
+    if round.ready {
+        return true;
+    }
+    let wrote = state.ledger.task_events(&task.id, 1000).iter().any(|e| e.ts >= round.started && e.kind == "file" && in_task_folder(&e.data));
+    let delegated = state.ledger.child_tasks(&task.id).iter().any(|c| c.status == "done" && c.updated >= round.started);
+    round_outcome(wrote, delegated, round.before.get(), snapshot(&task.cwd))
+}
+
+/// A task's round ended: changes wait for review; a round that only talked leaves it idle.
+fn finish_round(app: &tauri::AppHandle, task: &Task, agent_id: &str) {
+    let Some(state) = engine(app) else { return };
+    if round_changed(app, task) {
+        state.ledger.set_task_status(&task.id, "done", None);
+        event(app, &task.id, agent_id, "status", "Ready for review", "");
+        crate::notify::task_ready(app, task);
+    } else {
+        state.ledger.set_task_status(&task.id, "idle", None);
+        event(app, &task.id, agent_id, "status", "Finished, with nothing to review", "");
+    }
+    settled(app, &task.id);
+    emit_changed(app);
 }
 
 /// Who asked, as the UI names them: "You" for the developer, the automation's
@@ -363,8 +443,9 @@ pub fn resume(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     crate::chat::stop(app, &task.assignee);
     state.ledger.open_conversation(conversation);
     let _ = app.emit("chat://switched", serde_json::json!({ "agentId": task.assignee, "conversationId": conversation }));
-    developer_message(app, &task.assignee);
-    crate::chat::send_user_turn(app, &task.assignee, "Please continue the task where you left off.", &[], &task.cwd)?;
+    let request = "Please continue the task where you left off.";
+    developer_message(app, &task.assignee, request, &task.cwd);
+    crate::chat::send_user_turn(app, &task.assignee, request, &[], &task.cwd)?;
     Ok(())
 }
 
@@ -459,6 +540,7 @@ fn begin(app: &tauri::AppHandle, task: &Task) -> Result<(), String> {
     };
     let branch = current_branch(&task.cwd).unwrap_or_default();
     state.ledger.begin_task(&task.id, Some(conversation), &branch);
+    start_round(app, &task.id, &task.cwd, false);
     state.tasks.current.lock().unwrap().insert(agent.to_string(), task.id.clone());
     event(app, &task.id, agent, "started", "Started", "");
     let _ = app.emit("chat://switched", serde_json::json!({ "agentId": agent, "conversationId": conversation }));
@@ -490,24 +572,68 @@ fn start_next(app: &tauri::AppHandle, agent_id: &str) {
     }
 }
 
-/// The developer wrote in a conversation. If it's a task's, that task continues.
-pub fn developer_message(app: &tauri::AppHandle, agent_id: &str) {
+/// The developer wrote in a conversation. If it has open work, that continues; otherwise
+/// what they asked becomes a task, so every chat can be followed, reviewed and continued.
+pub fn developer_message(app: &tauri::AppHandle, agent_id: &str, text: &str, cwd: &str) {
     let Some(state) = engine(app) else { return };
     let conversation = state.ledger.active_conversation(agent_id);
-    match state.ledger.task_for_conversation(conversation) {
-        Some(task) => {
-            state.tasks.current.lock().unwrap().insert(agent_id.to_string(), task.id.clone());
-            if task.status != "doing" {
-                state.ledger.set_task_status(&task.id, "doing", None);
-                event(app, &task.id, agent_id, "status", "You followed up, so it continues", "");
-                crate::notify::task_settled(app, &task.id, "You followed up");
-                emit_changed(app);
-            }
+    let Some(task) = state.ledger.task_for_conversation(conversation).or_else(|| chat_task(app, agent_id, conversation, text, "doing", cwd)) else {
+        state.tasks.current.lock().unwrap().remove(agent_id);
+        return;
+    };
+    state.tasks.current.lock().unwrap().insert(agent_id.to_string(), task.id.clone());
+    if task.status != "doing" {
+        // A chat's task made before anything was asked takes its title from the first request.
+        if task.prompt.trim().is_empty() && !text.trim().is_empty() {
+            state.ledger.set_task_request(&task.id, &title_from(text), text.trim());
         }
-        None => {
-            state.tasks.current.lock().unwrap().remove(agent_id);
-        }
+        state.ledger.set_task_status(&task.id, "doing", None);
+        start_round(app, &task.id, &task.cwd, task.status == "done");
+        let summary = if task.status == "idle" { "You asked for more, so it continues" } else { "You followed up, so it continues" };
+        event(app, &task.id, agent_id, "status", summary, "");
+        crate::notify::task_settled(app, &task.id, "You followed up");
+        emit_changed(app);
     }
+}
+
+/// A task for a chat, in the chat's own folder (it doesn't move to a new worktree): running
+/// what was just asked, or idle for a chat that hasn't asked for anything yet.
+fn chat_task(app: &tauri::AppHandle, agent_id: &str, conversation: i64, text: &str, status: &str, cwd: &str) -> Option<Task> {
+    let state = engine(app)?;
+    let mut chat = state.ledger.conversation(conversation).filter(|c| !c.delegated)?;
+    // Chats from before folders were recorded work where the message was sent from.
+    if chat.cwd.is_empty() {
+        chat.cwd = cwd.to_string();
+        chat.project_folder = cwd.to_string();
+    }
+    let prompt = text.trim();
+    let title = if prompt.is_empty() { chat.title.clone() } else { title_from(prompt) };
+    let id = crate::chat::next_task_id();
+    state.ledger.create_task(&NewTask { id: &id, title: &title, assignee: agent_id, status, cwd: &chat.cwd, parent_id: None, requested_by: BY_DEVELOPER, prompt })?;
+    let kind = if chat.project_folder != chat.cwd { "worktree" } else { "checkout" };
+    let _ = state.ledger.set_task_workspace(&id, &chat.cwd, kind, &chat.project_folder);
+    let branch = current_branch(&chat.cwd).unwrap_or_default();
+    if status == "doing" {
+        state.ledger.begin_task(&id, Some(conversation), &branch);
+        start_round(app, &id, &chat.cwd, false);
+        event(app, &id, agent_id, "created", "You asked in a chat", "");
+    } else {
+        state.ledger.set_task_conversation(&id, conversation, &branch);
+        event(app, &id, agent_id, "created", "Started as a chat", "");
+    }
+    emit_changed(app);
+    state.ledger.task(&id)
+}
+
+/// The task a chat shows as: its latest work, or one made now for a chat that hasn't had any.
+pub fn for_chat(app: &tauri::AppHandle, conversation: i64) -> Result<Task, String> {
+    let state = engine(app).ok_or("Starkline isn't ready yet.")?;
+    if let Some(task) = state.ledger.latest_task_in(conversation) {
+        return Ok(task);
+    }
+    let chat = state.ledger.conversation(conversation).ok_or("That chat isn't here any more.")?;
+    let folder = state.project.lock().unwrap().clone();
+    chat_task(app, &chat.agent_id, conversation, "", "idle", &folder).ok_or_else(|| "The chat couldn't be opened as a task.".into())
 }
 
 /// The owner's turn ended. Its task is ready for review unless delegated work is still running.
@@ -517,11 +643,7 @@ pub fn turn_ended(app: &tauri::AppHandle, agent_id: &str) {
         if task.status == "doing" {
             let waiting = state.ledger.child_tasks(&task.id).iter().filter(|c| matches!(c.status.as_str(), "doing" | "todo")).count();
             if waiting == 0 {
-                state.ledger.set_task_status(&task.id, "done", None);
-                event(app, &task.id, agent_id, "status", "Ready for review", "");
-                crate::notify::task_ready(app, &task);
-                settled(app, &task.id);
-                emit_changed(app);
+                finish_round(app, &task, agent_id);
             }
         }
     }
@@ -649,6 +771,7 @@ pub fn begin_child(app: &tauri::AppHandle, from: &str, worker: &str, prompt: &st
     let conversation = state.ledger.create_conversation(worker, cwd, &title);
     crate::automode::inherit(app, from, source.as_deref(), conversation);
     state.ledger.begin_task(&id, Some(conversation), &current_branch(cwd).unwrap_or_default());
+    start_round(app, &id, cwd, false);
     let worker_name = crate::prompts::agent_name(app, worker);
     let origin = if from == BY_DEVELOPER { "You asked for this".to_string() } else { format!("{} delegated this", requester_name(app, from)) };
     event(app, &id, from, "created", &origin, "");
@@ -662,8 +785,10 @@ pub fn begin_child(app: &tauri::AppHandle, from: &str, worker: &str, prompt: &st
 /// A delegated task finished: done with its result, or blocked with the reason.
 pub fn end_child(app: &tauri::AppHandle, id: &str, worker: &str, outcome: &Result<String, String>) {
     let Some(state) = engine(app) else { return };
+    let changed = state.ledger.task(id).is_some_and(|task| round_changed(app, &task));
     let (status, detail, summary) = match outcome {
-        Ok(result) if !result.trim().is_empty() => ("done", crate::chat::truncate(result, 200), "Finished".to_string()),
+        Ok(result) if !result.trim().is_empty() && changed => ("done", crate::chat::truncate(result, 200), "Finished".to_string()),
+        Ok(result) if !result.trim().is_empty() => ("idle", crate::chat::truncate(result, 200), "Finished, with nothing to review".to_string()),
         Ok(_) => ("blocked", "The agent finished without a result.".to_string(), "Stopped without a result".to_string()),
         Err(e) => ("blocked", crate::chat::truncate(e, 200), format!("Couldn't finish: {}", crate::chat::truncate(e, 80))),
     };
@@ -682,6 +807,9 @@ pub fn tool_use(app: &tauri::AppHandle, agent_id: &str, task_id: Option<&str>, t
     match name {
         "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => {
             let path = [text("file_path"), text("notebook_path")].into_iter().find(|p| !p.is_empty()).unwrap_or_default();
+            if crate::prompts::is_memory_file(app, Path::new(&path)) {
+                return;
+            }
             if crate::prompts::agent_engine(app, agent_id).kind == "codex" { crate::claims::after_edit(app, agent_id, name, input); }
             let shown = relative(&path, &cwd);
             let verb = if name == "Write" { "Wrote" } else { "Edited" };
@@ -862,6 +990,65 @@ pub fn detail(app: &tauri::AppHandle, id: &str) -> Option<TaskDetail> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_round_that_changed_something_needs_a_review() {
+        let repo = Some(Some("abc\n\n1".to_string()));
+        let same = Some("abc\n\n1".to_string());
+        let moved = Some("def\n\n1".to_string());
+        assert!(!round_outcome(false, false, repo.as_ref(), same.clone()), "it only talked");
+        assert!(round_outcome(false, false, repo.as_ref(), moved), "a commit or an edit by a command");
+        assert!(round_outcome(true, false, repo.as_ref(), same.clone()), "it wrote a file");
+        assert!(round_outcome(false, true, repo.as_ref(), same), "work it delegated changed something");
+        assert!(!round_outcome(false, false, Some(&None), None), "outside a repository, only its own edits count");
+        assert!(round_outcome(true, false, Some(&None), None));
+        assert!(!round_outcome(false, false, None, Some("x".into())), "the snapshot wasn't taken in time");
+    }
+
+    #[test]
+    fn edits_count_inside_the_task_folder_only() {
+        assert!(in_task_folder(r#"{"path":"src/App.tsx","action":"edited"}"#));
+        assert!(!in_task_folder(r#"{"path":"/tmp/scratch.md","action":"wrote"}"#));
+        assert!(!in_task_folder(r#"{"path":"~/notes.md","action":"wrote"}"#));
+        assert!(!in_task_folder(""));
+    }
+
+    #[test]
+    fn a_snapshot_sees_edits_new_files_and_commits() {
+        let dir = std::env::temp_dir().join(format!("starkline-round-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cwd = dir.to_string_lossy().to_string();
+        let run = |args: &[&str]| {
+            let ok = Command::new("git").arg("-C").arg(&dir).args(args).stdout(Stdio::null()).stderr(Stdio::null()).status().unwrap().success();
+            assert!(ok, "git {args:?}");
+        };
+        assert_eq!(snapshot(&cwd), None, "not a repository yet");
+        run(&["init", "-q"]);
+        run(&["config", "user.email", "dev@example.com"]);
+        run(&["config", "user.name", "Dev"]);
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-qm", "first"]);
+        let clean = snapshot(&cwd).expect("a repository");
+        assert_eq!(snapshot(&cwd).as_ref(), Some(&clean), "nothing changed");
+
+        std::fs::write(dir.join("a.txt"), "two\n").unwrap();
+        let edited = snapshot(&cwd).unwrap();
+        assert_ne!(edited, clean);
+        std::fs::write(dir.join("a.txt"), "three\n").unwrap();
+        assert_ne!(snapshot(&cwd).unwrap(), edited, "a file that was already changed changes again");
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        assert_eq!(snapshot(&cwd).unwrap(), clean, "put back as it was");
+
+        std::fs::write(dir.join("b.txt"), "new\n").unwrap();
+        assert_ne!(snapshot(&cwd).unwrap(), clean, "a new file");
+        run(&["add", "."]);
+        run(&["commit", "-qm", "second"]);
+        let committed = snapshot(&cwd).unwrap();
+        assert_ne!(committed, clean, "a commit");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn titles_come_from_the_first_line() {

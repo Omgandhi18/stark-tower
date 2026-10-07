@@ -443,8 +443,8 @@ fn chat_send(
                 .cloned()
                 .unwrap_or_else(|| current_project(&state))
         });
-    // A follow-up in a task's conversation picks that task back up.
-    tasks::developer_message(&app, &agent_id);
+    // A follow-up in a task's conversation picks that task back up; otherwise what was asked becomes one.
+    tasks::developer_message(&app, &agent_id, &text, &cwd);
     // The stored id goes back to the UI, which already shows the message, to avoid a repeat.
     chat::send_user_turn(&app, &agent_id, &text, &files, &cwd)
 }
@@ -484,6 +484,13 @@ fn read_attachment_text(app: tauri::AppHandle, path: String) -> Result<String, S
 #[specta::specta]
 fn resume_task(app: tauri::AppHandle, id: String) -> Result<(), String> {
     tasks::resume(&app, &id)
+}
+
+/// The task a chat opens as on Work: its latest work, or a new idle one for a chat that hasn't had any.
+#[tauri::command]
+#[specta::specta]
+fn task_for_chat(app: tauri::AppHandle, conversation_id: i64) -> Result<ledger::Task, String> {
+    tasks::for_chat(&app, conversation_id)
 }
 
 /// Quit for real: every agent session stops. (Closing the window doesn't.)
@@ -2179,6 +2186,7 @@ fn specta_builder() -> tauri_specta::Builder {
             default_tone,
             start_task,
             resume_task,
+            task_for_chat,
             quit_app,
             login_item_enabled,
             set_login_item,

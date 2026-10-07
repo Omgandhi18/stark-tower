@@ -63,8 +63,8 @@ function newestFirst<T>(items: readonly T[], key: (item: T) => number): T[] {
   return [...items].sort((a, b) => key(b) - key(a));
 }
 
-/** Tasks the developer is finished with: they leave the board and stay in history. */
-const SETTLED: readonly string[] = ["closed", "reviewed"];
+/** Tasks off the board: finished with by the developer, or idle with nothing to review (they stay with their chats). */
+const SETTLED: readonly string[] = ["closed", "reviewed", "idle"];
 
 /** Tasks shown on their own: top-level ones, and delegations whose parent isn't shown. */
 function shownOnBoard(tasks: readonly Task[]): Task[] {
@@ -170,6 +170,8 @@ function stateForStopped(task: Task): TaskRow["state"] {
       return { label: "Blocked", tone: "danger" };
     case "reviewed":
       return { label: "Reviewed", tone: "success" };
+    case "idle":
+      return { label: "Idle", tone: "idle" };
     default:
       return { label: "Closed", tone: "idle" };
   }
