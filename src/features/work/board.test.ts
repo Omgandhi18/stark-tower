@@ -172,6 +172,44 @@ describe("buildBoard", () => {
     expect(board.ready[0].owner?.id).toBe("a");
   });
 
+  it("lists what was asked and answered in the last day, newest first, apart from what needs review", () => {
+    const now = 100 * 60 * 60 * 1000;
+    const hour = 60 * 60 * 1000;
+    const answered = (id: string, finished: number, over: Partial<Task> = {}) =>
+      task(id, "a", "idle", finished, "/w/app", { prompt: `Question ${id}`, finished, detail: `Answer ${id}`, ...over });
+    const board = buildBoard({
+      ...base,
+      now,
+      agents: [agent("a", "idle")],
+      tasks: [
+        answered("recent", now - hour),
+        answered("newest", now - 1000),
+        answered("old", now - 25 * hour),
+        answered("opened", now - hour, { prompt: "" }),
+        task("ready", "a", "done", now - 2000),
+      ],
+    });
+    expect(board.answered.map((r) => r.task.id)).toEqual(["newest", "recent"]);
+    expect(board.answered[0].state).toEqual({ label: "Answered", tone: "idle" });
+    expect(board.ready.map((r) => r.task.id)).toEqual(["ready"]);
+    expect(board.running).toEqual([]);
+  });
+
+  it("still shows blocked work delegated from something answered long ago", () => {
+    const now = 100 * 60 * 60 * 1000;
+    const board = buildBoard({
+      ...base,
+      now,
+      agents: [agent("a", "idle"), agent("b", "idle")],
+      tasks: [
+        task("parent", "a", "idle", now - 30 * 60 * 60 * 1000, "/w/app", { prompt: "Look into it", finished: now - 30 * 60 * 60 * 1000 }),
+        task("helper", "b", "blocked", now - 1000, "/w/app", { parent_id: "parent" }),
+      ],
+    });
+    expect(board.answered).toEqual([]);
+    expect(board.blocked.map((r) => r.task.id)).toEqual(["helper"]);
+  });
+
   it("sorts by longest running when asked", () => {
     const board = buildBoard({
       ...base,

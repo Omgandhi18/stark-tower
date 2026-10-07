@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ClipboardList } from "lucide-react";
 import { EmptyState, SkeletonRows, Tabs, type TabItem } from "../../design";
 import { requesterName } from "../../lib/requester";
@@ -7,6 +7,7 @@ import { useAgents } from "../../stores/agents";
 import { useAttention } from "../../stores/attention";
 import { useAutomations } from "../../stores/automations";
 import { useNavigation } from "../../stores/navigation";
+import { useWorkspace } from "../../stores/workspace";
 import TerminalDrawer from "../terminal/TerminalDrawer";
 import { taskState } from "../work/board";
 import ActivityList from "./ActivityList";
@@ -28,12 +29,24 @@ export default function TaskScreen() {
   const route = useNavigation((s) => s.route);
   const taskId = useNavigation((s) => s.taskId);
   const navigate = useNavigation((s) => s.navigate);
+  const openTask = useNavigation((s) => s.openTask);
   const agents = useAgents((s) => s.agents);
   const pending = useAttention((s) => s.pending);
   const automations = useAutomations((s) => s.items);
   const { state } = useTaskDetail(taskId);
   const [tab, setTab] = useState<CenterTab>("conversation");
   const now = useNow(CLOCK_MS);
+  // A chat carries on into newer work (more asked after a review, a new request from Work): once
+  // this task has nothing left running or waiting for review, the page follows the chat there.
+  const newer = useWorkspace((s) => {
+    const shown = s.tasks.find((t) => t.id === taskId);
+    if (!shown || shown.conversation_id === null || !["idle", "reviewed", "closed"].includes(shown.status)) return null;
+    const later = s.tasks.filter((t) => t.conversation_id === shown.conversation_id && !t.parent_id && t.ts > shown.ts);
+    return later.sort((a, b) => b.ts - a.ts)[0]?.id ?? null;
+  });
+  useEffect(() => {
+    if (newer && route === "task") openTask(newer);
+  }, [newer, route, openTask]);
 
   if (!taskId || state.status === "missing") {
     return (

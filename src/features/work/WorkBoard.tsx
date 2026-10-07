@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { ArrowUpDown, CircleCheckBig, CirclePause, Hourglass, MessagesSquare, OctagonAlert, Play } from "lucide-react";
+import { ArrowUpDown, CircleCheckBig, CirclePause, Hourglass, MessageSquareReply, MessagesSquare, OctagonAlert, Play } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { portraitKey, CountBadge, EmptyState, Portrait, SelectField, SkeletonRows, Tabs, ICON_SIZE, ICON_STROKE } from "../../design";
 import { AGENT_STATUS } from "../../lib/status";
@@ -40,8 +40,8 @@ export default function WorkBoard({ project }: { project: string | null }) {
   const now = useNow(CLOCK_MS);
 
   const board = useMemo(
-    () => buildBoard({ agents, since, tasks, conversations, latest, pending, project, tab, sort }),
-    [agents, since, tasks, conversations, latest, pending, project, tab, sort],
+    () => buildBoard({ agents, since, tasks, conversations, latest, pending, project, tab, sort, now }),
+    [agents, since, tasks, conversations, latest, pending, project, tab, sort, now],
   );
 
   if (!agentsLoaded || !tasksLoaded) {
@@ -116,6 +116,17 @@ export default function WorkBoard({ project }: { project: string | null }) {
           <BoardSection title="Blocked" icon={OctagonAlert} tone="danger" count={board.blocked.length}>
             <ul className="work-rows">
               {board.blocked.map((row) => (
+                <TaskRowView key={row.task.id} row={row} now={now} />
+              ))}
+            </ul>
+          </BoardSection>
+        )}
+
+        {board.answered.length > 0 && (
+          <BoardSection title="Answered" icon={MessageSquareReply} tone="idle" count={board.answered.length}>
+            <p className="work-section-note">Finished with nothing to review. Each stays here for a day, and with its chat after that.</p>
+            <ul className="work-rows">
+              {board.answered.map((row) => (
                 <TaskRowView key={row.task.id} row={row} now={now} />
               ))}
             </ul>

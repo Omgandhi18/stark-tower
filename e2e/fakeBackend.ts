@@ -150,9 +150,45 @@ function install(scenario: Scenario) {
     return messageId;
   };
 
+  /** Tasks made for chats here: their turns change nothing, so they end idle. */
+  const chatTasks = new Set<string>();
+  /** A chat's task, as the backend makes one: running what was just asked, or idle for a chat that hasn't asked yet. */
+  const chatTask = (conversationId: number, agentId: string, prompt: string, status: "doing" | "idle", title?: string) => {
+    const chat = state.conversations.find((c) => c.id === conversationId);
+    const cwd = chat?.cwd ?? state.projects.active;
+    const now = Date.now();
+    const task = {
+      id: `t-chat-${conversationId}-${state.tasks.length + 1}`,
+      ts: now,
+      updated: now,
+      title: title ?? (prompt.split("\n")[0].slice(0, 80) || "New chat"),
+      assignee: agentId,
+      status,
+      detail: null,
+      cwd,
+      conversation_id: conversationId as number | null,
+      parent_id: null,
+      requested_by: "you",
+      prompt,
+      branch: state.branches[cwd] ?? "",
+      started: status === "doing" ? now : null,
+      finished: status === "idle" ? now : null,
+      plan_done: null,
+      plan_total: null,
+      workspace_kind: "checkout",
+      project_folder: chat?.project_folder || cwd,
+      request_url: null, request_host: null, request_number: null,
+    };
+    state.tasks.unshift(task);
+    chatTasks.add(task.id);
+    emit("tasks://changed", null);
+    return task;
+  };
+
   /** A short scripted reply so a sent message visibly gets an answer. */
-  const reply = (agentId: string, text: string) => {
+  const reply = (agentId: string, text: string, taskId?: string) => {
     setStatus(agentId, "working");
+    const answer = `Got it: "${text}". I'll take care of it.`;
     const steps: Array<() => void> = [
       () => {
         const detail = "src/pages/Settings.tsx";
@@ -160,13 +196,17 @@ function install(scenario: Scenario) {
         emit("chat://event", { agentId, kind: "tool", tool: "Read", detail, messageId });
       },
       () => {
-        const answer = `Got it: "${text}". I'll take care of it.`;
         const messageId = persist(agentId, "agent", { text: answer });
         emit("chat://event", { agentId, kind: "text", text: answer, messageId });
       },
       () => {
         emit("chat://event", { agentId, kind: "result" });
         setStatus(agentId, "idle");
+        const task = state.tasks.find((t) => t.id === taskId);
+        if (task && chatTasks.has(task.id) && task.status === "doing") {
+          Object.assign(task, { status: "idle", finished: Date.now(), updated: Date.now(), detail: answer });
+          emit("tasks://changed", null);
+        }
       },
     ];
     steps.forEach((step, i) => window.setTimeout(step, REPLY_DELAY_MS * (i + 1)));
@@ -909,6 +949,14 @@ function install(scenario: Scenario) {
     },
     list_conversations: () => [...state.conversations].sort((a, b) => b.updated - a.updated),
     active_conversation: (args) => conversationOf(String(args.agentId)),
+    task_for_chat: (args) => {
+      const id = Number(args.conversationId);
+      const latest = state.tasks.filter((t) => t.conversation_id === id && !t.parent_id).sort((a, b) => b.ts - a.ts)[0];
+      if (latest) return latest;
+      const chat = state.conversations.find((c) => c.id === id);
+      if (!chat) throw "That chat isn't here any more.";
+      return chatTask(id, chat.agent_id, "", "idle", chat.title || "New chat");
+    },
     get_chat: (args) => {
       const id = state.current[String(args.agentId)];
       return id === undefined ? [] : (state.transcripts[id] ?? []);
@@ -970,7 +1018,18 @@ function install(scenario: Scenario) {
       const text = String(args.text);
       const files = (args.attachments as unknown[] | undefined) ?? [];
       const messageId = persist(agentId, "user", { text, ...(files.length ? { attachments: files } : {}) });
-      reply(agentId, text);
+      // What's asked in a chat continues its open task, or becomes one.
+      const conversationId = state.current[agentId];
+      let task = state.tasks
+        .filter((t) => t.conversation_id === conversationId && !["closed", "reviewed"].includes(t.status))
+        .sort((a, b) => b.updated - a.updated)[0];
+      if (!task) task = chatTask(conversationId, agentId, text, "doing");
+      else if (task.status !== "doing") {
+        if (!task.prompt) Object.assign(task, { prompt: text, title: text.split("\n")[0].slice(0, 80) });
+        Object.assign(task, { status: "doing", updated: Date.now(), finished: null });
+        emit("tasks://changed", null);
+      }
+      reply(agentId, text, task.id);
       return messageId;
     },
     chat_stop: (args) => {

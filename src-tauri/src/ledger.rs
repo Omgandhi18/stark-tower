@@ -112,7 +112,7 @@ pub struct Task {
     pub title: String,
     /// The agent accountable for the work.
     pub assignee: String,
-    /// todo (queued) | doing | blocked | done (ready for review) | closed
+    /// todo (queued) | doing | blocked | done (ready for review) | idle (finished, nothing to review) | reviewed | closed
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
@@ -1059,11 +1059,33 @@ impl Ledger {
     /// The open task a conversation belongs to, if any.
     pub fn task_for_conversation(&self, conv: i64) -> Option<Task> {
         self.query_tasks(
-            &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE conversation_id = ?1 AND status NOT IN ('closed', 'reviewed') ORDER BY updated DESC LIMIT 1"),
+            &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE conversation_id = ?1 AND status NOT IN ('closed', 'reviewed') ORDER BY updated DESC, ts DESC, rowid DESC LIMIT 1"),
             &[&conv],
         )
         .into_iter()
         .next()
+    }
+
+    /// The newest task the developer's work in a conversation is part of (not a delegation's).
+    pub fn latest_task_in(&self, conv: i64) -> Option<Task> {
+        self.query_tasks(
+            &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE conversation_id = ?1 AND parent_id IS NULL ORDER BY ts DESC, rowid DESC LIMIT 1"),
+            &[&conv],
+        )
+        .into_iter()
+        .next()
+    }
+
+    /// A task belongs to `conversation`, on `branch`, without starting.
+    pub fn set_task_conversation(&self, id: &str, conversation: i64, branch: &str) {
+        let conn = self.conn.lock().unwrap();
+        let _ = conn.execute("UPDATE tasks SET conversation_id = ?2, branch = ?3 WHERE id = ?1", rusqlite::params![id, conversation, branch]);
+    }
+
+    /// What a task was asked to do, once something is asked (a chat's task can start empty).
+    pub fn set_task_request(&self, id: &str, title: &str, prompt: &str) {
+        let conn = self.conn.lock().unwrap();
+        let _ = conn.execute("UPDATE tasks SET title = ?2, prompt = ?3 WHERE id = ?1", rusqlite::params![id, title, prompt]);
     }
 
     /// A task starts running in `conversation`, on `branch`.
@@ -1081,7 +1103,7 @@ impl Ledger {
     /// (done, blocked, closed, reviewed) stamp when it stopped; doing clears that again.
     pub fn set_task_status(&self, id: &str, status: &str, detail: Option<&str>) {
         let ts = now_ms();
-        let stopped = matches!(status, "done" | "blocked" | "closed" | "reviewed");
+        let stopped = matches!(status, "done" | "idle" | "blocked" | "closed" | "reviewed");
         let conn = self.conn.lock().unwrap();
         let _ = conn.execute(
             "UPDATE tasks SET status = ?2, updated = ?3, detail = COALESCE(?4, detail), \
@@ -1728,6 +1750,30 @@ mod tests {
         let p = std::env::temp_dir().join(format!("stark-led-{}-{n}.db", std::process::id()));
         let _ = std::fs::remove_file(&p);
         (Ledger::open(&p).unwrap(), p)
+    }
+
+    #[test]
+    fn a_chat_opens_as_its_newest_own_task() {
+        let l = Ledger::open(std::path::Path::new(":memory:")).unwrap();
+        let chat = l.new_conversation("friday", "/w");
+        let task = |id: &str, parent: Option<&str>| {
+            l.create_task(&NewTask { id, title: id, assignee: "friday", status: "idle", cwd: "/w", parent_id: parent, requested_by: "you", prompt: "" }).unwrap();
+            l.set_task_conversation(id, chat, "main");
+        };
+        assert!(l.latest_task_in(chat).is_none());
+        task("first", None);
+        task("helper", Some("first"));
+        task("second", None);
+        assert_eq!(l.latest_task_in(chat).map(|t| t.id), Some("second".into()), "the newest, never a delegation");
+        assert_eq!(l.task("second").unwrap().branch, "main");
+        l.set_task_request("second", "Fix the login page", "Fix the login page, please");
+        let second = l.task("second").unwrap();
+        assert_eq!((second.title.as_str(), second.prompt.as_str()), ("Fix the login page", "Fix the login page, please"));
+        assert_eq!(l.task_for_conversation(chat).map(|t| t.id), Some("second".into()), "an idle task carries on");
+        l.set_task_status("second", "reviewed", None);
+        l.set_task_status("first", "reviewed", None);
+        l.set_task_status("helper", "closed", None);
+        assert!(l.task_for_conversation(chat).is_none(), "reviewed work doesn't");
     }
 
     #[test]

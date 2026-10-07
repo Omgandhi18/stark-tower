@@ -29,6 +29,9 @@ export const onTasksChanged = (cb: () => void): Promise<UnlistenFn> => listen("t
 /** Pick an interrupted task back up where it left off. */
 export const resumeTask = (id: string) => ok(commands.resumeTask(id));
 
+/** The task a chat opens as on Work: its latest work, or a new idle one. */
+export const taskForChat = (conversationId: number) => ok(commands.taskForChat(conversationId));
+
 /** Quit for real: every agent session stops. Closing the window doesn't. */
 export const quitApp = () => commands.quitApp();
 

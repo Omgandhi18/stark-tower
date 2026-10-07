@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { MessageSquarePlus, Trash2 } from "lucide-react";
 import { portraitKey, OverflowMenu, Portrait, Tag, cx, ICON_SIZE, ICON_STROKE } from "../../design";
+import { taskForChat } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { AGENT_STATUS } from "../../lib/status";
 import { formatRelative } from "../../lib/time";
@@ -20,14 +21,17 @@ const SHOWN_CHATS = 5;
 const UNTITLED = "Untitled chat";
 
 /**
- * The developer's chats in a project, newest first. Each keeps its session until a new
- * chat is started; requests from Work continue the latest one with that agent.
+ * The developer's chats in a project, newest first. Each opens as its task, with the work's
+ * status, permissions and side panel around the conversation. Each keeps its session until
+ * a new chat is started; requests from Work continue the latest one with that agent.
  */
 export default function ProjectChats({ path, name }: { path: string; name: string }) {
   const conversations = useWorkspace((s) => s.conversations);
   const agents = useAgents((s) => s.agents);
   const route = useNavigation((s) => s.route);
-  const openConversation = useNavigation((s) => s.openConversation);
+  const openTask = useNavigation((s) => s.openTask);
+  const shownTask = useNavigation((s) => s.taskId);
+  const shownChat = useWorkspace((s) => s.tasks.find((t) => t.id === shownTask)?.conversation_id ?? null);
   const [showAll, setShowAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Conversation | null>(null);
@@ -38,33 +42,34 @@ export default function ProjectChats({ path, name }: { path: string; name: strin
   const lead = agents.find((a) => a.kind === "orchestrator") ?? agents.find((a) => a.kind !== "maintenance");
   const openChatId = (agentId: string) => selectThread(agentId)(useChats.getState()).conversationId;
 
-  const open = (chat: Conversation) => {
+  const open = async (chat: Conversation) => {
     setError(null);
     const agent = agents.find((a) => a.id === chat.agent_id);
-    if (chat.id === openChatId(chat.agent_id)) {
-      openConversation(chat.agent_id);
-      return;
+    try {
+      // It becomes the agent's chat when they're free, so you can talk in it at once. Switching
+      // ends their session, so never mid-task: then the page shows it until you pick it back up.
+      if (chat.id !== openChatId(chat.agent_id) && !(agent && AGENT_STATUS[agent.status].busy)) await reopenChat(chat.agent_id, chat.id);
+      openTask((await taskForChat(chat.id)).id);
+    } catch (e) {
+      setError(errorMessage(e, "That chat couldn't be opened."));
     }
-    // Switching chats ends the agent's session, so never mid-task.
-    if (agent && AGENT_STATUS[agent.status].busy) {
-      setError(`${agent.name} is working in another chat. Open this one when they're done.`);
-      return;
-    }
-    reopenChat(chat.agent_id, chat.id)
-      .then(() => openConversation(chat.agent_id))
-      .catch((e) => setError(errorMessage(e, "That chat couldn't be opened.")));
   };
 
-  const startChat = () => {
+  const startChat = async () => {
     if (!lead) return;
     setError(null);
     if (AGENT_STATUS[lead.status].busy) {
       setError(`${lead.name} is working right now. Start a new chat when they're done.`);
       return;
     }
-    startNewChat(lead.id, path)
-      .then(() => openConversation(lead.id))
-      .catch((e) => setError(errorMessage(e, "A new chat couldn't be started.")));
+    try {
+      await startNewChat(lead.id, path);
+      const chat = openChatId(lead.id);
+      if (chat === null) throw new Error("The new chat didn't open.");
+      openTask((await taskForChat(chat)).id);
+    } catch (e) {
+      setError(errorMessage(e, "A new chat couldn't be started."));
+    }
   };
 
   return (
@@ -72,7 +77,7 @@ export default function ProjectChats({ path, name }: { path: string; name: strin
       {shown.map((chat) => {
         const agent = agents.find((a) => a.id === chat.agent_id);
         const who = agent?.name ?? chat.agent_id;
-        const current = route === "conversation" && openChatId(chat.agent_id) === chat.id;
+        const current = route === "task" && shownChat === chat.id;
         const title = chat.title || UNTITLED;
         return (
           <li key={chat.id} className="nav-sub-row">
@@ -80,7 +85,7 @@ export default function ProjectChats({ path, name }: { path: string; name: strin
               type="button"
               className={cx("nav-chat", current && "is-current")}
               title={`${chat.title || UNTITLED}\n${who} · ${formatRelative(chat.updated, now)}`}
-              onClick={() => open(chat)}
+              onClick={() => void open(chat)}
             >
               <Portrait name={who} figure={portraitKey(agent)} accent={agent?.accent} size={20} />
               <span className="nav-sub-label">{title}</span>
@@ -103,7 +108,7 @@ export default function ProjectChats({ path, name }: { path: string; name: strin
       )}
       {lead && (
         <li>
-          <button type="button" className="nav-chat is-quiet" onClick={startChat}>
+          <button type="button" className="nav-chat is-quiet" onClick={() => void startChat()}>
             <MessageSquarePlus aria-hidden size={ICON_SIZE.sm} strokeWidth={ICON_STROKE} />
             <span className="nav-sub-label">New chat</span>
           </button>

@@ -143,6 +143,17 @@ async resumeTask(id: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * The task a chat opens as on Work: its latest work, or a new idle one for a chat that hasn't had any.
+ */
+async taskForChat(conversationId: number) : Promise<Result<Task, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("task_for_chat", { conversationId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Quit for real: every agent session stops. (Closing the window doesn't.)
  */
 async quitApp() : Promise<void> {
@@ -1841,7 +1852,7 @@ export type Task = { id: string; ts: number; updated: number; title: string;
  */
 assignee: string; 
 /**
- * todo (queued) | doing | blocked | done (ready for review) | closed
+ * todo (queued) | doing | blocked | done (ready for review) | idle (finished, nothing to review) | reviewed | closed
  */
 status: string; detail?: string | null; 
 /**
