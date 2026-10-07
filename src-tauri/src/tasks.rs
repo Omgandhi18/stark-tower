@@ -751,14 +751,46 @@ pub fn review(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     if task.status != "done" {
         return Err("Only a task that's ready for review can be marked reviewed.".into());
     }
-    state.ledger.set_task_status(id, "reviewed", None);
-    event(app, id, &task.assignee, "status", "Reviewed by you", "");
-    crate::notify::task_settled(app, id, "Reviewed");
-    // A to-do the work was started for is done once you've reviewed it.
-    crate::todos::task_reviewed(app, id);
-    settled(app, id);
+    mark_reviewed(app, &state.ledger, &task);
     emit_changed(app);
     Ok(())
+}
+
+/// Whether delegated work has finished: with changes to review, or with an answer.
+pub fn finished_delegated(task: &Task) -> bool {
+    task.parent_id.is_some() && matches!(task.status.as_str(), "done" | "idle")
+}
+
+/// The developer marks everything `id` delegated that has finished as reviewed, however deep it was
+/// delegated; what's still running, blocked or waiting its turn stays as it is. Returns how many.
+pub fn review_delegated(app: &tauri::AppHandle, id: &str) -> Result<usize, String> {
+    let state = engine(app).ok_or("Starkline isn't ready yet.")?;
+    state.ledger.task(id).ok_or("That task doesn't exist.")?;
+    let mut finished = Vec::new();
+    let mut pending = state.ledger.child_tasks(id);
+    while let Some(task) = pending.pop() {
+        pending.extend(state.ledger.child_tasks(&task.id));
+        if finished_delegated(&task) {
+            finished.push(task);
+        }
+    }
+    if finished.is_empty() {
+        return Err("Nothing this task delegated has finished since it was last reviewed.".into());
+    }
+    for task in &finished {
+        mark_reviewed(app, &state.ledger, task);
+    }
+    emit_changed(app);
+    Ok(finished.len())
+}
+
+fn mark_reviewed(app: &tauri::AppHandle, ledger: &crate::ledger::Ledger, task: &Task) {
+    ledger.set_task_status(&task.id, "reviewed", None);
+    event(app, &task.id, &task.assignee, "status", "Reviewed by you", "");
+    crate::notify::task_settled(app, &task.id, "Reviewed");
+    // A to-do the work was started for is done once you've reviewed it.
+    crate::todos::task_reviewed(app, &task.id);
+    settled(app, &task.id);
 }
 
 /// The developer closes a task: it leaves the board and stays in history.
@@ -1189,6 +1221,17 @@ mod tests {
     fn in_chat(mut t: Task, conversation: i64) -> Task {
         t.conversation_id = Some(conversation);
         t
+    }
+
+    #[test]
+    fn only_delegated_work_that_finished_is_reviewed_with_it() {
+        let delegated = |status: &str| Task { parent_id: Some("owner".into()), ..task("part", "karen", status) };
+        assert!(finished_delegated(&delegated("done")), "ready for review");
+        assert!(finished_delegated(&delegated("idle")), "answered");
+        for status in ["doing", "blocked", "todo", "reviewed", "closed"] {
+            assert!(!finished_delegated(&delegated(status)), "{status} stays as it is");
+        }
+        assert!(!finished_delegated(&task("own", "jarvis", "done")), "not delegated");
     }
 
     #[test]

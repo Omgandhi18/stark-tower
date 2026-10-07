@@ -1111,3 +1111,12 @@ The developer asked for "a way for agents to unblock other agent's previously ru
 - **A stopped chat of their own** (not delegated) gets the note as a message from whoever asked, with the lead agent's name on it; an agent can't do this to its own work, or to a chat that's still running.
 - **You can do it too:** a stopped delegated task's menu offers "Pick it back up (the result goes to …)".
 - **Verified here.** Script tests cover the tools and what reaches the app. A WebKit test picks up EDITH's stopped part from its menu.
+
+### 2026-10-07: reviewing a task with the work it delegated
+
+The developer asked that marking an owner's task reviewed can mark its delegated tasks reviewed too, when they've finished ("give me option to mark delegated tasks as finished too if they are completed").
+
+- **Finished means ready for review or answered.** Delegated work still running, waiting on you, blocked or waiting its turn stays as it is. It covers everything the task delegated, however deep.
+- **Mark as reviewed asks, when there's finished delegated work:** a checkbox (ticked) to mark that work reviewed too, the teammates' tasks it covers, and how many stay as they are. With nothing finished delegated, it marks the task at once, as before.
+- **Afterwards, from the task's menu:** "Mark N finished delegated tasks reviewed", for a task already reviewed (or still running) whose delegated work has since finished or was left out.
+- **Verified here.** A Rust test covers which delegated work counts as finished; a unit test covers the same on screen. WebKit tests mark a task reviewed with its finished delegated work, and without it and then from the menu.

@@ -165,4 +165,38 @@ test.describe("task screen", () => {
     await page.getByRole("menuitem", { name: "Pick it back up (the result goes to JARVIS)" }).click();
     expect(await fakeCalls(page)).toContainEqual({ cmd: "resume_task", args: { id: "t-idem" } });
   });
+
+  test("marks the finished work it delegated reviewed along with it, or leaves it", async ({ page }) => {
+    const scenario = defaultScenario();
+    scenario.tasks.find((t) => t.id === "t-refunds")!.status = "done";
+    await openApp(page, scenario);
+    await page.getByRole("button", { name: "Ship the refunds feature", exact: true }).click();
+    await page.getByRole("button", { name: "Mark as reviewed" }).click();
+    const confirm = page.getByRole("dialog", { name: "Mark as reviewed" });
+    await expect(confirm.getByRole("checkbox", { name: "Also mark its 1 finished delegated task reviewed" })).toBeChecked();
+    await expect(confirm.getByRole("list", { name: "Finished delegated tasks" })).toContainText("EDITH · Compare idempotency strategies for refunds");
+    await expect(confirm.getByText("2 still running or blocked stay as they are.")).toBeVisible();
+    await confirm.getByRole("button", { name: "Mark as reviewed" }).click();
+    await expect.poll(async () => (await fakeCalls(page)).map((c) => c.cmd).filter((cmd) => cmd.startsWith("review_"))).toEqual(["review_task", "review_delegated"]);
+    await expect(page.getByRole("button", { name: "Mark as reviewed" })).toHaveCount(0);
+  });
+
+  test("marks only the task reviewed when you untick its delegated work, and offers it again later", async ({ page }) => {
+    const scenario = defaultScenario();
+    scenario.tasks.find((t) => t.id === "t-refunds")!.status = "done";
+    await openApp(page, scenario);
+    await page.getByRole("button", { name: "Ship the refunds feature", exact: true }).click();
+    await page.getByRole("button", { name: "Mark as reviewed" }).click();
+    const confirm = page.getByRole("dialog", { name: "Mark as reviewed" });
+    await confirm.getByRole("checkbox", { name: /Also mark/ }).uncheck();
+    await confirm.getByRole("button", { name: "Mark as reviewed" }).click();
+    await expect.poll(async () => (await fakeCalls(page)).some((c) => c.cmd === "review_task")).toBe(true);
+    expect((await fakeCalls(page)).some((c) => c.cmd === "review_delegated")).toBe(false);
+
+    await page.getByRole("button", { name: "More actions for Ship the refunds feature" }).click();
+    await page.getByRole("menuitem", { name: "Mark 1 finished delegated task reviewed" }).click();
+    await expect.poll(async () => (await fakeCalls(page)).filter((c) => c.cmd === "review_delegated").map((c) => c.args)).toEqual([{ id: "t-refunds" }]);
+    await page.getByRole("button", { name: "More actions for Ship the refunds feature" }).click();
+    await expect(page.getByRole("menuitem", { name: /finished delegated/ })).toHaveCount(0);
+  });
 });

@@ -74,6 +74,17 @@ async reviewTask(id: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Mark everything a task delegated that has finished as reviewed; returns how many.
+ */
+async reviewDelegated(id: string) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("review_delegated", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Delete a chat for good: its messages go, and tasks that ran in it stay in history without
  * their transcript. The chat an agent is working in can't be deleted until they finish; the
  * open chat, once deleted, gives way to a fresh one in the same folder.

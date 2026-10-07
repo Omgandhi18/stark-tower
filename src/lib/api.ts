@@ -23,6 +23,8 @@ export const getTasks = (limit?: number) => commands.getTasks(limit ?? null);
 /** Close a reviewed task: it leaves the Work board but stays in history. */
 export const closeTask = (id: string) => commands.closeTask(id);
 export const reviewTask = (id: string) => ok(commands.reviewTask(id));
+/** Mark everything a task delegated that has finished as reviewed; resolves to how many. */
+export const reviewDelegated = (id: string) => ok(commands.reviewDelegated(id));
 
 export const onTasksChanged = (cb: () => void): Promise<UnlistenFn> => listen("tasks://changed", () => cb());
 

@@ -1122,3 +1122,14 @@ button.execution-task:hover {
     width: 380px;
   }
 }
+
+/* ---- Marking a task reviewed, with what it delegated -------------------------- */
+.review-popover { width: min(26rem, calc(100vw - var(--space-8))); }
+.review-confirm { display: grid; gap: var(--space-3); padding: var(--space-4); font-size: var(--text-sm); }
+.review-confirm-option { display: flex; align-items: flex-start; gap: var(--space-2); font-weight: 600; }
+.review-confirm-option input { margin-top: 0.2em; }
+.review-confirm-list { display: grid; gap: var(--space-1); margin: 0; padding: 0 0 0 calc(var(--space-2) + 1em); list-style: none; color: var(--text-secondary); }
+.review-confirm-list li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-confirm-list strong { color: var(--text); font-weight: 600; }
+.review-confirm-note { margin: 0; color: var(--text-muted); }
+.review-confirm-actions { display: flex; justify-content: flex-end; }

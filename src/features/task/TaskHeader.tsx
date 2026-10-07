@@ -5,7 +5,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { cx, portraitKey, Button, IconButton, OverflowMenu, Portrait, StatusPill, ICON_SIZE, ICON_STROKE, type MenuItem } from "../../design";
 import { PANEL_SHORTCUT } from "../../app/panelShortcuts";
 import { AUTO_MODE_GOES_AHEAD, AUTO_MODE_STILL_ASKS, useAutoModeOf } from "../automode/autoMode";
-import { seeCodeReview, closeTask, resumeTask, reviewTask, stopTask } from "../../lib/api";
+import { seeCodeReview, closeTask, resumeTask, reviewDelegated, stopTask } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { formatElapsed } from "../../lib/time";
 import type { Agent, TaskDetail } from "../../lib/types";
@@ -21,6 +21,8 @@ import MemoryButton from "../agents/MemoryButton";
 import WorkspaceChip from "./WorkspaceChip";
 import RemindMeButton from "../reminders/RemindMeButton";
 import { ChatCostFact, ChatFolderSelect, NewChatButton } from "./ChatControls";
+import ReviewButton from "./ReviewButton";
+import { delegatedToReview, finishedLabel } from "./reviewModel";
 import type { StateTone } from "../../lib/status";
 
 const report = (what: string) => (e: unknown) => console.error(`[task] couldn't ${what}`, e);
@@ -53,10 +55,7 @@ export default function TaskHeader({ detail, owner, chat, requester, state, now 
   const name = owner?.name ?? task.assignee;
   const [error, setError] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
-  const markReviewed = () => {
-    setError(null);
-    reviewTask(task.id).catch((e) => setError(errorMessage(e, "The task couldn't be marked reviewed.")));
-  };
+  const delegated = delegatedToReview(detail.children);
   // Stop shows while anything in the task runs: its owner, or work it delegated.
   const running = task.status === "doing" || detail.children.some((c) => c.status === "doing");
   const stop = () => {
@@ -80,6 +79,18 @@ export default function TaskHeader({ detail, owner, chat, requester, state, now 
     // Delegated work carries on in its own conversation, and its result still goes to whoever delegated it.
     const label = task.parent_id ? `Pick it back up (the result goes to ${requester})` : "Continue where it left off";
     items.push({ id: "resume", label, icon: Play, onSelect: () => void resumeTask(task.id).catch(report("continue the task")) });
+  }
+  // Once the task itself is reviewed (or while it runs), what it delegated that has finished can be too.
+  if (delegated.finished.length > 0 && task.status !== "done") {
+    items.push({
+      id: "review-delegated",
+      label: `Mark ${finishedLabel(delegated.finished.length)} reviewed`,
+      icon: CheckCheck,
+      onSelect: () => {
+        setError(null);
+        void reviewDelegated(task.id).catch((e) => setError(errorMessage(e, "The delegated work couldn't be marked reviewed.")));
+      },
+    });
   }
   // A finished task is marked reviewed (below); anything else still open can be closed.
   if (!["closed", "reviewed", "done"].includes(task.status)) {
@@ -117,11 +128,7 @@ export default function TaskHeader({ detail, owner, chat, requester, state, now 
           <ContextButton agentId={task.assignee} name={name} folder={task.cwd} taskId={task.id} />
           <MemoryButton agentId={task.assignee} name={name} />
           <RemindMeButton task={task} ownerName={name} />
-          {task.status === "done" && (
-            <Button variant="review" icon={CheckCheck} onClick={markReviewed}>
-              Mark as reviewed
-            </Button>
-          )}
+          {task.status === "done" && <ReviewButton task={task} finished={delegated.finished} unfinished={delegated.unfinished} onError={setError} />}
           {running && (
             <Button icon={Square} disabled={stopping} title="Stop this task, and anything it delegated that's still running" onClick={stop}>
               Stop

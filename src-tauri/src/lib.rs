@@ -1868,6 +1868,13 @@ fn review_task(app: tauri::AppHandle, id: String) -> Result<(), String> {
     tasks::review(&app, &id)
 }
 
+/// Mark everything a task delegated that has finished as reviewed; returns how many.
+#[tauri::command]
+#[specta::specta]
+fn review_delegated(app: tauri::AppHandle, id: String) -> Result<u32, String> {
+    tasks::review_delegated(&app, &id).map(|n| n as u32)
+}
+
 /// Inspect current prompt sections and provider instruction files without blocking the UI.
 #[tauri::command]
 #[specta::specta]
@@ -2309,6 +2316,7 @@ fn specta_builder() -> tauri_specta::Builder {
             stop_task,
             close_task,
             review_task,
+            review_delegated,
             delete_conversation,
             attach_files,
             attach_data,

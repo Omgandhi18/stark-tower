@@ -764,6 +764,16 @@ function install(scenario: Scenario) {
       emit("notifications://changed", null);
       return null;
     },
+    review_delegated: (args) => {
+      // Like the backend: everything delegated beneath it, however deep, that has finished.
+      const tree = [String(args.id)];
+      for (let i = 0; i < tree.length; i++) tree.push(...state.tasks.filter((t) => t.parent_id === tree[i]).map((t) => t.id));
+      const finished = state.tasks.filter((t) => t.parent_id && tree.includes(t.id) && ["done", "idle"].includes(t.status));
+      if (!finished.length) throw "Nothing this task delegated has finished since it was last reviewed.";
+      state.tasks = state.tasks.map((t) => (finished.includes(t) ? { ...t, status: "reviewed" } : t));
+      emit("tasks://changed", null);
+      return finished.length;
+    },
     stop_task: (args) => {
       // Like the backend: the task and everything delegated beneath it that's still running.
       const tree = [String(args.id)];
