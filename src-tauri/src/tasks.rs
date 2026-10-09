@@ -435,7 +435,7 @@ pub fn recover(app: &tauri::AppHandle) {
     }
     emit_changed(app);
     for task in waiting {
-        let _ = begin(app, &task);
+        let _ = begin(app, &task, ChatPlace::Usual);
     }
 }
 
@@ -562,6 +562,39 @@ pub fn start_for(
     files: &[crate::attachments::Attachment],
     origin: &Origin,
 ) -> Result<Task, String> {
+    launch(app, agent_id, prompt, dir, files, origin, ChatPlace::Usual)
+}
+
+/// Work that runs in a new chat of its own, beside whatever the agent is doing in that project.
+pub fn start_in_new_chat(
+    app: &tauri::AppHandle,
+    agent_id: &str,
+    prompt: &str,
+    dir: Option<String>,
+    files: &[crate::attachments::Attachment],
+    origin: &Origin,
+) -> Result<Task, String> {
+    launch(app, agent_id, prompt, dir, files, origin, ChatPlace::New)
+}
+
+/// Which chat a task starts in.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ChatPlace {
+    /// The agent's chat in that project, or a new one while that's busy.
+    Usual,
+    /// Always a new chat.
+    New,
+}
+
+fn launch(
+    app: &tauri::AppHandle,
+    agent_id: &str,
+    prompt: &str,
+    dir: Option<String>,
+    files: &[crate::attachments::Attachment],
+    origin: &Origin,
+    place: ChatPlace,
+) -> Result<Task, String> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
         return Err("Say what you'd like done.".into());
@@ -595,19 +628,21 @@ pub fn start_for(
         state.ledger.set_task_attachments(&id, files);
     }
     event(app, &id, agent_id, "created", origin.note, "");
-    begin(app, &task)?;
+    begin(app, &task, place)?;
     Ok(state.ledger.task(&id).unwrap_or(task))
 }
 
 /// Start a task in the developer's chat with the agent in that project, so a chat keeps
 /// its session until the developer starts a new one. While that chat is busy (or there's
-/// none yet) the task opens a chat of its own, so the agent works on both at once.
-fn begin(app: &tauri::AppHandle, task: &Task) -> Result<(), String> {
+/// none yet, or the task asks for one) the task opens a chat of its own, so the agent
+/// works on both at once.
+fn begin(app: &tauri::AppHandle, task: &Task, place: ChatPlace) -> Result<(), String> {
     let state = engine(app).ok_or("Starkline isn't ready yet.")?;
     let prepared = crate::workspaces::prepare(app, task)?;
     let task = &prepared;
     let agent = task.assignee.as_str();
-    let conversation = match state.ledger.chat_in(agent, &task.cwd).filter(|chat| !is_busy_in(app, *chat)) {
+    let usual = if place == ChatPlace::Usual { state.ledger.chat_in(agent, &task.cwd) } else { None };
+    let conversation = match usual.filter(|chat| !is_busy_in(app, *chat)) {
         Some(chat) => chat,
         None => state.ledger.new_titled_conversation(agent, &task.cwd, &task.title),
     };

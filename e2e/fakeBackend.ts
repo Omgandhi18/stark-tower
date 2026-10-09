@@ -1328,6 +1328,20 @@ function install(scenario: Scenario) {
       emit("bugs://changed", null);
       return null;
     },
+    list_crashes: () => state.crashes ?? [],
+    diagnose_crashes: (args) => {
+      const ids = (args.ids as string[]) ?? [];
+      const task = commands.start_task({ agentId: "dum-e", dir: "/Users/dev/stark-tower", prompt: `Fix the crash\nStarkline crashed. Find out why and fix it properly.` }) as { id: string };
+      state.crashes = (state.crashes ?? []).map((c) => (ids.includes(c.id) ? { ...c, status: "diagnosing" as const, taskId: task.id } : c));
+      emit("crashes://changed", null);
+      return task;
+    },
+    keep_crashes_for_later: (args) => {
+      const ids = (args.ids as string[]) ?? [];
+      state.crashes = (state.crashes ?? []).map((c) => (ids.includes(c.id) && c.status === "new" ? { ...c, status: "later" as const } : c));
+      emit("crashes://changed", null);
+      return null;
+    },
     run_maintenance: () => {
       state.bugs = state.bugs.map((b) => (b.status === "open" ? { ...b, status: "doing" } : b));
       emit("bugs://changed", null);

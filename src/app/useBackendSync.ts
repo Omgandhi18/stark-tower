@@ -29,6 +29,7 @@ import {
   onRemindersChanged,
   onTodosChanged,
   onBugsChanged,
+  onCrashesChanged,
   onChatEvent,
   onChatStatus,
   onChatSwitched,
@@ -47,6 +48,7 @@ import {
 import { errorMessage } from "../lib/errors";
 import { IS_TAURI } from "../lib/platform";
 import { useCodeReviews } from "../stores/codeReviews";
+import { useCrashes } from "../stores/crashes";
 import { useVoices } from "../stores/voices";
 import { useActivity } from "../stores/activity";
 import { useLooks } from "../stores/looks";
@@ -138,6 +140,7 @@ export function useBackendSync() {
     first("tasks", workspace.refreshTasks);
     first("code review", useCodeReviews.getState().refresh);
     first("bugs", workspace.refreshBugs);
+    first("crash log", useCrashes.getState().refresh);
     first("pending reviews", useAttention.getState().refresh);
     first("notifications", useNotifications.getState().refresh);
     first("automations", useAutomations.getState().refresh);
@@ -176,6 +179,7 @@ export function useBackendSync() {
       onTasksChanged(() => useWorkspace.getState().refreshTasks().catch(report("tasks"))),
       onConversationsChanged(() => useWorkspace.getState().refreshConversations().catch(report("saved chats"))),
       onBugsChanged(() => useWorkspace.getState().refreshBugs().catch(report("bugs"))),
+      onCrashesChanged(() => useCrashes.getState().refresh().catch(report("crash log"))),
       onUpdateStatus((s) => useSystem.getState().applyUpdate(s)),
       onPowerState((p) => useSystem.getState().applyPower(p)),
       onNotificationOpen((id) => useNavigation.getState().focusNotification(id)),

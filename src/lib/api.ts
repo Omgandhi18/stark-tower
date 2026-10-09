@@ -1,5 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { commands, type AutomationInput, type Bounds, type BrowserPage, type Budget, type CodeReviews, type CommitInput, type ExtraArgs, type MacNotifications, type Output, type PowerState, type ReminderInput, type RequestInput, type Result, type Server, type WorktreeSetup } from "./bindings";
 import type { Attachment, ChatEvent, ChatStatus, ChatSwitch, TodoInput, TodoListInput, TaskEvent, LedgerEntry, PtyData, ReviewRequest, StatusEvent, UsageUpdate, UpdateStatus } from "./types";
 
@@ -278,6 +279,22 @@ export const setBugStatus = (id: number, status: string) => commands.setBugStatu
 export const runMaintenance = () => ok(commands.runMaintenance());
 
 export const onBugsChanged = (cb: () => void): Promise<UnlistenFn> => listen("bugs://changed", () => cb());
+
+// ---- Crash log: Starkline's own crashes ----
+
+/** Starkline's crash log, newest first. */
+export const listCrashes = () => commands.listCrashes();
+
+/** Hand crashes to the maintenance agent: it diagnoses and fixes them in a chat of its own. */
+export const diagnoseCrashes = (ids: string[]) => ok(commands.diagnoseCrashes(ids));
+
+/** Keep crashes to look into later; the next launch doesn't ask about them again. */
+export const keepCrashesForLater = (ids: string[]) => commands.keepCrashesForLater(ids);
+
+/** Show a crash's files (its write-up and macOS's report) in Finder. */
+export const revealCrash = (folder: string) => revealItemInDir(folder);
+
+export const onCrashesChanged = (cb: () => void): Promise<UnlistenFn> => listen("crashes://changed", () => cb());
 
 /** List files and folders under a directory for the chat's @ file picker. */
 export const listFiles = (dir: string, limit?: number) => commands.listFiles(dir, limit ?? null);

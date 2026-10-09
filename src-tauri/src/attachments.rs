@@ -179,15 +179,20 @@ fn too_big(name: &str, size: u64) -> String {
 /// Keep a copy of a file in the attachments folder.
 pub fn store_copy(root: &Path, source: &Path) -> Result<Attachment, String> {
     let shown = source.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| source.to_string_lossy().into_owned());
+    store_copy_as(root, source, &shown)
+}
+
+/// Keep a copy of a file in the attachments folder under another name.
+pub fn store_copy_as(root: &Path, source: &Path, shown: &str) -> Result<Attachment, String> {
     let meta = std::fs::metadata(source).map_err(|_| format!("{shown} can't be found."))?;
     if !meta.is_file() {
         return Err(format!("{shown} is a folder; attach the files in it instead."));
     }
     if meta.len() > MAX_FILE_BYTES {
-        return Err(too_big(&shown, meta.len()));
+        return Err(too_big(shown, meta.len()));
     }
     let slot = new_slot(root)?;
-    let dest = slot.join(safe_name(&shown));
+    let dest = slot.join(safe_name(shown));
     std::fs::copy(source, &dest).map_err(|e| format!("{shown} couldn't be copied ({e})."))?;
     describe(&dest).ok_or_else(|| format!("{shown} couldn't be read after copying."))
 }

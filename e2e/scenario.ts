@@ -16,6 +16,7 @@ import type {
   Server,
   Output,
   Bug,
+  Crash,
   CheckRun,
   Conversation,
   FileChange,
@@ -88,6 +89,8 @@ export interface Scenario {
   /** Conversations in auto mode. */
   autoMode?: number[];
   bugs: Bug[];
+  /** Starkline's own crash log; empty unless a test crashes it. */
+  crashes?: Crash[];
   health: RuntimeHealth;
   power: PowerState;
   files: Record<string, PathEntry[]>;

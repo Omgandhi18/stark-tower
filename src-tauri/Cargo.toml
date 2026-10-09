@@ -46,6 +46,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 sherpa-onnx = "=1.13.8"
 # The model download streams to disk and is checked before extraction.
 sha2 = "0.10"
+# The crash log names the functions in macOS's crash reports (Rust symbols arrive mangled).
+rustc-demangle = "0.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -54,7 +56,8 @@ libc = "0.2"
 # Keep-awake: IOKit power assertions take CFString names.
 core-foundation = "0.10"
 # Screenshots of the built-in browser (WebKit draws the page; AppKit makes it a JPEG).
-objc2 = "0.6"
+# "exception" lets AppKit errors during an event be caught before they reach tao (event_guard.rs).
+objc2 = { version = "0.6", features = ["exception"] }
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSString", "NSData", "NSDictionary", "NSError", "NSValue", "NSGeometry"] }
 objc2-app-kit = { version = "0.3", features = ["NSImage", "NSImageRep", "NSBitmapImageRep", "NSView", "NSResponder", "NSGraphics", "NSWindow", "NSColor"] }
 objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKSnapshotConfiguration", "block2", "objc2-app-kit"] }

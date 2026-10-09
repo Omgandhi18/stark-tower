@@ -1,0 +1,88 @@
+/* The crash log: the question after a crash, and the list in Settings > Diagnostics. */
+
+.crash-list,
+.crash-prompt-list {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  list-style: none;
+}
+
+.crash-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+}
+
+.crash-row + .crash-row,
+.crash-prompt-item + .crash-prompt-item {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.crash-row .tag {
+  margin-top: 2px;
+}
+
+.crash-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--state-attention);
+}
+
+.crash-text,
+.crash-prompt-item {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.crash-text {
+  flex: 1;
+}
+
+.crash-prompt-item {
+  padding: var(--space-3) var(--space-4);
+}
+
+.crash-when {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.crash-reason {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.crash-place {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crash-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.crash-prompt-more,
+.crash-prompt-note {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.crash-error {
+  margin: var(--space-2) 0 0;
+  color: var(--state-danger);
+  font-size: var(--text-sm);
+}

@@ -171,6 +171,8 @@ pub fn on_run_event(app: &tauri::AppHandle, event: &tauri::RunEvent) {
                 app.state::<crate::AppState>().terminals.kill_all();
             }
         }
+        // Quitting normally: nothing that panicked along the way ended this run.
+        tauri::RunEvent::Exit => crate::crash_log::clean_exit(),
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { has_visible_windows: false, .. } => show_main(app),
         _ => {}

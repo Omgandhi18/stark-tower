@@ -25,6 +25,8 @@ export type {
   AppConfig,
   AuthConfig,
   Bug,
+  Crash,
+  CrashStatus,
   Conversation,
   EngineConfig,
   LedgerEntry,

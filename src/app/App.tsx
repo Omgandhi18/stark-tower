@@ -11,6 +11,7 @@ import SettingsScreen from "../features/settings/SettingsScreen";
 import TaskScreen from "../features/task/TaskScreen";
 import WorkScreen from "../features/work/WorkScreen";
 import AppShell from "../shell/AppShell";
+import CrashPrompt from "../features/crashes/CrashPrompt";
 import { useConfig } from "../stores/config";
 import { useNavigation, type RouteId } from "../stores/navigation";
 import CloseGuard from "./CloseGuard";
@@ -95,6 +96,7 @@ export default function App() {
       </AppShell>
       {config && !config.onboarded && <Onboarding config={config} />}
       <CloseGuard />
+      <CrashPrompt />
       {MockupCompare && (
         <Suspense fallback={null}>
           <MockupCompare onActiveChange={setComparing} />

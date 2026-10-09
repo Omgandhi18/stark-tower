@@ -10,9 +10,13 @@ mod codex;
 mod config;
 mod context;
 mod capture;
+mod crash_log;
+mod crash_report;
 mod delegation;
 mod devserver;
 mod engine;
+#[cfg(target_os = "macos")]
+mod event_guard;
 mod file_server;
 mod floor;
 mod gate;
@@ -1920,6 +1924,33 @@ fn set_bug_status(app: tauri::AppHandle, state: tauri::State<AppState>, id: i64,
     let _ = app.emit("bugs://changed", ());
 }
 
+/// The agent that looks after Starkline itself. Names are the developer's to choose, so
+/// it's found by its kind.
+fn maintenance_agent(state: &AppState) -> Option<String> {
+    state.config.lock().unwrap().agents.iter().find(|a| a.kind == agents::AgentKind::Maintenance && a.enabled).map(|a| a.id.clone())
+}
+
+/// Starkline's crash log, newest first.
+#[tauri::command]
+#[specta::specta]
+fn list_crashes(app: tauri::AppHandle) -> Vec<crash_log::Crash> {
+    crash_log::list(&app)
+}
+
+/// Hand crashes to the maintenance agent, which diagnoses and fixes them in a chat of its own.
+#[tauri::command]
+#[specta::specta]
+async fn diagnose_crashes(app: tauri::AppHandle, ids: Vec<String>) -> Result<ledger::Task, String> {
+    tauri::async_runtime::spawn_blocking(move || crash_log::diagnose(&app, &ids)).await.map_err(|e| e.to_string())?
+}
+
+/// Keep crashes to look into later; the next launch doesn't ask about them again.
+#[tauri::command]
+#[specta::specta]
+fn keep_crashes_for_later(app: tauri::AppHandle, ids: Vec<String>) {
+    crash_log::keep_for_later(&app, &ids);
+}
+
 /// The stark-tower repo root (the maintenance agent's working dir).
 fn repo_root() -> String {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1955,16 +1986,7 @@ reversible), and briefly say what you changed. If one is too vague to act on, sa
         ));
     }
     let repo = repo_root();
-    // Names are the developer's to choose: find the maintenance agent by its kind.
-    let maintainer = state
-        .config
-        .lock()
-        .unwrap()
-        .agents
-        .iter()
-        .find(|a| a.kind == agents::AgentKind::Maintenance && a.enabled)
-        .map(|a| a.id.clone())
-        .ok_or("There's no maintenance agent on the roster.")?;
+    let maintainer = maintenance_agent(&state).ok_or("There's no maintenance agent on the roster.")?;
     state.workdirs.lock().unwrap().insert(maintainer.clone(), repo.clone());
     let ids: Vec<i64> = bugs.iter().map(|b| b.id).collect();
 
@@ -2391,6 +2413,9 @@ fn specta_builder() -> tauri_specta::Builder {
             get_bugs,
             set_bug_status,
             run_maintenance,
+            list_crashes,
+            diagnose_crashes,
+            keep_crashes_for_later,
             get_project,
             set_project,
             list_projects,
@@ -2475,6 +2500,9 @@ fn specta_builder() -> tauri_specta::Builder {
 
 pub fn run() {
     let specta_builder = specta_builder();
+    // Before any event: AppKit errors while handling one mustn't reach tao and abort the app.
+    #[cfg(target_os = "macos")]
+    event_guard::install();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -2492,6 +2520,8 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir());
             std::fs::create_dir_all(&data_dir).ok();
+            // From here on, a panic is written down where the next launch will find it.
+            crash_log::watch(&data_dir.join(crash_log::FOLDER));
             let ledger =
                 Ledger::open(&data_dir.join("ledger.db")).expect("failed to open ledger db");
 
@@ -2621,6 +2651,8 @@ pub fn run() {
                 let h = app.handle().clone();
                 std::thread::spawn(move || update::check(&h));
             }
+            // Earlier runs that crashed join the crash log; the page asks what to do about them.
+            crash_log::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(specta_builder.invoke_handler())

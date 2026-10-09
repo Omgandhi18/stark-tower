@@ -4,6 +4,7 @@ import { Button, cx, ICON_SIZE, ICON_STROKE } from "../../design";
 import { errorMessage } from "../../lib/errors";
 import type { StateTone } from "../../lib/status";
 import { useSystem } from "../../stores/system";
+import CrashLog from "../crashes/CrashLog";
 import { installSummary, signInSummary } from "./providerDraft";
 
 const COPIED_MS = 1600;
@@ -140,6 +141,8 @@ export default function DiagnosticsSettings() {
           </tbody>
         </table>
       </section>
+
+      <CrashLog />
 
       <div className="settings-card-actions">
         <Button icon={ClipboardCopy} onClick={copyReport} disabled={!health}>

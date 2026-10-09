@@ -767,6 +767,29 @@ async runMaintenance() : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Starkline's crash log, newest first.
+ */
+async listCrashes() : Promise<Crash[]> {
+    return await TAURI_INVOKE("list_crashes");
+},
+/**
+ * Hand crashes to the maintenance agent, which diagnoses and fixes them in a chat of its own.
+ */
+async diagnoseCrashes(ids: string[]) : Promise<Result<Task, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("diagnose_crashes", { ids }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Keep crashes to look into later; the next launch doesn't ask about them again.
+ */
+async keepCrashesForLater(ids: string[]) : Promise<void> {
+    await TAURI_INVOKE("keep_crashes_for_later", { ids });
+},
 async getProject() : Promise<string> {
     return await TAURI_INVOKE("get_project");
 },
@@ -1575,6 +1598,48 @@ export type ConversationChat = { conversation: Conversation; messages: StoredMes
  */
 status: AgentStatus | null }
 export type ConversationSpend = { total: SpendTotal; context_tokens: number }
+export type Crash = { 
+/**
+ * Its folder: when it crashed and the process, e.g. "2026-10-09-123421-8993".
+ */
+id: string; 
+/**
+ * Milliseconds since the epoch.
+ */
+crashedAt: number; startedAt: number | null; version: string; pid: number; 
+/**
+ * What went wrong, in one line.
+ */
+reason: string; 
+/**
+ * The function in Starkline's code it stopped in, when macOS's report says.
+ */
+place: string | null; status: CrashStatus; 
+/**
+ * The task diagnosing it.
+ */
+taskId: string | null; 
+/**
+ * macOS's id for its crash report, so a report is logged once.
+ */
+incident: string | null; 
+/**
+ * Where its files are (filled in when read; saved empty).
+ */
+folder: string }
+export type CrashStatus = 
+/**
+ * Not asked about yet.
+ */
+"new" | 
+/**
+ * The developer chose to look into it later (or it predates the log).
+ */
+"later" | 
+/**
+ * Handed to the maintenance agent.
+ */
+"diagnosing"
 export type DeliveryInfo = { branch: string; default_branch: string; new_branch: string; host: Host | null; pushed: boolean; request_url: string | null; request_title: string }
 export type DispatchResult = { agent_id: string; name: string; spawned: boolean }
 export type Draft = { text: string; warning: string | null }
