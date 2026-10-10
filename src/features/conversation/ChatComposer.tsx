@@ -2,13 +2,17 @@ import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "re
 import { AtSign, SendHorizontal, Square } from "lucide-react";
 import { Button, IconButton, cx } from "../../design";
 import type { Attachment, PathEntry } from "../../lib/types";
-import { selectThread, useChats, type ChatRef } from "../../stores/chats";
+import { conversationOfKey, selectThread, useChats, type ChatRef } from "../../stores/chats";
 import { AttachButton, AttachmentTray } from "../attachments/AttachmentTray";
 import type { AttachmentDraft } from "../attachments/useAttachmentDraft";
 import AutoModeChip from "../automode/AutoModeChip";
 import FilePicker from "./FilePicker";
 import ModelChips from "./ModelChips";
 import { detectMention, insertMention, optionId, rankPaths, type MentionQuery } from "./fileMentions";
+import { clearToNewChat } from "./chatActions";
+import { composeFiles, composeMessage } from "./references/referenceModel";
+import { ReferenceTray } from "./references/ReferenceTray";
+import { useSlashMenu } from "../slash/useSlashMenu";
 import { useFolderFiles } from "./useFolderFiles";
 
 /** The input grows with its text up to this height, then scrolls. */
@@ -33,11 +37,24 @@ export default function ChatComposer({ chat, agentName, folder, pending, answeri
   const { agentId, key } = chat;
   const draft = useChats((s) => selectThread(key)(s).draft);
   const setDraft = useChats((s) => s.setDraft);
+  const references = useChats((s) => selectThread(key)(s).references);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [mention, setMention] = useState<MentionQuery | null>(null);
   const [highlight, setHighlight] = useState({ query: "", index: 0 });
   const files = useFolderFiles(folder);
   const listId = useId();
+  const slash = useSlashMenu({
+    agentId,
+    agentName,
+    conversationId: conversationOfKey(key),
+    folder,
+    draft,
+    setDraft: (text) => setDraft(key, text),
+    inputRef,
+    disabled: answering,
+    onNewChat: () => void clearToNewChat(chat, folder),
+    onBlocked: (notice) => useChats.getState().push(key, { role: "system", text: notice }),
+  });
 
   const options = mention ? rankPaths(files.entries, mention.query) : [];
   const index = mention && highlight.query === mention.query ? Math.min(highlight.index, Math.max(0, options.length - 1)) : 0;
@@ -84,18 +101,22 @@ export default function ChatComposer({ chat, agentName, folder, pending, answeri
 
   // An answer is words only: files go with the next message.
   const sending = answering ? [] : attachments.files;
-  const canSend = Boolean(draft.trim() || sending.length) && attachments.adding === 0;
+  const canSend = Boolean(draft.trim() || sending.length || references.length) && attachments.adding === 0;
 
   const submit = () => {
     const text = draft.trim();
-    if (!canSend) return;
+    if (!canSend || slash.interceptSubmit(text)) return;
+    const message = composeMessage(references, text);
+    const outgoing = answering ? [] : composeFiles(references, sending);
     setDraft(key, "");
+    useChats.getState().clearReferences(key);
     setMention(null);
     if (sending.length) attachments.sent();
-    onSend(text, [...sending]);
+    onSend(message, outgoing);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slash.handleKey(e)) return;
     if (picking && mention) {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -128,6 +149,8 @@ export default function ChatComposer({ chat, agentName, folder, pending, answeri
 
   return (
     <div className={cx("chat-composer", answering && "is-answering")}>
+      <ReferenceTray chatKey={key} />
+      {slash.menu}
       {!answering && <AttachmentTray draft={attachments} />}
       {picking && (
         <FilePicker
@@ -149,18 +172,23 @@ export default function ChatComposer({ chat, agentName, folder, pending, answeri
         placeholder={placeholder}
         aria-label={placeholder}
         aria-autocomplete="list"
-        aria-expanded={picking && options.length > 0}
-        aria-controls={picking && options.length > 0 ? listId : undefined}
-        aria-activedescendant={picking && options.length > 0 ? optionId(listId, index) : undefined}
+        aria-expanded={slash.aria.expanded || (picking && options.length > 0)}
+        aria-controls={slash.aria.controls ?? (picking && options.length > 0 ? listId : undefined)}
+        aria-activedescendant={slash.aria.activeDescendant ?? (picking && options.length > 0 ? optionId(listId, index) : undefined)}
         onChange={(e) => {
           setDraft(key, e.target.value);
           updateMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
+          slash.track(e.target.value, e.target.selectionStart ?? e.target.value.length);
         }}
         onSelect={(e) => {
           const input = e.currentTarget;
           if (mention) updateMention(input.value, input.selectionStart ?? input.value.length);
+          slash.track(input.value, input.selectionStart ?? input.value.length);
         }}
-        onBlur={() => setMention(null)}
+        onBlur={() => {
+          setMention(null);
+          slash.close();
+        }}
         onKeyDown={onKeyDown}
         onPaste={(e) => {
           const pasted = Array.from(e.clipboardData.files);

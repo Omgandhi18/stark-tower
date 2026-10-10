@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, MousePointerClick, RotateCw, X } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { EmptyState, IconButton, SelectField, covered, cx, onOverlaysChanged } from "../../design";
-import { browserGo, browserPicker, browserHide, browserNavigate, browserShow } from "../../lib/api";
+import { EmptyState, IconButton, SelectField, TabStrip, covered, cx, onOverlaysChanged, useTabShortcuts } from "../../design";
+import { browserCloseTab, browserGo, browserNewTab, browserPicker, browserHide, browserNavigate, browserSelectTab, browserShow } from "../../lib/api";
 import { selectQuestionFor, useAttention } from "../../stores/attention";
 import { errorMessage } from "../../lib/errors";
 import { useNavigation } from "../../stores/navigation";
@@ -11,7 +11,7 @@ import { addPoint } from "./pointComposer";
 import { browserPointText } from "./pointModel";
 import DevServerToolbar from "./DevServerToolbar";
 import DevServerOutput from "./DevServerOutput";
-import { BROWSER_SIZES, fitBrowser, type BrowserSize } from "./browserModel";
+import { BROWSER_SIZES, fitBrowser, tabLabel, type BrowserSize } from "./browserModel";
 import { usePreview } from "../../stores/preview";
 import "./preview.css";
 
@@ -38,6 +38,7 @@ export default function BrowserView({ active, chat, folder }: BrowserViewProps) 
   const agentId = chat?.agentId ?? null;
   const key = chat?.key ?? null;
   const page = usePreview((s) => s.page);
+  const tabs = usePreview((s) => s.tabs);
   const size = usePreview((s) => s.size);
   const setSize = usePreview((s) => s.setSize);
   const conversationId = useChats(s => key ? s.threads[key]?.conversationId ?? null : null);
@@ -46,13 +47,26 @@ export default function BrowserView({ active, chat, folder }: BrowserViewProps) 
   const [pickingFor, setPickingFor] = useState<string | null>(null);
   const picking = active && key !== null && pickingFor === key;
   const [outputOpen, setOutputOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const addressRef = useRef<HTMLInputElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [panel, setPanel] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const fitted = fitBrowser(panel, size);
   const viewportRef = useRef<HTMLDivElement>(null);
+  // The page is laid over the panel while it shows; a click into it moves focus out of this document.
+  const overPanelRef = useRef(false);
   const [typed, setTyped] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const hasPage = page.url !== "";
+  const activeTab = tabs.active;
+  // Another tab is another page: what was half-typed, and any pointing, belongs to the one left.
+  const [seenTab, setSeenTab] = useState(activeTab);
+  if (seenTab !== activeTab) {
+    setSeenTab(activeTab);
+    setTyped(null);
+    setPickingFor(null);
+  }
+  const tabId = (id: number) => String(id);
 
   useEffect(() => {
     const el = stageRef.current;
@@ -81,6 +95,7 @@ export default function BrowserView({ active, chat, folder }: BrowserViewProps) 
     const sync = () => {
       const r = el.getBoundingClientRect();
       const away = r.width < 2 || r.height < 2 || covered(r);
+      overPanelRef.current = !away;
       const key = away ? "away" : `${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.width)},${Math.round(r.height)}`;
       if (key === last) return;
       last = key;
@@ -98,6 +113,7 @@ export default function BrowserView({ active, chat, folder }: BrowserViewProps) 
       stopOverlays();
       window.clearInterval(timer);
       window.removeEventListener("resize", sync);
+      overPanelRef.current = false;
       browserHide().catch(report("hide"));
     };
   }, [active, hasPage, fitted.zoom, size]);
@@ -140,6 +156,18 @@ export default function BrowserView({ active, chat, folder }: BrowserViewProps) 
       .catch((e) => setError(errorMessage(e, "That page couldn't be opened.")));
   };
 
+  const newTab = () => {
+    setError(null);
+    browserNewTab()
+      .then(() => addressRef.current?.focus())
+      .catch((e) => setError(errorMessage(e, "A new tab couldn't be opened.")));
+  };
+  const closeTab = (id: number) => {
+    setError(null);
+    browserCloseTab(id).catch((e) => setError(errorMessage(e, "That tab couldn't be closed.")));
+  };
+  useTabShortcuts(rootRef, newTab, () => { if (activeTab !== null) closeTab(activeTab); }, () => overPanelRef.current && !document.hasFocus());
+
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && typed?.trim()) {
       e.preventDefault();
@@ -150,7 +178,17 @@ export default function BrowserView({ active, chat, folder }: BrowserViewProps) 
   };
 
   return (
-    <div className="browser-view">
+    <div ref={rootRef} className="browser-view">
+      <TabStrip
+        label="Browser tabs"
+        idPrefix="browser"
+        newLabel="New tab"
+        tabs={tabs.tabs.map((t) => ({ id: tabId(t.id), label: tabLabel(t), title: t.url || undefined, icon: Globe, iconSrc: t.favicon || undefined, busy: t.loading }))}
+        value={activeTab === null ? null : tabId(activeTab)}
+        onSelect={(id) => browserSelectTab(Number(id)).catch(report("switch tabs"))}
+        onClose={(id) => closeTab(Number(id))}
+        onNew={newTab}
+      />
       <div className="browser-toolbar">
         <IconButton icon={ArrowLeft} label="Back" size="sm" disabled={!hasPage} onClick={() => browserGo("back").catch(report("go back"))} />
         <IconButton icon={ArrowRight} label="Forward" size="sm" disabled={!hasPage} onClick={() => browserGo("forward").catch(report("go forward"))} />
@@ -160,6 +198,7 @@ export default function BrowserView({ active, chat, folder }: BrowserViewProps) 
           <IconButton icon={RotateCw} label="Reload" size="sm" disabled={!hasPage} onClick={() => browserGo("reload").catch(report("reload"))} />
         )}
         <input
+          ref={addressRef}
           className="input browser-address"
           aria-label="Address"
           placeholder="Type an address, or localhost:5173"
@@ -185,7 +224,7 @@ export default function BrowserView({ active, chat, folder }: BrowserViewProps) 
         </p>
       )}
       <div ref={stageRef} className="browser-stage">
-        <div ref={viewportRef} style={size === "fit" ? undefined : { width: fitted.bounds.width, height: fitted.bounds.height }} className={cx("browser-viewport", size !== "fit" && "is-device")} aria-label={page.title || page.url || "Browser"} role="region">
+        <div ref={viewportRef} style={size === "fit" ? undefined : { width: fitted.bounds.width, height: fitted.bounds.height }} className={cx("browser-viewport", size !== "fit" && "is-device")} aria-label={page.title || page.url || "Browser"} role="region" id={activeTab === null ? undefined : `browser-panel-${activeTab}`}>
           {!hasPage && (
             <EmptyState
               compact

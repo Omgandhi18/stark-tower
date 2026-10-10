@@ -225,15 +225,18 @@ const BROWSER_TOOL = {
     "server (\"http://localhost:5173\") or any page, `read` it (its text and numbered controls), " +
     "`click` and `type` into it, `run_js`, read the `console`, and take a `screenshot` to check your " +
     "work. Pages on this Mac are yours to use; a page on the internet needs the developer's " +
-    "permission, like any network access.",
+    "permission, like any network access. The browser has tabs, and every action works on the one " +
+    "you're on: `tabs` lists them, `new_tab` opens one (optionally on a `url`) and `switch_tab` goes " +
+    "to one by number. Open your own tab first rather than taking over a page the developer has open.",
   inputSchema: {
     type: "object",
     properties: {
       action: {
         type: "string",
-        enum: ["open", "read", "click", "type", "run_js", "console", "screenshot", "back", "forward", "reload"],
+        enum: ["open", "read", "click", "type", "run_js", "console", "screenshot", "back", "forward", "reload", "tabs", "new_tab", "switch_tab"],
       },
-      url: { type: "string", description: "For open: the address." },
+      url: { type: "string", description: "For open and new_tab: the address." },
+      tab: { type: "integer", description: "For switch_tab: a tab's number from tabs." },
       target: {
         type: "string",
         description: "For click and type: a control's number from read (\"3\"), a CSS selector, or its visible words.",
@@ -304,7 +307,7 @@ const ADD_TODO_TOOL = {
     "Add a to-do to the developer's lists: a follow-up you found that's outside what you were asked " +
     "(\"the login form has no error state either\"), or one they asked you to note down. It goes on the list " +
     "named in `list`, else the list of the to-do you're working on, else your project's list, else Inbox. " +
-    "They see that you added it.",
+    "It's numbered on that list (#1, #2, …); the reply says its number. They see that you added it.",
   inputSchema: {
     type: "object",
     properties: {
@@ -316,21 +319,54 @@ const ADD_TODO_TOOL = {
   },
 };
 
+const CHECK_TODO_TOOL = {
+  name: "check_todo",
+  description:
+    "Check one of the developer's to-dos is still there before you act on it. The developer can delete, tick off or " +
+    "move to-dos while you work, so call this immediately before you START a to-do and again immediately before you " +
+    "TICK it off. The reply begins with a verdict: OPEN (with its title, ref, notes and who it's assigned to: go ahead), " +
+    "DONE (who ticked it and when), MOVED (to which list and number), DELETED, or NOT FOUND. For anything but OPEN, " +
+    "don't start it and don't tick it: skip it and report that it's gone, done or moved. Numbers are per list and " +
+    "never reused, so give the `number` and the `list` it's on (`list` may be left out only for the list you were handed).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      number: { type: "integer", description: "The to-do's number on its list, as in \"#3\"." },
+      list: { type: "string", description: "The name of the list it's on. Optional only for the list you were handed." },
+    },
+    required: ["number"],
+  },
+};
+
 const COMPLETE_TODO_TOOL = {
   name: "complete_todo",
   description:
-    "Tick off one of the developer's to-dos once it's done: the one you were handed (its number is in the " +
-    "request), or one you finished from a list you were asked to work through. They see that you ticked it off.",
+    "Tick off one of the developer's to-dos once it's done: the one you were handed, or one you finished from a " +
+    "list you were asked to work through. To-dos are numbered within their own list (#1, #2, …), so another list " +
+    "has its own #3: give the `number` and the `list` it's on. `list` may be left out only for the list you were " +
+    "handed (the to-do you were given, or the list you were asked to work through); otherwise you'll be asked. " +
+    "Run `check_todo` right before this. Starkline checks again and REFUSES, ticking nothing, if the to-do was " +
+    "deleted, is already done, or was moved, or isn't the one you worked on: it never ticks a different to-do in its " +
+    "place. To prove it's the same one, pass the `title` exactly as you read it, or its `ref` (e.g. T12). If it's " +
+    "refused, don't redo the work or tick another: tell the developer. They see that you ticked it off.",
   inputSchema: {
     type: "object",
-    properties: { id: { type: "integer", description: "The to-do's number." } },
-    required: ["id"],
+    properties: {
+      number: { type: "integer", description: "The to-do's number on its list, as in \"#3\"." },
+      list: { type: "string", description: "The name of the list it's on. Optional only for the list you were handed." },
+      title: { type: "string", description: "The to-do's title as you read it. Give this or `ref`; it must match." },
+      ref: { type: "string", description: "The to-do's ref token, e.g. \"T12\", from `check_todo`, `list_todos` or the request. Give this or `title`; it must match." },
+      id: { type: "integer", description: "Deprecated: an old global id from before numbers were per list. Prefer `number` and `list`." },
+    },
   },
 };
 
 const LIST_TODOS_TOOL = {
   name: "list_todos",
-  description: "Read what's left on the developer's to-do lists, with each to-do's number, notes and who it's assigned to.",
+  description:
+    "Read what's left on the developer's to-do lists, with each to-do's number, ref, notes and who it's assigned to. " +
+    "Numbers are per list: every list starts at #1, so read a number together with the list it's under. " +
+    "This is a snapshot: before you start or tick off a to-do, confirm it with `check_todo`.",
   inputSchema: {
     type: "object",
     properties: { list: { type: "string", description: "Only this list (optional)." } },
@@ -372,7 +408,7 @@ const RELEASE_FILES_TOOL = {
 };
 
 async function toolsList() {
-  const tools = [CLAIM_FILES_TOOL, RELEASE_FILES_TOOL, ASK_HUMAN_TOOL, MESSAGE_TOOL, SHARE_TOOL, REMIND_TOOL, ADD_TODO_TOOL, COMPLETE_TODO_TOOL, LIST_TODOS_TOOL, BROWSER_TOOL, DEV_SERVER_TOOL, SIMULATOR_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
+  const tools = [CLAIM_FILES_TOOL, RELEASE_FILES_TOOL, ASK_HUMAN_TOOL, MESSAGE_TOOL, SHARE_TOOL, REMIND_TOOL, ADD_TODO_TOOL, CHECK_TODO_TOOL, COMPLETE_TODO_TOOL, LIST_TODOS_TOOL, BROWSER_TOOL, DEV_SERVER_TOOL, SIMULATOR_TOOL, REPORT_BUG_TOOL, APPROVE_TOOL];
   if (IS_ORCH) {
     const workers = await getRoster();
     tools.unshift(buildDelegateTool(workers), CONTINUE_TASK_TOOL, DELEGATIONS_TOOL);
@@ -482,9 +518,9 @@ rl.on("line", async (raw) => {
       const res = await bridge({ type: "delegations", agentId: AGENT_ID });
       if (res.error) result(id, "delegations failed: " + res.error, true);
       else result(id, res.result || "(nothing delegated)");
-    } else if (name === "add_todo" || name === "complete_todo" || name === "list_todos") {
-      const action = { add_todo: "add", complete_todo: "done", list_todos: "list" }[name];
-      log(name, "->", args.title || args.id || args.list || "");
+    } else if (name === "add_todo" || name === "check_todo" || name === "complete_todo" || name === "list_todos") {
+      const action = { add_todo: "add", check_todo: "check", complete_todo: "done", list_todos: "list" }[name];
+      log(name, "->", args.title || args.number || args.id || args.list || "");
       const res = await bridge({
         type: "todo",
         agentId: AGENT_ID,
@@ -492,6 +528,8 @@ rl.on("line", async (raw) => {
         title: args.title || "",
         notes: args.notes || "",
         list: args.list || "",
+        ...(typeof args.ref === "string" && args.ref ? { ref: args.ref } : {}),
+        ...(Number.isInteger(args.number) ? { number: args.number } : {}),
         ...(Number.isInteger(args.id) ? { id: args.id } : {}),
       });
       if (res.error) result(id, name + " failed: " + res.error, true);
@@ -505,6 +543,7 @@ rl.on("line", async (raw) => {
         command: args.command || "",
         filter: args.filter || "",
         url: args.url || "",
+        ...(Number.isInteger(args.tab) ? { tab: args.tab } : {}),
         target: args.target ?? "",
         text: args.text ?? "",
         submit: args.submit === true,

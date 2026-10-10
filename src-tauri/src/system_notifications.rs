@@ -58,7 +58,7 @@ impl MacNotifications {
             && match kind {
                 "reminder" => self.reminders,
                 "approval" | "question" | "review" => self.requests,
-                "task_ready" | "task_blocked" => self.work,
+                "task_ready" | "task_blocked" | "todo_removed" => self.work,
                 "code_review" => self.code_review,
                 "automation_missed" | "automation_failed" => self.automations,
                 "budget" => self.budget,
@@ -270,7 +270,7 @@ mod tests {
         let groups: &[Category] = &[
             (&["reminder"], |s, v| s.reminders = v),
             (&["approval", "question", "review"], |s, v| s.requests = v),
-            (&["task_ready", "task_blocked"], |s, v| s.work = v),
+            (&["task_ready", "task_blocked", "todo_removed"], |s, v| s.work = v),
             (&["code_review"], |s, v| s.code_review = v),
             (&["automation_missed", "automation_failed"], |s, v| s.automations = v),
             (&["budget"], |s, v| s.budget = v),
@@ -312,6 +312,7 @@ mod tests {
             "review",
             "task_ready",
             "task_blocked",
+            "todo_removed",
             "code_review",
             "automation_missed",
             "automation_failed",

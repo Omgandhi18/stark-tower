@@ -103,7 +103,7 @@ test.describe("attachments", () => {
     await expect(page.getByRole("list", { name: "Attached files" }).getByRole("listitem")).toHaveCount(2);
     await page.getByRole("textbox", { name: /Ask JARVIS/ }).fill("Build this screen");
     await page.getByRole("textbox", { name: /Ask JARVIS/ }).press("Enter");
-    await expect(page.getByText("JARVIS has started.")).toBeVisible();
+    await expect(page.getByRole("log", { name: "Conversation with JARVIS" }).getByText("Build this screen", { exact: true })).toBeVisible();
     const started = (await fakeCalls(page)).find((c) => c.cmd === "start_task");
     expect(started?.args).toMatchObject({ agentId: "jarvis", prompt: "Build this screen" });
     expect(started?.args.attachments).toHaveLength(2);

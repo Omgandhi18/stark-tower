@@ -1,0 +1,312 @@
+{
+ "jsonrpc": "2.0",
+ "method": "session/update",
+ "params": {
+  "sessionId": "ses_x",
+  "update": {
+   "sessionUpdate": "available_commands_update",
+   "availableCommands": [
+    {
+     "name": "app-sizzle",
+     "description": "Generate cinematic 1080p iOS app teaser videos from real App Store screenshots, with a GPT-image-2 enhancement pass on each selected screen before generation. Output is a beat-driven cinematic teaser built from GPT-enhanced screenshots, ending with the brand logo/icon plus a deterministic `COMING SO"
+    },
+    {
+     "name": "app-store-screens",
+     "description": "Generate 5\u20136 App Store screenshots in a given brand's aesthetic from a `brand.md`, raw product screenshots, or a public App Store listing fetched through Pika MCP. Story-driven (hook \u2192 value \u2192 features \u2192 proof \u2192 close), splashy, on-brand. Outputs 1290\u00d72796 PNGs ready to drop into App Store Connect. "
+    },
+    {
+     "name": "appllama-app-design-skill",
+     "description": "Build native-feeling, benchmark-quality mobile app screens (Expo / React Native). Use when designing or implementing any mobile UI \u2014 screens, flows, onboarding, paywalls, tab bars, sheets, settings, empty states \u2014 or when polishing motion, navigation, typography, dark mode, or perceived performance."
+    },
+    {
+     "name": "appllama-usage",
+     "description": "Use the Appllama MCP (mcp.appllama.io) well \u2014 research real top-grossing mobile apps, their screens, flows, and UI elements, then build from what you learn. Load when the Appllama MCP is connected and the task involves building a mobile app or screen, researching app design patterns, studying onboar"
+    },
+    {
+     "name": "baseball-trend",
+     "description": "Viral fake \"ESPN behind-home-plate broadcast cutaway\" of a user \u2014 broadcast-style still + 15s Kling-omni clip with native two-announcer commentary that names the user. Fixed trend: Yankees vs Red Sox ALCS Game 3 at Fenway Park, premium seats, scorebug + chyron with the user's name. Triggers: \"make m"
+    },
+    {
+     "name": "brag",
+     "description": "Turn the current project website into a short, polished, shareable launch video using Hyperframes. Use when someone says \"/brag\", \"let's brag about this\", \"make a launch video\", \"turn this into a video\", or wants to share what they built. Reads the project code directly \u2014 no live URL or screenshots "
+    },
+    {
+     "name": "brag-slim",
+     "description": "Turn a project directory or a website URL into a short, shareable launch video with music, motion, and share copy. One file, no bundled assets \u2014 built entirely by the model with the tools already on the machine. Use when someone says \"/brag-slim\", \"let's /brag about this\", \"brag about <url>\", \"make "
+    },
+    {
+     "name": "brandkit",
+     "description": "Premium brand-kit image generation skill for creating high-end brand-guidelines boards, logo systems, identity decks, and visual-world presentations. Trained for minimalist, cinematic, editorial, dark-tech, luxury, cultural, security, gaming, developer-tool, and consumer-app brand systems. Optimized"
+    },
+    {
+     "name": "build-a-brand",
+     "description": "Build a complete brand identity and guidelines PDF from any input \u2014 an idea, an existing website, a list of reference brands, product photos, or \"I want to rebrand X\". Use when someone wants a brand identity but does NOT need a full commerce launch (no Shopify, no product listings, no social posting"
+    },
+    {
+     "name": "built-in-browser",
+     "description": "Read this skill before the first step that uses the built-in browser, the browser pane inside the Codex desktop app (also called the in-app browser, the browser pane, Codex's browser, or \"your own browser\"), whose tools are named mcp__Claude_Browser__* when the session runs in the desktop app and mc"
+    },
+    {
+     "name": "captions-overlay",
+     "description": "Overlay doctrine for the embedded-captions workflow \u2014 the caption MODEL (drop / rail / embed) and the rule that captions are an OVERLAY composited on top of the film, never a reserved bottom band you shift content up to avoid. Load when adding captions/subtitles to a talking-head or launch video, wh"
+    },
+    {
+     "name": "changelog-video",
+     "description": "Turn a weekly changelog .md into a finished branded changelog video (square 1080, ~45-60s, Annie VO, animated brand background, mock-UI visualizations, lowkey captions). Use when the user provides a changelog/digest markdown and wants the weekly video, or says \"changelog video\". Self-contained \u2014 fon"
+    },
+    {
+     "name": "chrome-browser",
+     "description": "Read this skill before the first step that uses Codex in Chrome, the browser extension whose tools are named mcp__claude-in-chrome__* (also called Chrome, the browser extension, or the external browser) and which acts in the person's real Chrome with their own sign-ins; before those tools are turned"
+    },
+    {
+     "name": "computer-use",
+     "description": "Read this skill before the first step of any request to do something in an app on the person's own computer (Notes, Finder, System Settings, any desktop app), to look at their screen, or for \"computer use\". Computer use (desktop control) lets Codex take screenshots of the person's desktop and contro"
+    },
+    {
+     "name": "customize-opencode",
+     "description": "Use ONLY when the user is editing or creating opencode's own configuration: opencode.json, opencode.jsonc, files under .opencode/, or files under ~/.config/opencode/. Also use when creating or fixing opencode agents, subagents, skills, plugins, MCP servers, or permission rules. Do not use for the us"
+    },
+    {
+     "name": "cut-the-curve",
+     "description": "The technique catalog: five velocity-matched SEAMS (zoom-through, INVERSE zoom-through, cut-the-curve, waterfall cut, rack-focus blur-cut) plus the two in-scene techniques \u2014 waterfall ENTRY (staggered arrival cascades for title cards / segment openers) and the nudge curve (slow-fast-slow three-phase"
+    },
+    {
+     "name": "deep-research",
+     "description": "Use this skill when the user's prompt requires (1) researching a topic across multiple sources, comparing options or alternatives, analyzing trends or history, understanding markets or industries, or reviewing literature or studies and (2) synthesizing that research into a comprehensive, narrative r"
+    },
+    {
+     "name": "design-taste-frontend",
+     "description": "Anti-slop frontend skill for landing pages, portfolios, and redesigns. The agent reads the brief, infers the right design direction, and ships interfaces that do not look templated. Real design systems when applicable, audit-first on redesigns, strict pre-flight check."
+    },
+    {
+     "name": "design-taste-frontend-v1",
+     "description": "The original v1 taste-skill, preserved for projects depending on its exact behavior. The current default is `design-taste-frontend` (v2 experimental), which is a substantial rewrite. Use this v1 install name only if you need exact backward compatibility."
+    },
+    {
+     "name": "docs",
+     "description": "docs (editable docs people share and comment on; the default for any document, named as a doc or not: a document, report, proposal, resume, cover letter, letter, contract, policy, form, template, worksheet, essay, handbook, guide, how-to, cheat sheet, SOP or other writing to keep, share, collaborate"
+    },
+    {
+     "name": "docx",
+     "description": "Use this skill whenever the user wants to create, read, edit, or manipulate Word documents (.docx) or Word templates (.dotx). Triggers include: any mention of Microsoft Word Documents, such as 'Word doc', 'word document', '.docx', '.dotx', 'microsoft doc'. Also use when extracting or reorganizing co"
+    },
+    {
+     "name": "embedded-captions",
+     "description": "Add captions or subtitles to an existing single-subject talking-head video without editing the footage. Use for plain verbatim captions, cinematic captions embedded behind the subject, VFX captions, \u201c\u70b8/\u7279\u6548/\u9177\u70ab\u5b57\u5e55,\u201d or a named identity from the 35-style catalog. Route by visual identity, not by backend "
+    },
+    {
+     "name": "explainer",
+     "description": "~60-80s explainer video for any URL \u2014 GitHub repo, product page, docs site, blog post, or launch. Canonical workflow for URL walkthroughs. Use when the user asks to \"explain this URL / repo / website / product\", \"make a walkthrough video for [url]\", \"demo this site\", \"Loom-style explainer of [url]\","
+    },
+    {
+     "name": "faceless-explainer",
+     "description": "Turn arbitrary text \u2014 an article, notes, a topic, a brief \u2014 into a faceless explainer video: there is no site or footage to capture, so the visuals are invented per scene (typography, abstract graphics, diagrams, data-viz). Use for topic explainers, concept breakdowns, how-tos, listicles. Not a vide"
+    },
+    {
+     "name": "figma",
+     "description": "Import Figma content into a HyperFrames composition \u2014 rendered assets, brand tokens, components, storyboard sections \u2192 reconstructed motion (frames read as states, not slides) (REST/CLI), connector-assisted motion when available, and shaders from a connector or native export. Use when the user paste"
+    },
+    {
+     "name": "find-skills",
+     "description": "Helps users discover and install agent skills when they ask questions like \"how do I do X\", \"find a skill for X\", \"is there a skill that can...\", or express interest in extending capabilities. This skill should be used when the user is looking for functionality that might exist as an installable ski"
+    },
+    {
+     "name": "founder-product-video",
+     "description": "Generate a 65-second founder-style product video from a product URL + user-supplied imagery. Output is a 16:9 1080p MP4 \u2014 4 \u00d7 15s SeeDance acts of a talking founder + 5s branded end card + background music. The user's actual product screenshots appear on the founder's phone in reveal shots, so on-sc"
+    },
+    {
+     "name": "full-output-enforcement",
+     "description": "Overrides default LLM truncation behavior. Enforces complete code generation, bans placeholder patterns, and handles token-limit splits cleanly. Apply to any task requiring exhaustive, unabridged output."
+    },
+    {
+     "name": "general-video",
+     "description": "Author or edit a custom HyperFrames composition when no specialized workflow fits, or when BRIEF.md sets flow: companion. Use for longer or multi-scene pieces, brand and sizzle reels, montages, static loops, static title cards, footage remixes, and freeform builds. Use motion-graphics instead for a "
+    },
+    {
+     "name": "google-workspace",
+     "description": "Read this before the first Google Drive, Docs, Sheets or Slides connector call whenever the task creates or changes a Google file. Use this skill whenever the user wants to create or change a Google Doc, Sheet or Slides file in their Google Drive. Triggers include: a request that names Google Docs, "
+    },
+    {
+     "name": "gpt-taste",
+     "description": "Elite UX/UI & Advanced GSAP Motion Engineer. Enforces Python-driven true randomization for layout variance, strict AIDA page structure, wide editorial typography (bans 6-line wraps), gapless bento grids, strict GSAP ScrollTriggers (pinning, stacking, scrubbing), inline micro-images, and massive sect"
+    },
+    {
+     "name": "high-end-visual-design",
+     "description": "Teaches the AI to design like a high-end agency. Defines the exact fonts, spacing, shadows, card structures, and animations that make a website feel expensive. Blocks all the common defaults that make AI designs look cheap or generic."
+    },
+    {
+     "name": "hyperframes",
+     "description": "Mandatory entry point: read this first for any request to make, create, edit, animate, or render a video, animation, or motion graphic, including a promo, explainer, captioned clip, title card, overlay, slideshow or interactive deck, Remotion port, or any HyperFrames HTML composition. Also use it to"
+    },
+    {
+     "name": "hyperframes-animation",
+     "description": "All animation knowledge for HyperFrames \u2014 atomic motion rules, multi-phase scene blueprints, scene transitions, broader motion-design techniques, AND the seven runtime adapters (GSAP default, plus Lottie, Three.js, Anime.js, CSS keyframes, Web Animations API, TypeGPU). Use for any motion or animatio"
+    },
+    {
+     "name": "hyperframes-audio",
+     "description": "Use when audio already placed in a HyperFrames composition needs to be mixed: fade-in/fade-out, crossfade, track gain or volume, volume automation, ducking, a music bed that fights a voiceover (voiceover carve), effects on a track (EQ, compressor, limiter, gate, saturation, delay, reverb, chorus, ph"
+    },
+    {
+     "name": "hyperframes-cli",
+     "description": "Use the HyperFrames CLI development loop: init, add, catalog, capture, lint, check, snapshot, compare, grade-compare, preview, play, present, beats, keyframes, single or batch render, publish, cloud, cloudrun, feedback, lambda, doctor, browser, info, upgrade, skills, compositions, timeline, history,"
+    },
+    {
+     "name": "hyperframes-core",
+     "description": "The HyperFrames composition contract \u2014 build one renderable project. Use for composition structure, the `data-*` timing attributes, `class=\"clip\"`, tracks, sub-compositions, variables, framework-owned media playback, deterministic-render rules, and validation. Read before writing composition HTML."
+    },
+    {
+     "name": "hyperframes-creative",
+     "description": "Non-animation creative direction for HyperFrames videos. Use for design spec (frame.md / design.md) handling, palettes, typography, narration, beat planning, audio-reactive visuals, composition patterns, and brand / style decisions. For atomic motion patterns and scene blueprints, use `hyperframes-a"
+    },
+    {
+     "name": "hyperframes-keyframes",
+     "description": "Use when a HyperFrames composition needs a punch-in, punch-out, zoom, reframe, Ken Burns treatment, camera move, visual match/whip handoff, or other seek-safe 2D/3D keyframes; also for GSAP, CSS keyframes, Anime.js, WAAPI, FLIP, paths, masks, SVG morph/draw, text trails, 3D depth, or `hyperframes ke"
+    },
+    {
+     "name": "hyperframes-registry",
+     "description": "Search, install, and wire registry blocks and components into HyperFrames compositions. Use BEFORE hand-building any named visual \u2014 whenever a brief, a user, or a storyboard names a look, effect, treatment, or transition such as CRT scanlines, glitch, chromatic aberration, film grain, a shimmer swee"
+    },
+    {
+     "name": "hyperframes-studio",
+     "description": "Use when working with a person on a HyperFrames project in Studio: first, whether their message asks for a change at all (questions, loose ideas and \"don't change anything\" get an answer and a plan, not an edit); for a new film, the plan, storyboard and build order that the HyperFrames launch films "
+    },
+    {
+     "name": "image-to-code",
+     "description": "Elite website image-to-code skill for Codex. For visually important web tasks, it must first generate the design image(s) itself, deeply analyze them, then implement the website to match them as closely as possible. In Codex, it must prefer large, readable, section-specific images instead of tiny co"
+    },
+    {
+     "name": "imagegen-frontend-mobile",
+     "description": "Elite mobile app image-generation skill for creating premium, app-native screen concepts and flows. Designed for iOS, Android, and cross-platform mobile products. Prioritizes clean hierarchy, comfortably readable text, strong multi-screen consistency, controlled color palettes, non-generic creative "
+    },
+    {
+     "name": "imagegen-frontend-web",
+     "description": "Elite frontend image-direction skill for generating premium, conversion-aware website design references. CRITICAL OUTPUT RULE \u2014 generate ONE separate horizontal image FOR EVERY section. A landing page with 8 sections produces 8 images. Never compress multiple sections into one image. Enforces compos"
+    },
+    {
+     "name": "import-memory",
+     "description": "Import a memory export from another AI assistant into Codex's memory \u2014 conversationally, additively, and with the content treated as data."
+    },
+    {
+     "name": "industrial-brutalist-ui",
+     "description": "Raw mechanical interfaces fusing Swiss typographic print with military terminal aesthetics. Rigid grids, extreme type scale contrast, utilitarian color, analog degradation effects. For data-heavy dashboards, portfolios, or editorial sites that need to feel like declassified blueprints."
+    },
+    {
+     "name": "init",
+     "description": "guided AGENTS.md setup"
+    },
+    {
+     "name": "kiss-cam",
+     "description": "Generate a viral fake \"in-arena Kiss Cam moment\" of any two subjects \u2014 a fan-filmed phone shot of the MSG Jumbotron with retro Kiss Cam graphic + scoreboard, plus a 15s Kling v3-omni clip with PA-announcer commentary and crowd reaction. Any subject styles (human, 3D toy, illustrated avatar). No name"
+    },
+    {
+     "name": "lavish",
+     "description": "Turn complex or visual agent responses into rich, reviewable HTML artifacts the user can annotate and send feedback on, using the lavish-axi CLI. Use when about to give a plan, comparison, diagram, table, code diff, report, or anything easier to grasp visually than as prose."
+    },
+    {
+     "name": "media-use",
+     "description": "Agent Media OS, the single skill for every media need in a HyperFrames project. Resolve BGM, SFX, image, icon, brand logo, voice, color grade, or LUT into a frozen local file or paste-ready block + ledger record (one verb, `resolve`); generate via TTS / music / image models when the catalog misses; "
+    },
+    {
+     "name": "minimalist-ui",
+     "description": "Clean editorial-style interfaces. Warm monochrome palette, typographic contrast, flat bento grids, muted pastels. No gradients, no heavy shadows."
+    },
+    {
+     "name": "morning",
+     "description": "Render the user's morning brief as a styled HTML artifact, or set it up as a recurring weekday task. Use only when the user explicitly asks to run, see, or set up their morning brief, or if they invoke /morning by name. A question about their day, schedule, or calendar is not by itself a request for"
+    },
+    {
+     "name": "motion-doctrine",
+     "description": "GATEWAY \u2014 load FIRST before composing any HyperFrames animation or video. The high-level motion law that makes a multi-scene video feel like ONE continuous camera move instead of a stack of independently-animated slides. Covers the vector law (how you exit determines how you enter, incl. the Z scale"
+    },
+    {
+     "name": "motion-graphics",
+     "description": "A short, design-led motion graphic where motion is the message \u2014 kinetic typography, stat count-up, chart/data-viz hit, logo sting / brand lockup, lower-third / callout / social overlay, animated map (highlight regions, connect places, zoom to a location), animated tweet / news-article / headline, w"
+    },
+    {
+     "name": "music-to-video",
+     "description": "Turn a music track (an audio file, a video to pull audio from, or a track generated from a mood brief) into a beat-synced video \u2014 lyric video, slideshow, or kinetic promo. The music drives all pacing; any user-supplied images/videos are cut onto the same beat grid, and a complete video needs zero as"
+    },
+    {
+     "name": "oversized-cursor",
+     "description": "House-style oversized macOS cursor technique for HyperFrames launch videos. Load whenever a scene involves cursors or a pointer-led action, when kicking off a UI scene, when igniting a morph/transition/typing run with a click, or when a scene reads as static, dead, or stale and needs a cheap high-yi"
+    },
+    {
+     "name": "pdf",
+     "description": "Use this skill whenever the user wants to do anything with PDF files. This includes reading or extracting text/tables from PDFs, combining or merging multiple PDFs into one, splitting PDFs apart, rotating pages, adding watermarks, creating new PDFs, filling PDF forms, encrypting/decrypting PDFs, ext"
+    },
+    {
+     "name": "podcast",
+     "description": "Two-host podcast video for any URL or free-form topic \u2014 1 minute, 4 acts \u00d7 ~15s, native multi-shot dialogue, optional voice cloning for Host A. Use when the user asks to \"make a podcast\", \"podcast about [thing]\", \"podcast review of [url]\", \"two-host explainer\", \"interview-style clip\", \"two people ta"
+    },
+    {
+     "name": "pptx",
+     "description": "Use this skill any time a .pptx or .potx file is involved in any way \u2014 as input, output, or both. This includes: creating slide decks, pitch decks, or presentations as PowerPoint (.pptx) files; reading, parsing, or extracting text from any .pptx or .potx file (even if the extracted content will be u"
+    },
+    {
+     "name": "pr-to-video",
+     "description": "Turn a GitHub pull request (a PR URL, owner/repo#N, or 'this PR' in a checked-out repo) into a code-change explainer video \u2014 changelog, feature reveal, fix, or refactor walkthrough built from the diff, commits, and files: the input is a code change, not a website. Not a product promo (/product-launc"
+    },
+    {
+     "name": "product-launch-video",
+     "description": "Turn a product or marketing URL, pasted script, or brief into a product launch / promo video \u2014 SaaS promos, feature reveals, product demos, app and company launches. Use when the user wants to market, launch, promote, or reveal a product; the default for any commercial URL. Site tours / showcases of"
+    },
+    {
+     "name": "redesign-existing-projects",
+     "description": "Upgrades existing websites and apps to premium quality. Audits current design, identifies generic AI patterns, and applies high-end design standards without breaking functionality. Works with any CSS framework or vanilla CSS."
+    },
+    {
+     "name": "remotion-to-hyperframes",
+     "description": "Port an existing Remotion (React) composition's source to HyperFrames HTML. Use ONLY on an explicit ask to port/convert/migrate/translate a Remotion source \u2014 one-way, Remotion-only. A passing Remotion mention, reference-only code, or \"make something like my Remotion video\" is a fresh build (/general"
+    },
+    {
+     "name": "review",
+     "description": "review changes [commit|branch|pr], defaults to uncommitted"
+    },
+    {
+     "name": "seam-craft",
+     "description": "Render-correctness doctrine for scene-to-scene seams in HyperFrames launch videos \u2014 the prerequisites that make transitions composite correctly on the master timeline. Load when assembling the master timeline / index.html, when a white flash appears at a cut or crossfade seam (especially on dark fil"
+    },
+    {
+     "name": "setup-writing-style",
+     "description": "Learns how the user writes from their own sent messages and docs, and builds a voice profile so future drafts sound like them instead of generic AI. The profile is saved as the my-writing-style skill. Use when the user asks to set up, learn, or capture their writing voice, or complains that drafts s"
+    },
+    {
+     "name": "skill-creator",
+     "description": "Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better t"
+    },
+    {
+     "name": "slideshow",
+     "description": "Author a HyperFrames slideshow \u2014 a presentation, pitch deck, or interactive deck with discrete slides, fragment reveals, branching, hotspot navigation, and built-in presenter mode with speaker notes; also converts an existing page into a deck. Output is a navigable deck, not a rendered MP4. If the u"
+    },
+    {
+     "name": "starkcheck",
+     "description": "Starkline smoke-check skill. Use only when invoked explicitly."
+    },
+    {
+     "name": "starkhello",
+     "description": "Starkline smoke-check command"
+    },
+    {
+     "name": "stitch-design-taste",
+     "description": "Semantic Design System Skill for Google Stitch. Generates agent-friendly DESIGN.md files that enforce premium, anti-generic UI standards \u2014 strict typography, calibrated color, asymmetric layouts, perpetual micro-motion, and hardware-accelerated performance."
+    },
+    {
+     "name": "talking-head-recut",
+     "description": "Package an existing talking-head / interview / podcast video with timed, designed GRAPHIC OVERLAY cards \u2014 kinetic titles, lower-thirds, data callouts, quotes, side panels, picture-in-picture \u2014 synced to the transcript, on a 16:9 / 9:16 / 4:5 canvas of your choice; the clip plays untouched underneath"
+    },
+    {
+     "name": "ugc-ads",
+     "description": "Multi-cut jump-cut UGC product ad \u2014 HOOK + 3 JUMP CUTs + OUTRO, 15s, 9:16 vertical (3:4 optional, seedance only), POV first-person talking-head selfie, every beat has spoken dialogue with native lip-sync, 5-act narrative arc (set \u2192 name \u2192 reveal \u2192 twist \u2192 punchline). Six category essences (HAUL / AP"
+    },
+    {
+     "name": "unslop",
+     "description": "Cut AI tells from any writing. Must always apply."
+    },
+    {
+     "name": "xlsx",
+     "description": "Use this skill any time a spreadsheet file is the primary input or output. This means any task where the user wants to: open, read, edit, or fix an existing .xlsx, .xlsm, .xltx, .csv, or .tsv file (e.g., adding columns, computing formulas, formatting, charting, cleaning messy data); create a new spr"
+    }
+   ]
+  }
+ }
+}

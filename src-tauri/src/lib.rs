@@ -26,6 +26,7 @@ mod delivery;
 mod delivery_draft;
 mod ledger;
 mod lifecycle;
+mod limits;
 mod notify;
 #[cfg(target_os = "macos")]
 mod notifications_mac;
@@ -39,12 +40,15 @@ mod providers;
 mod policy;
 mod pty;
 mod reminders;
+mod references;
 mod rpc;
 mod runs;
 mod schedule;
 mod secrets;
+mod shellenv;
 mod simulator;
 mod simulator_extras;
+mod slash;
 #[cfg(target_os = "macos")]
 mod snapshot;
 mod spend;
@@ -54,6 +58,7 @@ mod studio;
 mod tasks;
 mod todo_store;
 mod todos;
+mod tool_output;
 mod terminal;
 mod workspaces;
 mod claims;
@@ -428,6 +433,21 @@ fn list_agents(state: tauri::State<AppState>) -> Vec<Agent> {
     roster
 }
 
+/// What the slash menu offers in an agent's chat: its skills, commands, MCP prompts and MCP servers.
+/// Read from disk until the chat's session reports its own; the window hears `slash://changed` then.
+#[tauri::command]
+#[specta::specta]
+async fn slash_catalog(app: tauri::AppHandle, agent_id: String, conversation: Option<i64>, folder: String) -> Result<slash::SlashCatalog, String> {
+    tauri::async_runtime::spawn_blocking(move || slash::catalog(&app, &agent_id, conversation, &folder)).await.map_err(|e| e.to_string())
+}
+
+/// Ask a chat's session for its MCP servers' status again. False when the chat has no session that can say.
+#[tauri::command]
+#[specta::specta]
+fn slash_refresh_mcp(app: tauri::AppHandle, conversation: i64) -> bool {
+    chat::request_mcp_status(&app, conversation)
+}
+
 /// Chat with an agent (headless Claude Code). Starts a session in `dir` (or the
 /// agent's recorded workdir / current project) on first message.
 #[tauri::command]
@@ -707,6 +727,13 @@ async fn browser_show(app: tauri::AppHandle, bounds: browser::Bounds, zoom: Opti
     browser::show(&app, bounds, zoom.unwrap_or(1.0))
 }
 
+/// ⌘W with no tab strip focused: close the window, which hides it (agents keep working).
+#[tauri::command]
+#[specta::specta]
+async fn close_main_window(app: tauri::AppHandle) {
+    lifecycle::close_main(&app)
+}
+
 /// Hide the built-in browser (its panel closed, or something is drawn over it).
 #[tauri::command]
 #[specta::specta]
@@ -728,11 +755,39 @@ async fn browser_go(app: tauri::AppHandle, action: String) -> Result<(), String>
     browser::go(&app, &action)
 }
 
-/// The page the built-in browser is on.
+/// The built-in browser's tabs, and the one showing.
 #[tauri::command]
 #[specta::specta]
-fn browser_page(app: tauri::AppHandle) -> browser::BrowserPage {
-    browser::page(&app)
+fn browser_tabs(app: tauri::AppHandle) -> browser::BrowserTabs {
+    browser::tabs(&app)
+}
+
+/// A new tab, switched to; on an address if one is given.
+#[tauri::command]
+#[specta::specta]
+async fn browser_new_tab(app: tauri::AppHandle, url: Option<String>) -> Result<browser::BrowserTabs, String> {
+    browser::new_tab(&app, url.as_deref())
+}
+
+/// Switch to a tab.
+#[tauri::command]
+#[specta::specta]
+async fn browser_select_tab(app: tauri::AppHandle, id: u32) -> Result<browser::BrowserTabs, String> {
+    browser::select_tab(&app, id)
+}
+
+/// Close a tab.
+#[tauri::command]
+#[specta::specta]
+async fn browser_close_tab(app: tauri::AppHandle, id: u32) -> Result<browser::BrowserTabs, String> {
+    browser::close_tab(&app, id)
+}
+
+/// Show a page in its own tab, or the tab already on it.
+#[tauri::command]
+#[specta::specta]
+async fn browser_open_tab(app: tauri::AppHandle, url: String) -> Result<browser::BrowserTabs, String> {
+    browser::open_tab(&app, &url)
 }
 
 #[tauri::command]
@@ -1295,8 +1350,23 @@ fn runtime_health(app: tauri::AppHandle, state: tauri::State<AppState>) -> healt
         live_sessions: state.chat.sessions.lock().unwrap().len() as u32,
         node,
         node_path,
+        shell_path: shellenv::health(),
         background: true,
     }
+}
+
+/// Check the runtime again from scratch: read the login shell's PATH again in the
+/// background, then ask every CLI its version and sign-in again. Returns the health
+/// as it stands; `health://changed` says when the new PATH is in.
+#[tauri::command]
+#[specta::specta]
+fn recheck_runtime(app: tauri::AppHandle, state: tauri::State<AppState>) -> health::RuntimeHealth {
+    let (probes, notify) = (state.probes.clone(), app.clone());
+    shellenv::reread(move || {
+        probes.expire();
+        let _ = notify.emit("health://changed", ());
+    });
+    runtime_health(app, state)
 }
 
 /// Whether Starkline is keeping this Mac awake, and why.
@@ -1422,6 +1492,21 @@ fn auto_mode(state: tauri::State<AppState>, conversation_id: i64) -> bool {
 #[specta::specta]
 fn set_auto_mode(app: tauri::AppHandle, conversation_id: i64, on: bool) -> Result<(), String> {
     automode::set(&app, conversation_id, on)
+}
+
+/// How much of each provider's usage limit is left, as last read. Readings older than
+/// `max_age_secs` are read again in the background (`limits://changed` says when).
+#[tauri::command]
+#[specta::specta]
+fn usage_limits(app: tauri::AppHandle, max_age_secs: u32) -> limits::UsageLimits {
+    limits::snapshot(&app, Duration::from_secs(max_age_secs.into()))
+}
+
+/// Read every provider's usage limits again now.
+#[tauri::command]
+#[specta::specta]
+fn refresh_usage_limits(app: tauri::AppHandle) -> limits::UsageLimits {
+    limits::snapshot(&app, Duration::ZERO)
 }
 
 #[tauri::command]
@@ -2332,7 +2417,11 @@ fn specta_builder() -> tauri_specta::Builder {
             spend_summary,
             set_budget,
             conversation_spend,
+            usage_limits,
+            refresh_usage_limits,
             list_agents,
+            slash_catalog,
+            slash_refresh_mcp,
             get_ledger,
             get_tasks,
             stop_task,
@@ -2385,9 +2474,14 @@ fn specta_builder() -> tauri_specta::Builder {
             simulator_open_app,
             browser_show,
             browser_hide,
+            close_main_window,
             browser_navigate,
             browser_go,
-            browser_page,
+            browser_tabs,
+            browser_new_tab,
+            browser_select_tab,
+            browser_close_tab,
+            browser_open_tab,
             devserver_candidates,
             devserver_select,
             devserver_start,
@@ -2460,6 +2554,7 @@ fn specta_builder() -> tauri_specta::Builder {
             auto_mode,
             set_auto_mode,
             runtime_health,
+            recheck_runtime,
             studio_available,
             studio_draw,
             studio_looks,
@@ -2503,6 +2598,8 @@ pub fn run() {
     // Before any event: AppKit errors while handling one mustn't reach tao and abort the app.
     #[cfg(target_os = "macos")]
     event_guard::install();
+    // Read the login shell's PATH now, so finding CLIs doesn't wait for it later.
+    shellenv::prime();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -2513,6 +2610,8 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![lifecycle::BACKGROUND_ARG]),
         ))
+        .menu(lifecycle::app_menu)
+        .on_menu_event(lifecycle::on_menu_event)
         .on_window_event(lifecycle::on_window_event)
         .setup(|app| {
             let data_dir = app
@@ -2617,6 +2716,8 @@ pub fn run() {
             // Only now is there anything for the page to talk to.
             capture::start(app.handle());
             lifecycle::create_main(app)?;
+            // The pages the last run had open.
+            browser::restore(app.handle());
             start_power_monitor(app.handle().clone());
 
             pty::start_idle_monitor(app.handle().clone());

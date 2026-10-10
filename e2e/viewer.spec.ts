@@ -36,7 +36,7 @@ test.describe("full screen", () => {
     await log.locator(".attachment-card", { hasText: "pricing.html" }).getByRole("button", { name: "Open in browser" }).click();
     await expect(sidePanel(page).getByRole("tab", { name: "Browser", selected: true })).toBeVisible();
     await expect
-      .poll(async () => (await fakeCalls(page)).filter((c) => c.cmd === "browser_navigate").pop()?.args)
+      .poll(async () => (await fakeCalls(page)).filter((c) => c.cmd === "browser_open_tab").pop()?.args)
       .toEqual({ url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/tok\/.*\.html$/) });
     expect((await fakeCalls(page)).some((c) => c.cmd === "plugin:opener|open_path")).toBe(false);
   });

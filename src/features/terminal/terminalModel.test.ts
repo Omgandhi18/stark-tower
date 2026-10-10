@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { clampHeight, localTerminalLink, terminalLabel, unseenOutput } from "./terminalModel";
+import type { TerminalInfo } from "../../lib/bindings";
+import { clampHeight, localTerminalLink, terminalLabels, unseenOutput } from "./terminalModel";
+
+const shell = (id: string, patch: Partial<TerminalInfo> = {}): TerminalInfo => ({ id, folder: "/code/app", title: "zsh", shell: "zsh", alive: true, exit_code: null, program_running: false, note: null, ...patch });
 
 describe("terminal presentation", () => {
   it("keeps the drawer between its minimum and seventy percent of the column", () => {
@@ -7,9 +10,13 @@ describe("terminal presentation", () => {
     expect(clampHeight(700, 800)).toBe(560);
     expect(clampHeight(240, 800)).toBe(240);
   });
-  it("names a terminal for its folder and reported program", () => {
-    expect(terminalLabel("/code/app/", "zsh", "zsh")).toBe("app");
-    expect(terminalLabel("/code/app", "npm run dev", "zsh")).toBe("app · npm run dev");
+  it("names terminals for their program, numbering repeats in the order they opened", () => {
+    const labels = terminalLabels([shell("a"), shell("b"), shell("c", { title: "npm run dev" }), shell("d")], "/code/app");
+    expect([...labels.values()]).toEqual(["zsh", "zsh 2", "npm run dev", "zsh 3"]);
+  });
+  it("says where a terminal from another folder is, and when it has exited", () => {
+    const labels = terminalLabels([shell("a"), shell("b", { folder: "/code/api" }), shell("c", { alive: false, exit_code: 0 })], "/code/app");
+    expect([...labels.values()]).toEqual(["zsh", "zsh · api", "zsh 2 · Exited"]);
   });
   it("opens only local web links in the built-in browser", () => {
     expect(localTerminalLink("http://localhost:5173/test")).toBe(true);

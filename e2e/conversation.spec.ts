@@ -16,8 +16,9 @@ test.describe("conversation", () => {
   test("restores the saved chat with readable tool calls and markdown", async ({ page }) => {
     const log = await openFriday(page);
     await expect(log.getByText("Can you redesign the settings page?", { exact: false })).toBeVisible();
-    await expect(log.getByText("Reading")).toBeVisible();
-    await expect(log.getByText("src/pages/Settings.tsx").first()).toBeVisible();
+    // Tool calls are grouped under a summary, opening to a row each.
+    await log.getByRole("button", { name: "Read a file, searched the code" }).click();
+    await expect(log.getByText("Read Settings.tsx")).toBeVisible();
     await expect(log.locator("strong", { hasText: "Account" })).toBeVisible();
     await expect(log.locator("pre code")).toContainText("sections.filter");
     await expect(page.getByRole("heading", { name: "Redesign the settings page", level: 1 })).toBeVisible();

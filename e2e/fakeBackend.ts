@@ -20,8 +20,12 @@ function install(scenario: Scenario) {
   const calls: Array<{ cmd: string; args: Json }> = [];
   let nextCallback = 1;
   let nextConversation = 100;
+  // Chats whose (pretend) session has started, and so reports its own commands and MCP status.
+  const slashLive = new Set<number>();
   let nextMessage = 1_000;
   const REPLY_DELAY_MS = 60;
+  // How long the pretend login shell takes to print its PATH again.
+  const SHELL_REREAD_MS = 600;
   // Tests fix the clock (Date), so the launch race is timed on the page's own monotonic clock.
   const readyAt = performance.now() + (scenario.backendReadyAfterMs ?? 0);
 
@@ -136,6 +140,16 @@ function install(scenario: Scenario) {
   };
   const BUSY = ["working", "thinking", "blocked"];
 
+  /** What the developer wrote, without the quotes and points the composer puts in front of it (the backend's references.rs). */
+  const ownWords = (text: string) => {
+    const words = text
+      .replace(/^In the browser at \S+, I'm pointing at:\n.*\n.*(?:\n+<details><summary>Element (?:details|HTML)<\/summary>[\s\S]*?\n<\/details>)*\n*/gm, "")
+      .replace(/^On .+, at -?\d+, -?\d+ \(points\): .*\n?/gm, "")
+      .replace(/^>.*\n?/gm, "")
+      .trim();
+    return words || text.replace(/^> ?/gm, "").trim();
+  };
+
   /** Save a message in one of the agent's chats (by default the one it's open in). */
   const persist = (agentId: string, role: string, fields: Json, conversationId?: number) => {
     let id = conversationId ?? state.current[agentId];
@@ -145,7 +159,7 @@ function install(scenario: Scenario) {
       state.conversations.unshift({
         id,
         agent_id: agentId,
-        title: String(fields.text ?? "New chat").slice(0, 60),
+        title: ownWords(String(fields.text ?? "New chat")).split("\n")[0].slice(0, 60),
         cwd: state.projects.active,
         created: Date.now(),
         updated: Date.now(),
@@ -173,7 +187,7 @@ function install(scenario: Scenario) {
       id: `t-chat-${conversationId}-${state.tasks.length + 1}`,
       ts: now,
       updated: now,
-      title: title ?? (prompt.split("\n")[0].slice(0, 80) || "New chat"),
+      title: title ?? (ownWords(prompt).split("\n")[0].slice(0, 80) || "New chat"),
       assignee: agentId,
       status,
       detail: null,
@@ -201,7 +215,7 @@ function install(scenario: Scenario) {
   const startWork = (agentId: string, prompt: string, cwd: string) => {
     const conversationId = nextConversation++;
     const now = Date.now();
-    state.conversations.unshift({ id: conversationId, agent_id: agentId, title: prompt.split("\n")[0].slice(0, 60), cwd, created: now, updated: now, delegated: false, project_folder: cwd, branch: "" });
+    state.conversations.unshift({ id: conversationId, agent_id: agentId, title: ownWords(prompt).split("\n")[0].slice(0, 60), cwd, created: now, updated: now, delegated: false, project_folder: cwd, branch: "" });
     state.transcripts[conversationId] = [];
     state.current[agentId] = conversationId;
     const task = chatTask(conversationId, agentId, prompt, "doing", prompt.split("\n")[0].slice(0, 80));
@@ -218,7 +232,7 @@ function install(scenario: Scenario) {
     if (!todo) throw "That to-do no longer exists.";
     if (!todo.agent_id) throw "Assign an agent to it first.";
     const list = state.todoLists.find((l) => l.id === todo.list_id);
-    const task = startWork(todo.agent_id, `${todo.title}\n\n(This is to-do #${todo.id}.)`, list?.project || state.projects.active);
+    const task = startWork(todo.agent_id, `${todo.title}\n\n(This is to-do #${todo.number} on the developer's "${list?.name ?? ""}" list.)`, list?.project || state.projects.active);
     todo.task_id = task.id;
     emit("todos://changed", null);
     return task;
@@ -228,12 +242,16 @@ function install(scenario: Scenario) {
   const reply = (agentId: string, text: string, taskId?: string, conversation?: number) => {
     const conversationId = conversation ?? state.current[agentId];
     setChatStatus(agentId, conversationId, "working");
-    const answer = `Got it: "${text}". I'll take care of it.`;
+    const answer = `Got it: "${ownWords(text)}". I'll take care of it.`;
     const steps: Array<() => void> = [
       () => {
         const detail = "src/pages/Settings.tsx";
-        const messageId = persist(agentId, "tool", { tool: "Read", detail }, conversationId);
-        emit("chat://event", { agentId, kind: "tool", tool: "Read", detail, messageId, conversationId });
+        const input = JSON.stringify({ file_path: detail });
+        const messageId = persist(agentId, "tool", { tool: "Read", detail, input }, conversationId);
+        emit("chat://event", { agentId, kind: "tool", tool: "Read", detail, input, messageId, conversationId });
+        const result = { text: "export const settings = {};\n" };
+        state.transcripts[conversationId].find((m) => m.id === messageId)!.result = result;
+        emit("chat://event", { agentId, kind: "tool_result", result, messageId, conversationId });
       },
       () => {
         const messageId = persist(agentId, "agent", { text: answer }, conversationId);
@@ -267,6 +285,36 @@ function install(scenario: Scenario) {
     emit("review://resolved", id);
   };
 
+  // The built-in browser's tabs; the active one's page is `state.browser`.
+  type FakeTab = { id: number; url: string; title: string; loading: boolean };
+  const browserTabs: FakeTab[] = state.browser.url ? [{ id: 1, ...state.browser }] : [];
+  let browserActive: number | null = browserTabs[0]?.id ?? null;
+  let nextBrowserTab = browserTabs.length + 1;
+  const publishTabs = () => {
+    const current = browserTabs.find((t) => t.id === browserActive);
+    state.browser = current ? { url: current.url, title: current.title, loading: current.loading } : { url: "", title: "", loading: false };
+    const tabs = { tabs: browserTabs.map((t) => ({ ...t })), active: browserActive };
+    emit("browser://changed", tabs);
+    return tabs;
+  };
+  const addBrowserTab = () => {
+    const tab = { id: nextBrowserTab++, url: "", title: "", loading: false };
+    browserTabs.push(tab);
+    return tab;
+  };
+  const browserAddress = (input: string) => {
+    const typed = input.trim();
+    if (!typed) throw "Type an address.";
+    return /^https?:\/\//.test(typed) ? typed : typed.startsWith("localhost") ? `http://${typed}` : `https://${typed}`;
+  };
+  const loadBrowserTab = (tab: FakeTab, url: string) => {
+    Object.assign(tab, { url, title: "", loading: true });
+    publishTabs();
+    setTimeout(() => {
+      Object.assign(tab, { title: url.includes("/docs") ? "Docs" : url.includes("/billing") ? "Billing" : "Checkout settings", loading: false });
+      publishTabs();
+    }, 30);
+  };
   let nextTerminal = state.terminals.length;
   const terminalChannels = new Map<string, { callback: number; index: number }>();
   const terminalOutput = (id: string, text: string, exit_code: number | null = null) => {
@@ -516,6 +564,8 @@ function install(scenario: Scenario) {
     },
     get_config: () => state.config,
     spend_summary: () => state.spend,
+    usage_limits: () => state.usageLimits ?? { providers: [] },
+    refresh_usage_limits: () => state.usageLimits ?? { providers: [] },
     set_budget: (args) => {
       const budget = args.budget as Scenario["spend"]["budget"];
       if (!Number.isFinite(budget.limit_usd) || budget.limit_usd < 0 || budget.warn_percent < 50 || budget.warn_percent > 95) throw "Choose a valid budget amount and warning percentage.";
@@ -676,7 +726,7 @@ function install(scenario: Scenario) {
         id,
         ts: now,
         updated: now,
-        title: prompt.split("\n")[0].slice(0, 80),
+        title: ownWords(prompt).split("\n")[0].slice(0, 80),
         assignee: agentId,
         status: busy ? "todo" : "doing",
         detail: null,
@@ -876,21 +926,42 @@ function install(scenario: Scenario) {
       if (action === "logs_clear") extra.logs = "";
       return extra;
     },
-    browser_page: () => state.browser,
+    browser_tabs: () => publishTabs(),
     browser_show: () => null,
     browser_hide: () => null,
     browser_go: () => null,
     browser_navigate: (args) => {
-      const typed = String(args.url).trim();
-      if (!typed) throw "Type an address.";
-      const url = /^https?:\/\//.test(typed) ? typed : typed.startsWith("localhost") ? `http://${typed}` : `https://${typed}`;
-      state.browser = { url, title: "", loading: true };
-      emit("browser://changed", state.browser);
-      setTimeout(() => {
-        state.browser = { url, title: "Checkout settings", loading: false };
-        emit("browser://changed", state.browser);
-      }, 30);
+      const tab = browserTabs.find((t) => t.id === browserActive) ?? addBrowserTab();
+      browserActive = tab.id;
+      loadBrowserTab(tab, browserAddress(String(args.url)));
       return state.browser;
+    },
+    browser_new_tab: (args) => {
+      const tab = addBrowserTab();
+      browserActive = tab.id;
+      if (args.url) loadBrowserTab(tab, browserAddress(String(args.url)));
+      return publishTabs();
+    },
+    browser_select_tab: (args) => {
+      if (!browserTabs.some((t) => t.id === args.id)) throw `There is no tab ${args.id}.`;
+      browserActive = Number(args.id);
+      return publishTabs();
+    },
+    browser_close_tab: (args) => {
+      const index = browserTabs.findIndex((t) => t.id === args.id);
+      if (index < 0) throw `There is no tab ${args.id}.`;
+      browserTabs.splice(index, 1);
+      if (browserActive === args.id) browserActive = browserTabs[Math.min(index, browserTabs.length - 1)]?.id ?? null;
+      return publishTabs();
+    },
+    browser_open_tab: (args) => {
+      const url = browserAddress(String(args.url));
+      const same = browserTabs.find((t) => t.url === url);
+      const blank = browserTabs.find((t) => t.id === browserActive && !t.url);
+      const tab = same ?? blank ?? addBrowserTab();
+      browserActive = tab.id;
+      if (!same) loadBrowserTab(tab, url);
+      return publishTabs();
     },
     simulator_status: () => {
       const { frame: _frame, ...status } = state.simulator;
@@ -1055,10 +1126,21 @@ function install(scenario: Scenario) {
       const now = Date.now();
       const existing = state.todos.find((t) => t.id === input.id);
       const before = existing?.agent_id ?? null;
+      // A to-do's number is its place on its list: the next one when it's made, or moved to another list.
+      const nextNumber = Math.max(0, ...state.todos.filter((t) => t.list_id === input.list_id).map((t) => t.number)) + 1;
       const todo = existing
-        ? Object.assign(existing, { list_id: input.list_id, title: input.title.trim(), notes: input.notes, agent_id: input.agent_id, due: input.due, updated: now })
+        ? Object.assign(existing, {
+            number: existing.list_id === input.list_id ? existing.number : nextNumber,
+            list_id: input.list_id,
+            title: input.title.trim(),
+            notes: input.notes,
+            agent_id: input.agent_id,
+            due: input.due,
+            updated: now,
+          })
         : {
             id: Math.max(0, ...state.todos.map((t) => t.id)) + 1,
+            number: nextNumber,
             list_id: input.list_id,
             title: input.title.trim(),
             notes: input.notes,
@@ -1097,7 +1179,9 @@ function install(scenario: Scenario) {
     hand_todo_list: (args) => {
       const list = state.todoLists.find((l) => l.id === args.listId);
       if (!list) throw "That list no longer exists.";
-      return startWork(String(args.agentId), `Work through my to-do list "${list.name}"`, list.project || state.projects.active);
+      const open = state.todos.filter((t) => t.list_id === list.id && !t.done).sort((a, b) => a.position - b.position);
+      const items = open.map((t) => `- #${t.number} ${t.title}`).join("\n");
+      return startWork(String(args.agentId), `Work through my to-do list "${list.name}", in order:\n${items}`, list.project || state.projects.active);
     },
     list_conversations: () => [...state.conversations].sort((a, b) => b.updated - a.updated),
     active_conversation: (args) => conversationOf(String(args.agentId)),
@@ -1187,9 +1271,13 @@ function install(scenario: Scenario) {
         .sort((a, b) => b.updated - a.updated)[0];
       if (!task) task = chatTask(conversationId, agentId, text, "doing");
       else if (task.status !== "doing") {
-        if (!task.prompt) Object.assign(task, { prompt: text, title: text.split("\n")[0].slice(0, 80) });
+        if (!task.prompt) Object.assign(task, { prompt: text, title: ownWords(text).split("\n")[0].slice(0, 80) });
         Object.assign(task, { status: "doing", updated: Date.now(), finished: null });
         emit("tasks://changed", null);
+      }
+      if (!slashLive.has(conversationId)) {
+        slashLive.add(conversationId);
+        emit("slash://changed", conversationId);
       }
       reply(agentId, text, task.id, conversationId);
       return messageId;
@@ -1201,6 +1289,24 @@ function install(scenario: Scenario) {
       return null;
     },
     list_files: (args) => state.files[String(args.dir)] ?? [],
+    slash_catalog: (args) => {
+      const item = (name: string, description: string, kind: string, source: string, origin = "", hint = "") => ({ name, description, hint, kind, source, origin });
+      const live = typeof args.conversation === "number" && slashLive.has(args.conversation);
+      const items = [
+        item("hello", "Say hello to a name", "command", "project", "", "[name]"),
+        item("pdf", "Read, merge and split PDF files", "skill", "user"),
+        item("sarathi:review", "Review code against the spec", "skill", "plugin", "sarathi"),
+        ...(live ? [item("mcp__docs__summarize", "Summarize a page from the docs server", "prompt", "mcp", "docs", "<url>")] : []),
+        item("compact", "Free up context by summarizing the conversation so far", "builtin", "provider", "", "<optional instructions>"),
+        item("context", "Show how much of the context window is in use", "builtin", "provider"),
+      ];
+      const server = (name: string, status: string, source: string, tools: number | null, error: string | null = null, transport = "stdio") => ({ name, status, source, tools, error, transport });
+      const servers = live
+        ? [server("docs", "connected", "user", 4, null, "http"), server("db", "failed", "project", null, "spawn psql ENOENT"), server("crm", "needs-auth", "claude.ai", null, null, "http")]
+        : [server("docs", "unknown", "user", null, null, "http"), server("db", "unknown", "project", null), server("crm", "unknown", "claude.ai", null, null, "http")];
+      return { items, servers, live };
+    },
+    slash_refresh_mcp: (args) => typeof args.conversation === "number" && slashLive.has(args.conversation),
     get_memory: (args) => state.memory[String(args.agentId)] ?? "",
     pending_reviews: () => state.reviews,
     review_respond: (args) => {
@@ -1268,6 +1374,19 @@ function install(scenario: Scenario) {
       return null;
     },
     runtime_health: () => state.health,
+    recheck_runtime: () => {
+      const reread = (patch: Partial<Scenario["health"]["shellPath"]>) => {
+        state.health = { ...state.health, shellPath: { ...state.health.shellPath, ...patch } };
+      };
+      if (!state.health.shellPath.reading) {
+        reread({ reading: true });
+        window.setTimeout(() => {
+          reread({ reading: false, readAt: Date.now(), elapsedMs: 420 });
+          emit("health://changed", null);
+        }, SHELL_REREAD_MS);
+      }
+      return state.health;
+    },
     power_state: () => state.power,
     set_keep_awake: (args) => {
       const enabled = Boolean(args.enabled);

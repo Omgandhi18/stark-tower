@@ -78,8 +78,10 @@ fn title_words(line: &str) -> &str {
     }
 }
 
-/// A task's title: the first line of its request that says something.
+/// A task's title: the first line of its request that says something, in the developer's own
+/// words (a reply's quotes and a pointed-at element come first in the text, and aren't a title).
 pub fn title_from(prompt: &str) -> String {
+    let prompt = &crate::references::readable(prompt);
     let first = prompt.lines().map(str::trim).find(|l| !l.is_empty());
     let line = prompt.lines().map(title_words).find(|l| !l.is_empty()).or(first).unwrap_or("Untitled task");
     if line.chars().count() <= TITLE_LIMIT {
@@ -1368,6 +1370,8 @@ mod tests {
         assert_eq!(title_from("Standup at 10:30, then https://example.com"), "Standup at 10:30, then https://example.com");
         assert_eq!(title_from("Fix: the button overlaps"), "Fix: the button overlaps", "only known labels are dropped");
         assert_eq!(title_from("LGTM"), "LGTM", "a request that's only a heading keeps it");
+        assert_eq!(title_from("> I grouped the options.\n\nWhy these three?"), "Why these three?", "a quote isn't the title");
+        assert_eq!(title_from("> I grouped the options into Account and Payments"), "I grouped the options into Account and Payments", "a quote alone names it by its words");
         let long = "a".repeat(200);
         let title = title_from(&long);
         assert_eq!(title.chars().count(), TITLE_LIMIT);

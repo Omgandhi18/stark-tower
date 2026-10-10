@@ -10,6 +10,7 @@ import { budgetMeter } from "../features/spend/spendModel";
 import { formatCost } from "../lib/format";
 import { useSpend } from "../stores/spend";
 import "../features/spend/spend.css";
+import LimitsMeter from "../features/limits/LimitsMeter";
 
 /** Brand, runtime status, the attention bell and Keep Awake. Drags the window. */
 export default function TopBar() {
@@ -42,6 +43,8 @@ export default function TopBar() {
       </div>
 
       <div className="topbar-spacer" data-tauri-drag-region />
+
+      <LimitsMeter />
 
       {spend?.has_spend && (
         <button type="button" className={cx("spend-chip", `spend-tone-${spendTone}`)} onClick={() => openSettings("spend")} title={spendTitle}>

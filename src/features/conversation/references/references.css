@@ -1,0 +1,234 @@
+/* Quotes and points: chips on the message being written, cards in the transcript. */
+
+/* ---- In the composer ------------------------------------------------------------------ */
+.reference-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-2) 0;
+  list-style: none;
+}
+
+.reference-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 320px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font-size: var(--text-sm);
+}
+
+.reference-chip-thumb,
+.reference-chip-icon {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--surface-sunken);
+}
+
+.reference-chip-thumb {
+  object-fit: cover;
+}
+
+.reference-chip-icon {
+  display: grid;
+  place-items: center;
+  color: var(--accent-text);
+}
+
+.reference-chip-text {
+  display: grid;
+  min-width: 0;
+  line-height: var(--leading-tight);
+}
+
+/* A quote can be long: two lines of it say which part it is. */
+.reference-chip-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.reference-chip-meta {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Replying to selected text -------------------------------------------------------- */
+.selection-reply {
+  position: fixed;
+  z-index: var(--z-popover);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-overlay);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  animation: selection-reply-in var(--duration-fast) var(--ease-out);
+}
+
+.selection-reply:hover {
+  background: var(--surface-hover);
+}
+
+.selection-reply:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
+@keyframes selection-reply-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .selection-reply {
+    animation: none;
+  }
+}
+
+/* ---- In the transcript ---------------------------------------------------------------- */
+.msg-quote {
+  display: flex;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  max-width: min(80%, 620px);
+  margin: 0;
+  padding: 6px 12px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading);
+}
+
+.msg-quote-icon {
+  flex: none;
+  margin-top: 3px;
+  color: var(--accent-text);
+}
+
+.msg-quote p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+}
+
+.msg-point {
+  box-sizing: border-box;
+  width: min(80%, 620px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  font-size: var(--text-sm);
+}
+
+.msg-point-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: 8px 12px;
+}
+
+.msg-point-icon {
+  flex: none;
+  color: var(--accent-text);
+}
+
+.msg-point-title {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msg-point-meta {
+  flex: none;
+  margin-left: auto;
+  padding-left: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.msg-point-details,
+.msg-point-html {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.msg-point-details > summary,
+.msg-point-html > summary {
+  padding: 6px 12px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.msg-point-details > summary:hover,
+.msg-point-html > summary:hover {
+  color: var(--text);
+}
+
+.msg-point-facts {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 2px 12px 10px;
+}
+
+.msg-point-facts > div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.msg-point-facts dt {
+  color: var(--text-muted);
+}
+
+.msg-point-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.msg-point-html pre {
+  max-height: 220px;
+  margin: 0;
+  padding: 8px 12px;
+  overflow: auto;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

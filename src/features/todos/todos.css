@@ -6,9 +6,12 @@
   min-height: 0;
 }
 
-/* The page centres in what's left beside the open to-do. */
+/* The page centres in what's left beside the open to-do. Rows keep their content's height, so a long
+   list scrolls the page: the rows card clips its corners (overflow hidden), and an auto row would
+   otherwise squeeze it to fit the window and cut the list off. */
 .todos-page {
   display: grid;
+  grid-auto-rows: max-content;
   align-content: start;
   gap: var(--space-5);
   flex: 1;

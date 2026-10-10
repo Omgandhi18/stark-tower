@@ -13,6 +13,7 @@ import ChatComposer from "./ChatComposer";
 import MessageList from "./MessageList";
 import ChatRequestCard from "./ChatRequestCard";
 import { answerQuestion, sendMessage, stopChat } from "./chatActions";
+import { addQuote } from "./references/referenceActions";
 import "./conversation.css";
 
 interface ChatPanelProps {
@@ -79,6 +80,7 @@ export default function ChatPanel({ agentId, chatKey, compact = false }: ChatPan
         messages={thread.messages}
         pending={thread.pending}
         empty={empty}
+        onQuote={(text) => addQuote(chat, text)}
         after={
           requests.length > 0 ? requests.map((review) => <ChatRequestCard key={review.id} review={review} chat={chat} agentName={agent.name} />) : undefined
         }

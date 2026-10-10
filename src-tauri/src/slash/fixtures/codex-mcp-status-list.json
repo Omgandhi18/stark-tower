@@ -1,0 +1,1277 @@
+{
+ "data": [
+  {
+   "name": "argent",
+   "pluginId": "goldie@goldie",
+   "serverInfo": {
+    "name": "argent",
+    "title": null,
+    "version": "0.28.0",
+    "description": null,
+    "icons": null,
+    "websiteUrl": null
+   },
+   "tools": {
+    "gesture-tap": {
+     "name": "gesture-tap",
+     "inputSchema": {}
+    },
+    "launch-app": {
+     "name": "launch-app",
+     "inputSchema": {}
+    },
+    "debugger-status": {
+     "name": "debugger-status",
+     "inputSchema": {}
+    },
+    "react-profiler-stop": {
+     "name": "react-profiler-stop",
+     "inputSchema": {}
+    },
+    "native-profiler-start": {
+     "name": "native-profiler-start",
+     "inputSchema": {}
+    },
+    "flow-add-echo": {
+     "name": "flow-add-echo",
+     "inputSchema": {}
+    },
+    "screenshot-diff": {
+     "name": "screenshot-diff",
+     "inputSchema": {}
+    },
+    "chromium-tabs": {
+     "name": "chromium-tabs",
+     "inputSchema": {}
+    },
+    "debugger-component-tree": {
+     "name": "debugger-component-tree",
+     "inputSchema": {}
+    },
+    "gesture-pinch": {
+     "name": "gesture-pinch",
+     "inputSchema": {}
+    },
+    "react-profiler-cpu-summary": {
+     "name": "react-profiler-cpu-summary",
+     "inputSchema": {}
+    },
+    "react-profiler-start": {
+     "name": "react-profiler-start",
+     "inputSchema": {}
+    },
+    "tv-remote": {
+     "name": "tv-remote",
+     "inputSchema": {}
+    },
+    "boot-device": {
+     "name": "boot-device",
+     "inputSchema": {}
+    },
+    "update-argent": {
+     "name": "update-argent",
+     "inputSchema": {}
+    },
+    "gesture-swipe": {
+     "name": "gesture-swipe",
+     "inputSchema": {}
+    },
+    "stop-simulator-server": {
+     "name": "stop-simulator-server",
+     "inputSchema": {}
+    },
+    "fold": {
+     "name": "fold",
+     "inputSchema": {}
+    },
+    "view-network-logs": {
+     "name": "view-network-logs",
+     "inputSchema": {}
+    },
+    "gesture-scroll": {
+     "name": "gesture-scroll",
+     "inputSchema": {}
+    },
+    "native-profiler-stop": {
+     "name": "native-profiler-stop",
+     "inputSchema": {}
+    },
+    "flow-read-prerequisite": {
+     "name": "flow-read-prerequisite",
+     "inputSchema": {}
+    },
+    "view-network-request-details": {
+     "name": "view-network-request-details",
+     "inputSchema": {}
+    },
+    "run-sequence": {
+     "name": "run-sequence",
+     "inputSchema": {}
+    },
+    "react-profiler-renders": {
+     "name": "react-profiler-renders",
+     "inputSchema": {}
+    },
+    "native-full-hierarchy": {
+     "name": "native-full-hierarchy",
+     "inputSchema": {}
+    },
+    "react-profiler-fiber-tree": {
+     "name": "react-profiler-fiber-tree",
+     "inputSchema": {}
+    },
+    "await-ui-element": {
+     "name": "await-ui-element",
+     "inputSchema": {}
+    },
+    "stop-metro": {
+     "name": "stop-metro",
+     "inputSchema": {}
+    },
+    "gather-workspace-data": {
+     "name": "gather-workspace-data",
+     "inputSchema": {}
+    },
+    "native-network-logs": {
+     "name": "native-network-logs",
+     "inputSchema": {}
+    },
+    "await-screen-idle": {
+     "name": "await-screen-idle",
+     "inputSchema": {}
+    },
+    "stop-all-simulator-servers": {
+     "name": "stop-all-simulator-servers",
+     "inputSchema": {}
+    },
+    "native-describe-screen": {
+     "name": "native-describe-screen",
+     "inputSchema": {}
+    },
+    "flow-add-script": {
+     "name": "flow-add-script",
+     "inputSchema": {}
+    },
+    "open-url": {
+     "name": "open-url",
+     "inputSchema": {}
+    },
+    "profiler-stack-query": {
+     "name": "profiler-stack-query",
+     "inputSchema": {}
+    },
+    "debugger-connect": {
+     "name": "debugger-connect",
+     "inputSchema": {}
+    },
+    "native-view-at-point": {
+     "name": "native-view-at-point",
+     "inputSchema": {}
+    },
+    "button": {
+     "name": "button",
+     "inputSchema": {}
+    },
+    "flow-add-step": {
+     "name": "flow-add-step",
+     "inputSchema": {}
+    },
+    "flow-finish-recording": {
+     "name": "flow-finish-recording",
+     "inputSchema": {}
+    },
+    "flow-execute": {
+     "name": "flow-execute",
+     "inputSchema": {}
+    },
+    "list-devices": {
+     "name": "list-devices",
+     "inputSchema": {}
+    },
+    "reinstall-app": {
+     "name": "reinstall-app",
+     "inputSchema": {}
+    },
+    "keyboard": {
+     "name": "keyboard",
+     "inputSchema": {}
+    },
+    "profiler-load": {
+     "name": "profiler-load",
+     "inputSchema": {}
+    },
+    "react-profiler-component-source": {
+     "name": "react-profiler-component-source",
+     "inputSchema": {}
+    },
+    "profiler-cpu-query": {
+     "name": "profiler-cpu-query",
+     "inputSchema": {}
+    },
+    "paste": {
+     "name": "paste",
+     "inputSchema": {}
+    },
+    "profiler-combined-report": {
+     "name": "profiler-combined-report",
+     "inputSchema": {}
+    },
+    "rotate": {
+     "name": "rotate",
+     "inputSchema": {}
+    },
+    "react-profiler-analyze": {
+     "name": "react-profiler-analyze",
+     "inputSchema": {}
+    },
+    "gesture-custom": {
+     "name": "gesture-custom",
+     "inputSchema": {}
+    },
+    "screen-recording-start": {
+     "name": "screen-recording-start",
+     "inputSchema": {}
+    },
+    "debugger-evaluate": {
+     "name": "debugger-evaluate",
+     "inputSchema": {}
+    },
+    "native-user-interactable-view-at-point": {
+     "name": "native-user-interactable-view-at-point",
+     "inputSchema": {}
+    },
+    "react-profiler-status": {
+     "name": "react-profiler-status",
+     "inputSchema": {}
+    },
+    "debugger-reload-metro": {
+     "name": "debugger-reload-metro",
+     "inputSchema": {}
+    },
+    "screen-recording-stop": {
+     "name": "screen-recording-stop",
+     "inputSchema": {}
+    },
+    "screenshot": {
+     "name": "screenshot",
+     "inputSchema": {}
+    },
+    "debugger-log-registry": {
+     "name": "debugger-log-registry",
+     "inputSchema": {}
+    },
+    "describe": {
+     "name": "describe",
+     "inputSchema": {}
+    },
+    "settings-permissions": {
+     "name": "settings-permissions",
+     "inputSchema": {}
+    },
+    "gesture-drag": {
+     "name": "gesture-drag",
+     "inputSchema": {}
+    },
+    "chromium-storage": {
+     "name": "chromium-storage",
+     "inputSchema": {}
+    },
+    "flow-start-recording": {
+     "name": "flow-start-recording",
+     "inputSchema": {}
+    },
+    "debugger-inspect-element": {
+     "name": "debugger-inspect-element",
+     "inputSchema": {}
+    },
+    "gesture-rotate": {
+     "name": "gesture-rotate",
+     "inputSchema": {}
+    },
+    "native-find-views": {
+     "name": "native-find-views",
+     "inputSchema": {}
+    },
+    "profiler-commit-query": {
+     "name": "profiler-commit-query",
+     "inputSchema": {}
+    },
+    "dismiss-update": {
+     "name": "dismiss-update",
+     "inputSchema": {}
+    },
+    "native-profiler-analyze": {
+     "name": "native-profiler-analyze",
+     "inputSchema": {}
+    },
+    "restart-app": {
+     "name": "restart-app",
+     "inputSchema": {}
+    },
+    "shake": {
+     "name": "shake",
+     "inputSchema": {}
+    },
+    "chromium-cookies": {
+     "name": "chromium-cookies",
+     "inputSchema": {}
+    },
+    "native-devtools-status": {
+     "name": "native-devtools-status",
+     "inputSchema": {}
+    }
+   },
+   "resources": [],
+   "resourceTemplates": [],
+   "authStatus": "unsupported"
+  },
+  {
+   "name": "code-review",
+   "pluginId": "code-review@openai-bundled",
+   "serverInfo": null,
+   "tools": {},
+   "resources": [],
+   "resourceTemplates": [],
+   "authStatus": "unsupported"
+  },
+  {
+   "name": "codex_app",
+   "pluginId": "codex-app-tools@openai-bundled",
+   "serverInfo": null,
+   "tools": {},
+   "resources": [],
+   "resourceTemplates": [],
+   "authStatus": "unsupported"
+  },
+  {
+   "name": "codex_apps",
+   "pluginId": null,
+   "serverInfo": {
+    "name": "plugin-runtime",
+    "title": null,
+    "version": "0.1.0",
+    "description": null,
+    "icons": null,
+    "websiteUrl": null
+   },
+   "tools": {
+    "github.fetch_workflow_run_jobs": {
+     "name": "github.fetch_workflow_run_jobs",
+     "inputSchema": {}
+    },
+    "github.get_pr_statuses": {
+     "name": "github.get_pr_statuses",
+     "inputSchema": {}
+    },
+    "github.fetch_commit": {
+     "name": "github.fetch_commit",
+     "inputSchema": {}
+    },
+    "github.update_file": {
+     "name": "github.update_file",
+     "inputSchema": {}
+    },
+    "notion.notion-spawn-session": {
+     "name": "notion.notion-spawn-session",
+     "inputSchema": {}
+    },
+    "github.rerun_workflow_job": {
+     "name": "github.rerun_workflow_job",
+     "inputSchema": {}
+    },
+    "github.search_installed_repositories_v2": {
+     "name": "github.search_installed_repositories_v2",
+     "inputSchema": {}
+    },
+    "github.fetch_issue_comments": {
+     "name": "github.fetch_issue_comments",
+     "inputSchema": {}
+    },
+    "notion.notion-restore-pages": {
+     "name": "notion.notion-restore-pages",
+     "inputSchema": {}
+    },
+    "pets.update_pet": {
+     "name": "pets.update_pet",
+     "inputSchema": {}
+    },
+    "plugin_management.get_plugin_dependencies": {
+     "name": "plugin_management.get_plugin_dependencies",
+     "inputSchema": {}
+    },
+    "booking_com.attractions_search": {
+     "name": "booking_com.attractions_search",
+     "inputSchema": {}
+    },
+    "notion.notion-get-teams": {
+     "name": "notion.notion-get-teams",
+     "inputSchema": {}
+    },
+    "safety_settings.update_parental_control": {
+     "name": "safety_settings.update_parental_control",
+     "inputSchema": {}
+    },
+    "github.add_comment_to_issue": {
+     "name": "github.add_comment_to_issue",
+     "inputSchema": {}
+    },
+    "github.get_pr_review_comment_reactions": {
+     "name": "github.get_pr_review_comment_reactions",
+     "inputSchema": {}
+    },
+    "github.get_users_recent_prs_in_repo": {
+     "name": "github.get_users_recent_prs_in_repo",
+     "inputSchema": {}
+    },
+    "notion.notion-search-agents": {
+     "name": "notion.notion-search-agents",
+     "inputSchema": {}
+    },
+    "pets.create_pet": {
+     "name": "pets.create_pet",
+     "inputSchema": {}
+    },
+    "plugin_management.suggest_plugins": {
+     "name": "plugin_management.suggest_plugins",
+     "inputSchema": {}
+    },
+    "booking_com.answer_property_qa_by_ids_v2": {
+     "name": "booking_com.answer_property_qa_by_ids_v2",
+     "inputSchema": {}
+    },
+    "github.search_commits": {
+     "name": "github.search_commits",
+     "inputSchema": {}
+    },
+    "github.get_user_login": {
+     "name": "github.get_user_login",
+     "inputSchema": {}
+    },
+    "pets.unshare_pet": {
+     "name": "pets.unshare_pet",
+     "inputSchema": {}
+    },
+    "safety_settings.get_family_info": {
+     "name": "safety_settings.get_family_info",
+     "inputSchema": {}
+    },
+    "github.rerun_failed_workflow_run_jobs": {
+     "name": "github.rerun_failed_workflow_run_jobs",
+     "inputSchema": {}
+    },
+    "notion.notion-update-folder": {
+     "name": "notion.notion-update-folder",
+     "inputSchema": {}
+    },
+    "notion.notion-list-shared-pages": {
+     "name": "notion.notion-list-shared-pages",
+     "inputSchema": {}
+    },
+    "notion.notion-update-view": {
+     "name": "notion.notion-update-view",
+     "inputSchema": {}
+    },
+    "booking_com.cars_search": {
+     "name": "booking_com.cars_search",
+     "inputSchema": {}
+    },
+    "github.fetch_blob": {
+     "name": "github.fetch_blob",
+     "inputSchema": {}
+    },
+    "github.fetch_workflow_run_artifacts": {
+     "name": "github.fetch_workflow_run_artifacts",
+     "inputSchema": {}
+    },
+    "booking_com.accommodations_search_v2": {
+     "name": "booking_com.accommodations_search_v2",
+     "inputSchema": {}
+    },
+    "github.fetch_pr_patch": {
+     "name": "github.fetch_pr_patch",
+     "inputSchema": {}
+    },
+    "github.list_pull_request_reviews": {
+     "name": "github.list_pull_request_reviews",
+     "inputSchema": {}
+    },
+    "github.remove_reaction_from_pr": {
+     "name": "github.remove_reaction_from_pr",
+     "inputSchema": {}
+    },
+    "github.search": {
+     "name": "github.search",
+     "inputSchema": {}
+    },
+    "github.resolve_review_thread": {
+     "name": "github.resolve_review_thread",
+     "inputSchema": {}
+    },
+    "apple_music.add-favorite-resource-by-id": {
+     "name": "apple_music.add-favorite-resource-by-id",
+     "inputSchema": {}
+    },
+    "github.unresolve_review_thread": {
+     "name": "github.unresolve_review_thread",
+     "inputSchema": {}
+    },
+    "github.get_issue_comment_reactions": {
+     "name": "github.get_issue_comment_reactions",
+     "inputSchema": {}
+    },
+    "notion.notion-get-session-status": {
+     "name": "notion.notion-get-session-status",
+     "inputSchema": {}
+    },
+    "notion.notion-convert-page-to-skill": {
+     "name": "notion.notion-convert-page-to-skill",
+     "inputSchema": {}
+    },
+    "notion.notion-move-pages": {
+     "name": "notion.notion-move-pages",
+     "inputSchema": {}
+    },
+    "github.fetch_pr": {
+     "name": "github.fetch_pr",
+     "inputSchema": {}
+    },
+    "notion.notion-get-users": {
+     "name": "notion.notion-get-users",
+     "inputSchema": {}
+    },
+    "notion.notion-upload-skill": {
+     "name": "notion.notion-upload-skill",
+     "inputSchema": {}
+    },
+    "github.get_pr_mergeability": {
+     "name": "github.get_pr_mergeability",
+     "inputSchema": {}
+    },
+    "github.remove_reaction_from_pr_review_comment": {
+     "name": "github.remove_reaction_from_pr_review_comment",
+     "inputSchema": {}
+    },
+    "github.add_issue_labels": {
+     "name": "github.add_issue_labels",
+     "inputSchema": {}
+    },
+    "notion.notion-create-pages": {
+     "name": "notion.notion-create-pages",
+     "inputSchema": {}
+    },
+    "notion.query-data-sources": {
+     "name": "notion.query-data-sources",
+     "inputSchema": {}
+    },
+    "notion.search": {
+     "name": "notion.search",
+     "inputSchema": {}
+    },
+    "github.search_branches": {
+     "name": "github.search_branches",
+     "inputSchema": {}
+    },
+    "notion.notion-query-sessions": {
+     "name": "notion.notion-query-sessions",
+     "inputSchema": {}
+    },
+    "notion.notion-send-message-to-session": {
+     "name": "notion.notion-send-message-to-session",
+     "inputSchema": {}
+    },
+    "github.download_user_content": {
+     "name": "github.download_user_content",
+     "inputSchema": {}
+    },
+    "github.list_user_org_memberships": {
+     "name": "github.list_user_org_memberships",
+     "inputSchema": {}
+    },
+    "notion.notion-create-database": {
+     "name": "notion.notion-create-database",
+     "inputSchema": {}
+    },
+    "notion.notion-get-self": {
+     "name": "notion.notion-get-self",
+     "inputSchema": {}
+    },
+    "notion.notion-query-meeting-notes": {
+     "name": "notion.notion-query-meeting-notes",
+     "inputSchema": {}
+    },
+    "plugin_management.get_app_permissions": {
+     "name": "plugin_management.get_app_permissions",
+     "inputSchema": {}
+    },
+    "github.create_branch": {
+     "name": "github.create_branch",
+     "inputSchema": {}
+    },
+    "safety_settings.get_trusted_contact": {
+     "name": "safety_settings.get_trusted_contact",
+     "inputSchema": {}
+    },
+    "github.list_pr_changed_filenames": {
+     "name": "github.list_pr_changed_filenames",
+     "inputSchema": {}
+    },
+    "github.reply_to_review_comment": {
+     "name": "github.reply_to_review_comment",
+     "inputSchema": {}
+    },
+    "github.get_repo": {
+     "name": "github.get_repo",
+     "inputSchema": {}
+    },
+    "github.remove_issue_label": {
+     "name": "github.remove_issue_label",
+     "inputSchema": {}
+    },
+    "github.fetch_pr_file_patch": {
+     "name": "github.fetch_pr_file_patch",
+     "inputSchema": {}
+    },
+    "safety_settings.get_parental_controls": {
+     "name": "safety_settings.get_parental_controls",
+     "inputSchema": {}
+    },
+    "notion.notion-get-tool-access": {
+     "name": "notion.notion-get-tool-access",
+     "inputSchema": {}
+    },
+    "search_service.web_run": {
+     "name": "search_service.web_run",
+     "inputSchema": {}
+    },
+    "github.list_recent_issues": {
+     "name": "github.list_recent_issues",
+     "inputSchema": {}
+    },
+    "notion.notion-get-enabled-skills": {
+     "name": "notion.notion-get-enabled-skills",
+     "inputSchema": {}
+    },
+    "github.add_reaction_to_pr": {
+     "name": "github.add_reaction_to_pr",
+     "inputSchema": {}
+    },
+    "github.remove_pull_request_reviewers": {
+     "name": "github.remove_pull_request_reviewers",
+     "inputSchema": {}
+    },
+    "notion.notion-wait-session": {
+     "name": "notion.notion-wait-session",
+     "inputSchema": {}
+    },
+    "notion.notion-get-comments": {
+     "name": "notion.notion-get-comments",
+     "inputSchema": {}
+    },
+    "github.fetch_issue": {
+     "name": "github.fetch_issue",
+     "inputSchema": {}
+    },
+    "github.list_repositories_by_affiliation": {
+     "name": "github.list_repositories_by_affiliation",
+     "inputSchema": {}
+    },
+    "github.create_pull_request": {
+     "name": "github.create_pull_request",
+     "inputSchema": {}
+    },
+    "github.lock_issue_conversation": {
+     "name": "github.lock_issue_conversation",
+     "inputSchema": {}
+    },
+    "pets.get_pet_download_link": {
+     "name": "pets.get_pet_download_link",
+     "inputSchema": {}
+    },
+    "github.delete_file": {
+     "name": "github.delete_file",
+     "inputSchema": {}
+    },
+    "github.mark_pull_request_ready_for_review": {
+     "name": "github.mark_pull_request_ready_for_review",
+     "inputSchema": {}
+    },
+    "github.fetch_pr_comments": {
+     "name": "github.fetch_pr_comments",
+     "inputSchema": {}
+    },
+    "notion.notion-search-emails": {
+     "name": "notion.notion-search-emails",
+     "inputSchema": {}
+    },
+    "notion.notion-get-file-download-urls": {
+     "name": "notion.notion-get-file-download-urls",
+     "inputSchema": {}
+    },
+    "notion.query-multiple-data-sources": {
+     "name": "notion.query-multiple-data-sources",
+     "inputSchema": {}
+    },
+    "github.convert_pull_request_to_draft": {
+     "name": "github.convert_pull_request_to_draft",
+     "inputSchema": {}
+    },
+    "apple_music.add-library-resource-by-id": {
+     "name": "apple_music.add-library-resource-by-id",
+     "inputSchema": {}
+    },
+    "pets.delete_pet": {
+     "name": "pets.delete_pet",
+     "inputSchema": {}
+    },
+    "github.get_pr_info": {
+     "name": "github.get_pr_info",
+     "inputSchema": {}
+    },
+    "github.compare_commits": {
+     "name": "github.compare_commits",
+     "inputSchema": {}
+    },
+    "github.get_pr_reactions": {
+     "name": "github.get_pr_reactions",
+     "inputSchema": {}
+    },
+    "github.add_issue_assignees": {
+     "name": "github.add_issue_assignees",
+     "inputSchema": {}
+    },
+    "github.update_review_comment": {
+     "name": "github.update_review_comment",
+     "inputSchema": {}
+    },
+    "notion.notion-stop-session": {
+     "name": "notion.notion-stop-session",
+     "inputSchema": {}
+    },
+    "github.get_repo_collaborator_permission": {
+     "name": "github.get_repo_collaborator_permission",
+     "inputSchema": {}
+    },
+    "codex_document_control.get_document_tool_schemas": {
+     "name": "codex_document_control.get_document_tool_schemas",
+     "inputSchema": {}
+    },
+    "notion.notion-download-skill": {
+     "name": "notion.notion-download-skill",
+     "inputSchema": {}
+    },
+    "github.search_issues": {
+     "name": "github.search_issues",
+     "inputSchema": {}
+    },
+    "github.list_repositories": {
+     "name": "github.list_repositories",
+     "inputSchema": {}
+    },
+    "apple_music.get-track-details-batch": {
+     "name": "apple_music.get-track-details-batch",
+     "inputSchema": {}
+    },
+    "apple_music.sign-in": {
+     "name": "apple_music.sign-in",
+     "inputSchema": {}
+    },
+    "github.remove_reaction_from_issue_comment": {
+     "name": "github.remove_reaction_from_issue_comment",
+     "inputSchema": {}
+    },
+    "github.create_issue": {
+     "name": "github.create_issue",
+     "inputSchema": {}
+    },
+    "notion.notion-show-advanced-analysis-next-steps": {
+     "name": "notion.notion-show-advanced-analysis-next-steps",
+     "inputSchema": {}
+    },
+    "github.add_reaction_to_issue_comment": {
+     "name": "github.add_reaction_to_issue_comment",
+     "inputSchema": {}
+    },
+    "safety_settings.prepare_parental_control_update": {
+     "name": "safety_settings.prepare_parental_control_update",
+     "inputSchema": {}
+    },
+    "github.fetch": {
+     "name": "github.fetch",
+     "inputSchema": {}
+    },
+    "notion.notion-duplicate-page": {
+     "name": "notion.notion-duplicate-page",
+     "inputSchema": {}
+    },
+    "github.create_file": {
+     "name": "github.create_file",
+     "inputSchema": {}
+    },
+    "notion.notion-create-folder": {
+     "name": "notion.notion-create-folder",
+     "inputSchema": {}
+    },
+    "apple_music.search": {
+     "name": "apple_music.search",
+     "inputSchema": {}
+    },
+    "github.request_pull_request_reviewers": {
+     "name": "github.request_pull_request_reviewers",
+     "inputSchema": {}
+    },
+    "notion.notion-list-private-pages": {
+     "name": "notion.notion-list-private-pages",
+     "inputSchema": {}
+    },
+    "notion.notion-list-session-events": {
+     "name": "notion.notion-list-session-events",
+     "inputSchema": {}
+    },
+    "github.enable_auto_merge": {
+     "name": "github.enable_auto_merge",
+     "inputSchema": {}
+    },
+    "github.remove_issue_assignees": {
+     "name": "github.remove_issue_assignees",
+     "inputSchema": {}
+    },
+    "github.merge_pull_request": {
+     "name": "github.merge_pull_request",
+     "inputSchema": {}
+    },
+    "github.search_repositories": {
+     "name": "github.search_repositories",
+     "inputSchema": {}
+    },
+    "github.create_commit": {
+     "name": "github.create_commit",
+     "inputSchema": {}
+    },
+    "github.fetch_workflow_job_steps": {
+     "name": "github.fetch_workflow_job_steps",
+     "inputSchema": {}
+    },
+    "codex_document_control.list_document_sessions": {
+     "name": "codex_document_control.list_document_sessions",
+     "inputSchema": {}
+    },
+    "github.fetch_file": {
+     "name": "github.fetch_file",
+     "inputSchema": {}
+    },
+    "github.list_repositories_by_installation": {
+     "name": "github.list_repositories_by_installation",
+     "inputSchema": {}
+    },
+    "github.create_blob": {
+     "name": "github.create_blob",
+     "inputSchema": {}
+    },
+    "github.dismiss_pull_request_review": {
+     "name": "github.dismiss_pull_request_review",
+     "inputSchema": {}
+    },
+    "github.update_ref": {
+     "name": "github.update_ref",
+     "inputSchema": {}
+    },
+    "notion.notion-check-mcp-next-steps": {
+     "name": "notion.notion-check-mcp-next-steps",
+     "inputSchema": {}
+    },
+    "github.add_review_to_pr": {
+     "name": "github.add_review_to_pr",
+     "inputSchema": {}
+    },
+    "notion.notion-create-comment": {
+     "name": "notion.notion-create-comment",
+     "inputSchema": {}
+    },
+    "notion.notion-download-attachment": {
+     "name": "notion.notion-download-attachment",
+     "inputSchema": {}
+    },
+    "notion.notion-read-session-event": {
+     "name": "notion.notion-read-session-event",
+     "inputSchema": {}
+    },
+    "notion.notion-search-sessions": {
+     "name": "notion.notion-search-sessions",
+     "inputSchema": {}
+    },
+    "github.search_installed_repositories_streaming": {
+     "name": "github.search_installed_repositories_streaming",
+     "inputSchema": {}
+    },
+    "plugin_management.search_plugins": {
+     "name": "plugin_management.search_plugins",
+     "inputSchema": {}
+    },
+    "pets.list_pets": {
+     "name": "pets.list_pets",
+     "inputSchema": {}
+    },
+    "booking_com.wishlist_tool": {
+     "name": "booking_com.wishlist_tool",
+     "inputSchema": {}
+    },
+    "plugin_management.uninstall_app": {
+     "name": "plugin_management.uninstall_app",
+     "inputSchema": {}
+    },
+    "github.update_issue": {
+     "name": "github.update_issue",
+     "inputSchema": {}
+    },
+    "plugin_management.update_app_permissions": {
+     "name": "plugin_management.update_app_permissions",
+     "inputSchema": {}
+    },
+    "notion.notion-list-recent-pages": {
+     "name": "notion.notion-list-recent-pages",
+     "inputSchema": {}
+    },
+    "notion.notion-update-data-source": {
+     "name": "notion.notion-update-data-source",
+     "inputSchema": {}
+    },
+    "github.add_reaction_to_pr_review_comment": {
+     "name": "github.add_reaction_to_pr_review_comment",
+     "inputSchema": {}
+    },
+    "github.search_prs": {
+     "name": "github.search_prs",
+     "inputSchema": {}
+    },
+    "codex_document_control.execute_document_command": {
+     "name": "codex_document_control.execute_document_command",
+     "inputSchema": {}
+    },
+    "notion.notion-update-page": {
+     "name": "notion.notion-update-page",
+     "inputSchema": {}
+    },
+    "apple_music.create-playlist-from-ids": {
+     "name": "apple_music.create-playlist-from-ids",
+     "inputSchema": {}
+    },
+    "github.create_tree": {
+     "name": "github.create_tree",
+     "inputSchema": {}
+    },
+    "github.list_installed_accounts": {
+     "name": "github.list_installed_accounts",
+     "inputSchema": {}
+    },
+    "notion.notion-create-view": {
+     "name": "notion.notion-create-view",
+     "inputSchema": {}
+    },
+    "github.unlock_issue_conversation": {
+     "name": "github.unlock_issue_conversation",
+     "inputSchema": {}
+    },
+    "pets.adopt": {
+     "name": "pets.adopt",
+     "inputSchema": {}
+    },
+    "github.get_pr_diff": {
+     "name": "github.get_pr_diff",
+     "inputSchema": {}
+    },
+    "github.fetch_workflow_job_logs": {
+     "name": "github.fetch_workflow_job_logs",
+     "inputSchema": {}
+    },
+    "pets.prepare_pet_upload": {
+     "name": "pets.prepare_pet_upload",
+     "inputSchema": {}
+    },
+    "pets.select_pet": {
+     "name": "pets.select_pet",
+     "inputSchema": {}
+    },
+    "notion.notion-view-thread-content": {
+     "name": "notion.notion-view-thread-content",
+     "inputSchema": {}
+    },
+    "pets.validate_pet_spritesheet": {
+     "name": "pets.validate_pet_spritesheet",
+     "inputSchema": {}
+    },
+    "github.list_user_orgs": {
+     "name": "github.list_user_orgs",
+     "inputSchema": {}
+    },
+    "notion.notion-create-attachment": {
+     "name": "notion.notion-create-attachment",
+     "inputSchema": {}
+    },
+    "notion.notion-list-favorite-pages": {
+     "name": "notion.notion-list-favorite-pages",
+     "inputSchema": {}
+    },
+    "github.get_profile": {
+     "name": "github.get_profile",
+     "inputSchema": {}
+    },
+    "notion.notion-update-enabled-skills": {
+     "name": "notion.notion-update-enabled-skills",
+     "inputSchema": {}
+    },
+    "github.list_installations": {
+     "name": "github.list_installations",
+     "inputSchema": {}
+    },
+    "notion.notion-memory-search": {
+     "name": "notion.notion-memory-search",
+     "inputSchema": {}
+    },
+    "notion.notion-get-async-task": {
+     "name": "notion.notion-get-async-task",
+     "inputSchema": {}
+    },
+    "github.get_commit_combined_status": {
+     "name": "github.get_commit_combined_status",
+     "inputSchema": {}
+    },
+    "github.list_pull_request_review_threads": {
+     "name": "github.list_pull_request_review_threads",
+     "inputSchema": {}
+    },
+    "pets.share_pet": {
+     "name": "pets.share_pet",
+     "inputSchema": {}
+    },
+    "notion.notion-create-file-upload": {
+     "name": "notion.notion-create-file-upload",
+     "inputSchema": {}
+    },
+    "github.fetch_commit_workflow_runs": {
+     "name": "github.fetch_commit_workflow_runs",
+     "inputSchema": {}
+    },
+    "github.download_workflow_artifact": {
+     "name": "github.download_workflow_artifact",
+     "inputSchema": {}
+    },
+    "github.update_pull_request": {
+     "name": "github.update_pull_request",
+     "inputSchema": {}
+    },
+    "github.update_issue_comment": {
+     "name": "github.update_issue_comment",
+     "inputSchema": {}
+    },
+    "github.label_pr": {
+     "name": "github.label_pr",
+     "inputSchema": {}
+    },
+    "notion.fetch": {
+     "name": "notion.fetch",
+     "inputSchema": {}
+    }
+   },
+   "resources": [],
+   "resourceTemplates": [],
+   "authStatus": "bearerToken"
+  },
+  {
+   "name": "computer-use",
+   "pluginId": null,
+   "serverInfo": null,
+   "tools": {},
+   "resources": [],
+   "resourceTemplates": [],
+   "authStatus": "unsupported"
+  },
+  {
+   "name": "context7",
+   "pluginId": null,
+   "serverInfo": {
+    "name": "Context7",
+    "title": null,
+    "version": "4.3.0",
+    "description": "Context7 provides up-to-date documentation and code examples for libraries and frameworks.",
+    "icons": [
+     {
+      "src": "https://context7.com/context7-icon-green.png",
+      "mimeType": "image/png"
+     }
+    ],
+    "websiteUrl": "https://context7.com"
+   },
+   "tools": {
+    "query-docs": {
+     "name": "query-docs",
+     "inputSchema": {}
+    },
+    "resolve-library-id": {
+     "name": "resolve-library-id",
+     "inputSchema": {}
+    }
+   },
+   "resources": [],
+   "resourceTemplates": [],
+   "authStatus": "unsupported"
+  },
+  {
+   "name": "cua_repl",
+   "pluginId": "unified-computer-use@openai-bundled",
+   "serverInfo": {
+    "name": "rmcp",
+    "title": null,
+    "version": "1.5.0",
+    "description": null,
+    "icons": null,
+    "websiteUrl": null
+   },
+   "tools": {
+    "turn_ended": {
+     "name": "turn_ended",
+     "inputSchema": {}
+    },
+    "js": {
+     "name": "js",
+     "inputSchema": {}
+    },
+    "js_reset": {
+     "name": "js_reset",
+     "inputSchema": {}
+    }
+   },
+   "resources": [],
+   "resourceTemplates": [],
+   "authStatus": "unsupported"
+  },
+  {
+   "name": "node_repl",
+   "pluginId": null,
+   "serverInfo": {
+    "name": "rmcp",
+    "title": null,
+    "version": "1.5.0",
+    "description": null,
+    "icons": null,
+    "websiteUrl": null
+   },
+   "tools": {
+    "js": {
+     "name": "js",
+     "inputSchema": {}
+    },
+    "turn_ended": {
+     "name": "turn_ended",
+     "inputSchema": {}
+    },
+    "js_add_node_module_dir": {
+     "name": "js_add_node_module_dir",
+     "inputSchema": {}
+    },
+    "js_reset": {
+     "name": "js_reset",
+     "inputSchema": {}
+    }
+   },
+   "resources": [],
+   "resourceTemplates": [],
+   "authStatus": "unsupported"
+  },
+  {
+   "name": "panchayat-local",
+   "pluginId": null,
+   "serverInfo": null,
+   "tools": {},
+   "resources": [],
+   "resourceTemplates": [],
+   "authStatus": "oAuth"
+  },
+  {
+   "name": "pika-mcp",
+   "pluginId": null,
+   "serverInfo": null,
+   "tools": {},
+   "resources": [],
+   "resourceTemplates": [],
+   "authStatus": "notLoggedIn"
+  },
+  {
+   "name": "stitch",
+   "pluginId": null,
+   "serverInfo": {
+    "name": "StatelessServer",
+    "title": null,
+    "version": "scaffolding on HTTPServer2",
+    "description": null,
+    "icons": null,
+    "websiteUrl": null
+   },
+   "tools": {
+    "create_project": {
+     "name": "create_project",
+     "inputSchema": {}
+    },
+    "list_screens": {
+     "name": "list_screens",
+     "inputSchema": {}
+    },
+    "get_screen": {
+     "name": "get_screen",
+     "inputSchema": {}
+    },
+    "update_design_system": {
+     "name": "update_design_system",
+     "inputSchema": {}
+    },
+    "list_projects": {
+     "name": "list_projects",
+     "inputSchema": {}
+    },
+    "delete_project": {
+     "name": "delete_project",
+     "inputSchema": {}
+    },
+    "get_project": {
+     "name": "get_project",
+     "inputSchema": {}
+    },
+    "create_design_system": {
+     "name": "create_design_system",
+     "inputSchema": {}
+    },
+    "generate_screen_from_text": {
+     "name": "generate_screen_from_text",
+     "inputSchema": {}
+    },
+    "generate_variants": {
+     "name": "generate_variants",
+     "inputSchema": {}
+    },
+    "edit_screens": {
+     "name": "edit_screens",
+     "inputSchema": {}
+    },
+    "create_design_system_from_design_md": {
+     "name": "create_design_system_from_design_md",
+     "inputSchema": {}
+    },
+    "list_design_systems": {
+     "name": "list_design_systems",
+     "inputSchema": {}
+    },
+    "apply_design_system": {
+     "name": "apply_design_system",
+     "inputSchema": {}
+    },
+    "upload_design_md": {
+     "name": "upload_design_md",
+     "inputSchema": {}
+    }
+   },
+   "resources": [],
+   "resourceTemplates": [],
+   "authStatus": "notLoggedIn"
+  }
+ ],
+ "nextCursor": null
+}

@@ -24,7 +24,7 @@ const FACTS: ReadonlyArray<{ icon: LucideIcon; text: string }> = [
 export default function Onboarding({ config }: { config: AppConfig }) {
   const apply = useConfig((s) => s.apply);
   const health = useSystem((s) => s.health);
-  const refreshHealth = useSystem((s) => s.refreshHealth);
+  const recheckHealth = useSystem((s) => s.recheckHealth);
   const projects = useWorkspace((s) => s.projects);
   const applyProjects = useWorkspace((s) => s.applyProjects);
   const [step, setStep] = useState(0);
@@ -170,7 +170,7 @@ export default function Onboarding({ config }: { config: AppConfig }) {
             })}
           </div>
           <div className="onboarding-provider-foot">
-            <Button size="sm" variant="ghost" icon={RefreshCw} onClick={() => void refreshHealth().catch(() => undefined)}>
+            <Button size="sm" variant="ghost" icon={RefreshCw} onClick={() => void recheckHealth().catch(() => undefined)}>
               Check again
             </Button>
           </div>

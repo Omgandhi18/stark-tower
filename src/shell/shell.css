@@ -164,6 +164,28 @@
   background: var(--nav-surface);
 }
 
+/* A long list of chats scrolls under a scrollbar in the sidebar's own colours, shown only while you're over it. */
+.sidenav {
+  scrollbar-color: transparent transparent;
+}
+
+.sidenav:is(:hover, :focus-within) {
+  scrollbar-color: color-mix(in srgb, var(--nav-text) 32%, transparent) transparent;
+}
+
+.sidenav::-webkit-scrollbar-thumb,
+.sidenav::-webkit-scrollbar-thumb:hover {
+  background-color: transparent;
+}
+
+.sidenav:is(:hover, :focus-within)::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--nav-text) 32%, transparent);
+}
+
+.sidenav:is(:hover, :focus-within)::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--nav-text) 48%, transparent);
+}
+
 .nav-list {
   display: grid;
   /* Tracks may shrink below their content, so long names truncate instead of widening the sidebar. */
@@ -434,6 +456,16 @@
   box-shadow: var(--shadow-overlay);
 }
 
+/* The rail still scrolls a long list, but without a scrollbar: one would take a fifth of its width
+   and push every icon and highlight off-centre. */
+.sidenav.is-rail:not(.is-peeking) {
+  scrollbar-width: none;
+}
+
+.sidenav.is-rail:not(.is-peeking)::-webkit-scrollbar {
+  display: none;
+}
+
 /* Icons and portraits keep their size in a row too narrow for their names. */
 .sidenav.is-rail :is(.nav-item, .nav-sub-item, .nav-chat, .nav-update) > :is(svg, .portrait) {
   flex: none;
@@ -461,11 +493,17 @@
     background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
-/* Nested places line up under the destinations' icons. */
+/* Nested places line up under the destinations' icons, on a faint tray so a long run of projects
+   and chats still reads as belonging to the destination above it. */
 .sidenav.is-rail:not(.is-peeking) :is(.nav-sub, .nav-chats) {
   margin-left: 0;
   padding-left: 0;
   border-left-color: transparent;
+}
+
+.sidenav.is-rail:not(.is-peeking) .nav-sub {
+  border-radius: var(--radius-control);
+  background-color: color-mix(in srgb, var(--nav-text) 6%, transparent);
 }
 
 .sidenav.is-rail:not(.is-peeking) .nav-sub-item {

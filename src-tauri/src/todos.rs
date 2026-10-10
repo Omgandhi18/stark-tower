@@ -8,7 +8,7 @@
 use crate::reminders::ReminderInput;
 use crate::runs::Actor;
 use crate::tasks::{Origin, BY_DEVELOPER};
-use crate::todo_store::{Todo, TodoList};
+use crate::todo_store::{Standing, Todo, TodoList};
 use serde::Deserialize;
 use std::time::Duration;
 use tauri::{Emitter, Manager};
@@ -94,6 +94,12 @@ pub fn todo_problem(input: &TodoInput, agent_known: bool) -> Option<String> {
     None
 }
 
+/// The short token that goes with a to-do: it can't be reused (a deleted to-do's is gone for good),
+/// so it says "this very to-do" even if its number or words later change.
+pub fn token(todo: &Todo) -> String {
+    format!("T{}", todo.id)
+}
+
 /// What an agent is asked when a to-do is handed to it.
 pub fn prompt_for(todo: &Todo, list: &TodoList) -> String {
     let mut prompt = todo.title.trim().to_string();
@@ -102,8 +108,14 @@ pub fn prompt_for(todo: &Todo, list: &TodoList) -> String {
         prompt.push_str(todo.notes.trim());
     }
     prompt.push_str(&format!(
-        "\n\n(This is to-do #{} on the developer's \"{}\" list. When it's done, tick it off with the `complete_todo` tool.)",
-        todo.id, list.name
+        "\n\n(This is to-do #{n} on the developer's \"{list}\" list, ref {token}. The developer can change their lists while you work, so: \
+before you start, check it's still there and open with the `check_todo` tool (number {n}, list \"{list}\"); if it's gone, done or moved, stop and say so instead of doing it. \
+When it's done, check it again, then tick it off with the `complete_todo` tool: number {n}, list \"{list}\", ref {token}, title \"{title}\". \
+Starkline refuses to tick a to-do that has been deleted, ticked or moved, or isn't the one you worked on; if that happens, don't redo or work around it, tell the developer.)",
+        n = todo.number,
+        list = list.name,
+        token = token(todo),
+        title = todo.title.trim().replace('"', "'")
     ));
     prompt
 }
@@ -112,7 +124,7 @@ pub fn prompt_for(todo: &Todo, list: &TodoList) -> String {
 pub fn list_prompt(list: &TodoList, open: &[Todo], name_of: impl Fn(&str) -> String) -> String {
     let mut prompt = format!("Work through my to-do list \"{}\", in order:\n", list.name);
     for t in open {
-        prompt.push_str(&format!("\n- #{} {}", t.id, t.title.trim()));
+        prompt.push_str(&format!("\n- #{} {} (ref {})", t.number, t.title.trim(), token(t)));
         if let Some(line) = t.notes.lines().map(str::trim).find(|l| !l.is_empty()) {
             prompt.push_str(&format!(" ({line})"));
         }
@@ -120,10 +132,15 @@ pub fn list_prompt(list: &TodoList, open: &[Todo], name_of: impl Fn(&str) -> Str
             prompt.push_str(&format!(" [assigned to {}]", name_of(agent)));
         }
     }
-    prompt.push_str(
-        "\n\nDo each yourself, or delegate it (to whoever it's assigned to, if anyone). Tick each off with \
-`complete_todo` as it's done, and add follow-ups you find with `add_todo`. Read any to-do's notes with `list_todos`.",
-    );
+    prompt.push_str(&format!(
+        "\n\nThis list is a snapshot: I can delete, tick off or move to-dos while you work. So for EACH to-do: \
+(1) immediately before you start it, call `check_todo` (number, list \"{list}\"); if it is gone, done or moved, skip it and report that at the end instead of doing it. \
+(2) Do it yourself, or delegate it (to whoever it's assigned to, if anyone). \
+(3) Immediately before ticking it, call `check_todo` again; only if it's still open and still the same to-do, tick it with `complete_todo` (number, list \"{list}\", and its ref or exact title). \
+Starkline refuses a tick for a to-do that has been deleted, ticked or moved, or doesn't match; never work around that, just report it. \
+These numbers belong to \"{list}\" only; another list has its own #1, #2… Add follow-ups you find with `add_todo`. Read any to-do's notes with `list_todos`.",
+        list = list.name
+    ));
     prompt
 }
 
@@ -152,6 +169,200 @@ pub fn list_for_folder<'a>(lists: &'a [TodoList], folder: &str) -> Option<&'a To
         .iter()
         .filter(|l| !l.project.is_empty() && std::path::Path::new(folder).starts_with(&l.project))
         .max_by_key(|l| l.project.len())
+}
+
+/// How an agent points at a to-do: its number on a list (with the list's name, if it gave one),
+/// or, from before numbers were per list, its old global `id`.
+#[derive(Debug, Default, PartialEq)]
+pub struct TodoRef {
+    pub number: Option<i64>,
+    pub id: Option<i64>,
+    pub list: String,
+}
+
+/// Where an agent's pointer leads, before asking whether anything is there.
+#[derive(Debug, PartialEq)]
+pub enum Target {
+    /// A number on a list.
+    Numbered { list_id: i64, number: i64 },
+    /// An old global id, on the list named if one was.
+    Id { id: i64, list_id: Option<i64> },
+}
+
+/// The place an agent means, or why that can't be told. A number only ever means a to-do on
+/// one list: the list it names, else `handed` (the list it was given), else the only list there is.
+/// It's never guessed from the other lists, so a number can't tick the wrong list's to-do.
+pub fn locate(lists: &[TodoList], pointer: &TodoRef, handed: Option<i64>) -> Result<Target, String> {
+    let named = pointer.list.trim();
+    let named_list = || -> Result<Option<i64>, String> {
+        if named.is_empty() {
+            return Ok(None);
+        }
+        let found: Vec<&TodoList> = lists.iter().filter(|l| l.name.eq_ignore_ascii_case(named)).collect();
+        match found.as_slice() {
+            [] => Err(format!("There's no list called \"{named}\".")),
+            [one] => Ok(Some(one.id)),
+            _ => Err(format!("More than one list is called \"{named}\"; rename one so it can be told apart.")),
+        }
+    };
+    if let Some(number) = pointer.number {
+        let list_id = match named_list()? {
+            Some(id) => id,
+            None => match (handed, lists) {
+                (Some(id), _) if lists.iter().any(|l| l.id == id) => id,
+                (_, [only]) => only.id,
+                _ => {
+                    let names: Vec<String> = lists.iter().map(|l| format!("\"{}\"", l.name)).collect();
+                    return Err(format!("Numbers are per list, so say which list #{number} is on with `list` (one of {}).", names.join(", ")));
+                }
+            },
+        };
+        return Ok(Target::Numbered { list_id, number });
+    }
+    if let Some(id) = pointer.id {
+        return Ok(Target::Id { id, list_id: named_list()? });
+    }
+    Err("Say which to-do: its `number` on its list, with the list's name in `list`.".into())
+}
+
+/// How a to-do and its list are named in what an agent reads.
+pub struct Names<'a> {
+    pub list: &'a dyn Fn(i64) -> String,
+    pub agent: &'a dyn Fn(&str) -> String,
+}
+
+fn when(ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms)
+        .map(|t| t.with_timezone(&chrono::Local).format("%-d %b %H:%M").to_string())
+        .unwrap_or_default()
+}
+
+fn who(names: &Names, by: &str) -> String {
+    if by == BY_DEVELOPER { "the developer".into() } else { (names.agent)(by) }
+}
+
+/// What `check_todo` tells an agent about a number on a list: one verdict word first, then what to do.
+pub fn check_report(standing: &Standing, list_id: i64, number: i64, names: &Names) -> String {
+    let list = (names.list)(list_id);
+    match standing {
+        Standing::Found(t) if t.done.is_none() => {
+            let mut text = format!("OPEN: to-do #{number} on \"{list}\" is \"{}\" (ref {}).", t.title, token(t));
+            if let Some(agent) = &t.agent_id {
+                text.push_str(&format!(" Assigned to {}.", (names.agent)(agent)));
+            }
+            if !t.notes.trim().is_empty() {
+                text.push_str(&format!("\nNotes: {}", t.notes.trim().replace('\n', "\n  ")));
+            }
+            text.push_str("\nIt is still open, so it's fine to start it. Check again right before you tick it off.");
+            text
+        }
+        Standing::Found(t) => format!(
+            "DONE: to-do #{number} on \"{list}\" (\"{}\", ref {}) was ticked off by {} on {}. Don't start it or tick it again; skip it and say it was already done.",
+            t.title,
+            token(t),
+            who(names, t.done_by.as_deref().unwrap_or(BY_DEVELOPER)),
+            when(t.done.unwrap_or(0))
+        ),
+        Standing::Moved { title, list_id: to_list, number: to_number, .. } => format!(
+            "MOVED: to-do #{number} on \"{list}\" (\"{title}\") is no longer there: it was moved to \"{}\", where it's now #{to_number}. \
+Don't act on #{number} on \"{list}\". If you were meant to do it, check #{to_number} on \"{}\" first; otherwise skip it and say it moved.",
+            (names.list)(*to_list),
+            (names.list)(*to_list)
+        ),
+        Standing::Deleted { title, at, .. } => format!(
+            "DELETED: to-do #{number} on \"{list}\" (\"{title}\") was deleted on {}. Don't start it or tick it off; skip it and report that it's gone.",
+            when(*at)
+        ),
+        Standing::Missing => format!(
+            "NOT FOUND: there is no to-do #{number} on \"{list}\" (it was deleted, or it never existed). Don't start it or tick it off; skip it and report that it's gone."
+        ),
+    }
+}
+
+/// Whether what an agent is told it can tick is the same to-do it worked on: it must say which by
+/// its title (as it read it) or its ref, and whichever it gives has to match.
+pub fn identity_problem(todo: &Todo, list_name: &str, title: &str, reference: &str) -> Option<String> {
+    let (title, reference) = (title.trim(), reference.trim());
+    if title.is_empty() && reference.is_empty() {
+        return Some(format!(
+            "Not ticked: say which to-do you worked on. Pass its `title` exactly as you read it, or its `ref` ({}), along with the number, so I can tell it's the same one. Run `check_todo` to read them.",
+            token(todo)
+        ));
+    }
+    if !reference.is_empty() && !reference.trim_start_matches('#').eq_ignore_ascii_case(&token(todo)) {
+        return Some(format!(
+            "Not ticked: ref {reference} isn't to-do #{} on \"{list_name}\" (that is {}, \"{}\"). It's a different to-do from the one you worked on, so nothing was ticked. Check it with `check_todo`.",
+            todo.number,
+            token(todo),
+            todo.title
+        ));
+    }
+    if !title.is_empty() && !same_words(title, &todo.title) {
+        return Some(format!(
+            "Not ticked: to-do #{} on \"{list_name}\" is \"{}\", not \"{title}\". It's a different to-do from the one you worked on (or it was reworded), so nothing was ticked. Check it with `check_todo`.",
+            todo.number, todo.title
+        ));
+    }
+    None
+}
+
+/// Titles match when they have the same words, ignoring case, spacing and a closing full stop.
+fn same_words(a: &str, b: &str) -> bool {
+    let plain = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase().trim_end_matches(['.', '!']).to_string();
+    plain(a) == plain(b)
+}
+
+/// Why `complete_todo` won't tick what the number now points at, or None if it may go ahead. `mine`:
+/// the agent was working on it (it was its task's to-do, or on the list it was handed).
+pub fn tick_refusal(standing: &Standing, list_id: i64, number: i64, mine: bool, names: &Names) -> Option<String> {
+    let list = (names.list)(list_id);
+    let gone = |what: &str, title: &str| {
+        let working = if mine { " It was removed while you were working on it." } else { "" };
+        format!("Not ticked: to-do #{number} on \"{list}\" (\"{title}\") {what}.{working} Stop work on it and tell the developer what you had done; don't redo it or tick another in its place.")
+    };
+    match standing {
+        Standing::Found(t) if t.done.is_some() => Some(format!(
+            "Not ticked: to-do #{number} on \"{list}\" (\"{}\") is already done: ticked off by {} on {}. Nothing is left for you to tick.",
+            t.title,
+            who(names, t.done_by.as_deref().unwrap_or(BY_DEVELOPER)),
+            when(t.done.unwrap_or(0))
+        )),
+        Standing::Found(_) => None,
+        Standing::Deleted { title, .. } => Some(gone("was deleted", title)),
+        Standing::Moved { title, list_id: to_list, number: to_number, .. } => {
+            Some(gone(&format!("was moved to \"{}\", where it's now #{to_number}", (names.list)(*to_list)), title))
+        }
+        Standing::Missing => Some(format!("Not ticked: there is no to-do #{number} on \"{list}\" (it was deleted, or it never existed). Don't tick another in its place.")),
+    }
+}
+
+/// Whether a to-do that's gone was the agent's to do: the task it was started for, or the list it was handed.
+pub fn was_mine(standing: &Standing, list_id: i64, my_task: Option<&str>, handed: Option<i64>) -> bool {
+    let task = match standing {
+        Standing::Deleted { task_id, .. } | Standing::Moved { task_id, .. } => task_id.as_deref(),
+        _ => None,
+    };
+    (task.is_some() && task == my_task) || handed == Some(list_id)
+}
+
+/// Re-reads a to-do the scheduler picked, right before it is dispatched: it must still be that
+/// to-do (same list, number and agent), still open and unstarted, on a list that still starts it this way.
+pub fn recheck_before_start(ledger: &crate::ledger::Ledger, picked: &Todo) -> Result<Todo, String> {
+    let fresh = ledger.todo(picked.id).ok_or("it was deleted")?;
+    if fresh.list_id != picked.list_id || fresh.number != picked.number {
+        return Err("it was moved to another list".into());
+    }
+    if fresh.done.is_some() {
+        return Err("it was already ticked off".into());
+    }
+    if fresh.agent_id != picked.agent_id {
+        return Err("it was given to someone else".into());
+    }
+    let list = ledger.todo_list(fresh.list_id).ok_or("its list was deleted")?;
+    if !waits_for_agent(&fresh, &list) {
+        return Err("it is no longer waiting for its agent".into());
+    }
+    Ok(fresh)
 }
 
 // ---- Lists -----------------------------------------------------------------------
@@ -234,6 +445,7 @@ pub fn save(app: &tauri::AppHandle, input: TodoInput, by: &str) -> Result<Todo, 
         ..existing.clone().unwrap_or(Todo {
             id: 0,
             list_id: input.list_id,
+            number: 0,
             title: String::new(),
             notes: String::new(),
             agent_id: None,
@@ -347,7 +559,9 @@ pub fn hand_list(app: &tauri::AppHandle, list_id: i64, agent_id: &str) -> Result
     let dir = (!list.project.is_empty()).then(|| list.project.clone());
     let title = format!("Work through \"{}\"", list.name);
     let origin = Origin { requested_by: BY_DEVELOPER, title: Some(&title), note: "You handed over your to-do list" };
-    crate::tasks::start_for(app, agent_id, &prompt, dir, &[], &origin)
+    let task = crate::tasks::start_for(app, agent_id, &prompt, dir, &[], &origin)?;
+    state.ledger.record_list_handoff(&task.id, list.id);
+    Ok(task)
 }
 
 /// You marked a task reviewed: the to-do it was started for is done.
@@ -372,9 +586,15 @@ fn free(app: &tauri::AppHandle, agent_id: &str) -> bool {
 fn tick(app: &tauri::AppHandle) {
     let Ok(state) = state(app) else { return };
     let (lists, todos) = (state.ledger.todo_lists(), state.ledger.todos());
-    for todo in pick_up(&lists, &todos, |agent| free(app, agent)) {
-        if let Err(e) = start(app, todo.id) {
-            eprintln!("[todos] couldn't start to-do {}: {e}", todo.id);
+    for picked in pick_up(&lists, &todos, |agent| free(app, agent)) {
+        // The developer may have deleted, ticked or moved it since the list was read.
+        match recheck_before_start(&state.ledger, picked) {
+            Ok(todo) => {
+                if let Err(e) = start(app, todo.id) {
+                    eprintln!("[todos] couldn't start to-do {}: {e}", todo.id);
+                }
+            }
+            Err(why) => eprintln!("[todos] not starting to-do {}: {why}", picked.id),
         }
     }
 }
@@ -423,7 +643,7 @@ fn describe(app: &tauri::AppHandle, list: &TodoList, todos: &[Todo]) -> String {
     let mut text = format!("\"{}\":", list.name);
     for t in open {
         let who = t.agent_id.as_deref().map(|a| format!(" [assigned to {}]", crate::prompts::agent_name(app, a))).unwrap_or_default();
-        text.push_str(&format!("\n- #{} {}{who}", t.id, t.title));
+        text.push_str(&format!("\n- #{} {} (ref {}){who}", t.number, t.title, token(t)));
         if !t.notes.is_empty() {
             text.push_str(&format!("\n  {}", t.notes.replace('\n', "\n  ")));
         }
@@ -431,7 +651,61 @@ fn describe(app: &tauri::AppHandle, list: &TodoList, todos: &[Todo]) -> String {
     text
 }
 
-/// An agent adds a to-do, ticks one off, or reads a list (`action`: add | done | list).
+fn pointer_of(req: &serde_json::Value, list: String) -> TodoRef {
+    TodoRef { number: req.get("number").and_then(|v| v.as_i64()), id: req.get("id").and_then(|v| v.as_i64()), list }
+}
+
+/// The list this agent's work is about: the one its task's to-do is on, else the one it was handed whole.
+fn handed_list(app: &tauri::AppHandle, who: &Actor) -> Option<i64> {
+    let state = state(app).ok()?;
+    let task = crate::tasks::task_of(app, who)?;
+    state.ledger.todo_for_task(&task).map(|t| t.list_id).or_else(|| state.ledger.list_handed_for_task(&task))
+}
+
+/// What an agent that pointed at a to-do by its old global id is told when it's no longer there.
+fn gone_by_id(standing: &Standing, id: i64) -> String {
+    let verdict = if matches!(standing, Standing::Missing) { "NOT FOUND" } else { "DELETED" };
+    format!("{verdict}: no to-do with the old id {id} exists any more. Skip it and report that it's gone; use `number` and `list` from now on.")
+}
+
+/// The developer hears when a to-do an agent was working on is gone from under it.
+fn removed_while_working(app: &tauri::AppHandle, who: &Actor, task: Option<&str>, standing: &Standing, list_id: i64, number: i64, list: &str) {
+    static TOLD: std::sync::Mutex<Vec<(String, i64, i64)>> = std::sync::Mutex::new(Vec::new());
+    let Ok(state) = state(app) else { return };
+    let key = (who.agent.clone(), list_id, number);
+    {
+        let mut told = TOLD.lock().unwrap();
+        if told.contains(&key) {
+            return;
+        }
+        told.push(key);
+    }
+    let (title, what) = match standing {
+        Standing::Deleted { title, .. } => (title.as_str(), "had been deleted".to_string()),
+        Standing::Moved { title, list_id, number, .. } => {
+            let to = state.ledger.todo_list(*list_id).map(|l| l.name).unwrap_or_default();
+            (title.as_str(), format!("had been moved to \"{to}\" (#{number})"))
+        }
+        _ => return,
+    };
+    let name = crate::prompts::agent_name(app, &who.agent);
+    let cwd = state.ledger.todo_list(list_id).map(|l| l.project).unwrap_or_default();
+    if let Some(stored) = state.ledger.add_notification(&crate::ledger::NewNotification {
+        kind: "todo_removed",
+        urgency: "update",
+        agent_id: &who.agent,
+        task_id: task,
+        cwd: &cwd,
+        title: &format!("To-do #{number} \"{title}\" was removed while {name} was working on it"),
+        body: &format!("{name} tried to tick it off on \"{list}\", but it {what}. Nothing was ticked."),
+        ..Default::default()
+    }) {
+        crate::system_notifications::deliver(app, &stored, "");
+        let _ = app.emit("notifications://changed", ());
+    }
+}
+
+/// An agent adds a to-do, ticks one off, checks one, or reads a list (`action`: add | done | check | list).
 pub fn tool(app: &tauri::AppHandle, who: &Actor, req: &serde_json::Value) -> Result<String, String> {
     let text = |key: &str| req.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
     match text("action").as_str() {
@@ -439,12 +713,67 @@ pub fn tool(app: &tauri::AppHandle, who: &Actor, req: &serde_json::Value) -> Res
             let list = list_for_agent(app, who, &text("list"))?;
             let input = TodoInput { id: None, list_id: list.id, title: text("title"), notes: text("notes"), agent_id: None, due: None };
             let todo = save(app, input, &who.agent)?;
-            Ok(format!("Added to-do #{} to \"{}\". The developer sees you added it.", todo.id, list.name))
+            Ok(format!("Added to-do #{} to \"{}\". The developer sees you added it.", todo.number, list.name))
+        }
+        "check" => {
+            let state = state(app)?;
+            let (lists, handed) = (state.ledger.todo_lists(), handed_list(app, who));
+            let target = locate(&lists, &pointer_of(req, text("list")), handed)?;
+            let (list_id, number, standing) = match target {
+                Target::Numbered { list_id, number } => (list_id, number, state.ledger.standing(list_id, number)),
+                Target::Id { id, .. } => match state.ledger.standing_by_id(id) {
+                    Standing::Found(t) => (t.list_id, t.number, Standing::Found(t)),
+                    gone => return Ok(gone_by_id(&gone, id)),
+                },
+            };
+            let (list_name, agent_name) = (|id: i64| state.ledger.todo_list(id).map(|l| l.name).unwrap_or_default(), |id: &str| crate::prompts::agent_name(app, id));
+            Ok(check_report(&standing, list_id, number, &Names { list: &list_name, agent: &agent_name }))
         }
         "done" => {
-            let id = req.get("id").and_then(|v| v.as_i64()).ok_or("Say which to-do, by its number.")?;
-            let todo = set_done(app, id, true, &who.agent)?;
-            Ok(format!("Ticked off to-do #{} \"{}\".", todo.id, todo.title))
+            let state = state(app)?;
+            let handed = handed_list(app, who);
+            let my_task = crate::tasks::task_of(app, who);
+            let target = locate(&state.ledger.todo_lists(), &pointer_of(req, text("list")), handed)?;
+            let (list_id, number, standing) = match target {
+                Target::Numbered { list_id, number } => (list_id, number, state.ledger.standing(list_id, number)),
+                Target::Id { id, list_id: on } => match state.ledger.standing_by_id(id) {
+                    Standing::Found(t) if on.is_some_and(|named| named != t.list_id) => {
+                        return Err(format!("To-do id {id} isn't on \"{}\". Use its number on that list instead.", text("list").trim()));
+                    }
+                    Standing::Found(t) => (t.list_id, t.number, Standing::Found(t)),
+                    gone => return Err(format!("Not ticked: {}", gone_by_id(&gone, id))),
+                },
+            };
+            let (list_name, agent_name) = (|id: i64| state.ledger.todo_list(id).map(|l| l.name).unwrap_or_default(), |id: &str| crate::prompts::agent_name(app, id));
+            let names = Names { list: &list_name, agent: &agent_name };
+            let mine = was_mine(&standing, list_id, my_task.as_deref(), handed);
+            if let Some(why) = tick_refusal(&standing, list_id, number, mine, &names) {
+                if mine && !matches!(standing, Standing::Found(_)) {
+                    removed_while_working(app, who, my_task.as_deref(), &standing, list_id, number, &(names.list)(list_id));
+                }
+                return Err(why);
+            }
+            let Standing::Found(seen) = standing else { unreachable!("only a found to-do passes the refusal") };
+            if let Some(problem) = identity_problem(&seen, &(names.list)(list_id), &text("title"), &text("ref")) {
+                return Err(problem);
+            }
+            // The last look and the tick are one statement: it only ticks if nothing changed since.
+            if !state.ledger.tick_if_unchanged(&seen, &who.agent) {
+                let now = state.ledger.standing_by_id(seen.id);
+                let why = tick_refusal(&now, list_id, number, true, &names)
+                    .unwrap_or_else(|| format!("Not ticked: to-do #{number} on \"{}\" changed while you were ticking it. Check it with `check_todo` and try again.", (names.list)(list_id)));
+                if !matches!(now, Standing::Found(_)) {
+                    removed_while_working(app, who, my_task.as_deref(), &now, list_id, number, &(names.list)(list_id));
+                }
+                return Err(why);
+            }
+            // Its reminder goes with it being done.
+            if let Some(mut done) = state.ledger.todo(seen.id) {
+                sync_reminder(app, &mut done);
+                state.ledger.save_todo(&done);
+            }
+            changed(app);
+            Ok(format!("Ticked off to-do #{} \"{}\" on \"{}\".", seen.number, seen.title, (names.list)(list_id)))
         }
         "list" => {
             let state = state(app)?;
@@ -472,6 +801,7 @@ mod tests {
         Todo {
             id,
             list_id,
+            number: id,
             title: format!("Thing {id}"),
             notes: String::new(),
             agent_id: agent.map(str::to_string),
@@ -503,16 +833,188 @@ mod tests {
 
     #[test]
     fn an_agent_is_told_which_todo_it_is_and_how_to_tick_it_off() {
-        let mut t = todo(12, 1, Some("karen"));
+        // The 12th to-do made overall is only the 3rd on its list: the agent is told "#3", never "#12".
+        let mut t = Todo { number: 3, ..todo(12, 1, Some("karen")) };
         t.title = "Fix the splash".into();
         t.notes = "Use the new logo.".into();
         let prompt = prompt_for(&t, &list(1, "", MANUAL));
         assert!(prompt.starts_with("Fix the splash\n\nUse the new logo."));
-        assert!(prompt.contains("to-do #12 on the developer's \"List 1\" list") && prompt.contains("complete_todo"));
+        assert!(prompt.contains("to-do #3 on the developer's \"List 1\" list") && prompt.contains("complete_todo"));
+        assert!(prompt.contains("number 3, list \"List 1\""), "it says how to point at it");
+        assert!(!prompt.contains("#12"));
+        // It must check before starting and again before ticking, and says what to do when it is gone.
+        assert!(prompt.contains("before you start, check it's still there and open with the `check_todo` tool (number 3"));
+        assert!(prompt.contains("check it again, then tick it off") && prompt.contains("ref T12") && prompt.contains("title \"Fix the splash\""));
+        assert!(prompt.contains("gone, done or moved, stop and say so"));
 
-        let handed = list_prompt(&list(1, "", MANUAL), &[t, todo(13, 1, None)], |id| id.to_uppercase());
-        assert!(handed.contains("- #12 Fix the splash (Use the new logo.) [assigned to KAREN]"));
-        assert!(handed.contains("- #13 Thing 13\n"), "one with nothing more is just its title");
+        let handed = list_prompt(&list(1, "", MANUAL), &[t, Todo { number: 4, ..todo(13, 1, None) }], |id| id.to_uppercase());
+        assert!(handed.contains("- #3 Fix the splash (ref T12) (Use the new logo.) [assigned to KAREN]"));
+        assert!(handed.contains("- #4 Thing 13 (ref T13)\n"), "one with nothing more is just its title");
+        assert!(handed.contains("immediately before you start it, call `check_todo`") && handed.contains("Immediately before ticking it, call `check_todo` again"));
+        assert!(handed.contains("skip it and report that at the end") && handed.contains("gone, done or moved"));
+        assert!(handed.contains("belong to \"List 1\" only") && !handed.contains("#12") && !handed.contains("#13 "));
+    }
+
+    fn pointer(number: Option<i64>, id: Option<i64>, list: &str) -> TodoRef {
+        TodoRef { number, id, list: list.into() }
+    }
+
+    fn at(list_id: i64, number: i64) -> Target {
+        Target::Numbered { list_id, number }
+    }
+
+    fn two_lists() -> Vec<TodoList> {
+        vec![list(1, "", MANUAL), list(2, "", MANUAL)]
+    }
+
+    #[test]
+    fn a_number_means_a_place_on_one_list_only() {
+        let lists = two_lists();
+        // The list it names wins, even over the one the agent was handed.
+        assert_eq!(locate(&lists, &pointer(Some(2), None, "list 2"), Some(1)), Ok(at(2, 2)), "names are matched without case");
+        // With no list named it is the one the agent was handed.
+        assert_eq!(locate(&lists, &pointer(Some(2), None, ""), Some(1)), Ok(at(1, 2)));
+        assert_eq!(locate(&lists, &pointer(Some(2), None, ""), Some(2)), Ok(at(2, 2)));
+    }
+
+    #[test]
+    fn a_number_with_no_list_to_go_by_is_never_guessed() {
+        let lists = two_lists();
+        let err = locate(&lists, &pointer(Some(1), None, ""), None).unwrap_err();
+        assert!(err.contains("which list") && err.contains("List 1") && err.contains("List 2"), "{err}");
+        // A handed list that has since been deleted isn't used.
+        assert!(locate(&lists, &pointer(Some(1), None, ""), Some(99)).is_err());
+        // With a single list there's nothing to mix up.
+        assert_eq!(locate(&lists[..1], &pointer(Some(2), None, ""), None), Ok(at(1, 2)));
+        assert!(locate(&lists, &pointer(Some(1), None, "Nope"), Some(1)).unwrap_err().contains("no list called"));
+        let twins = vec![list(1, "", MANUAL), TodoList { id: 2, name: "list 1".into(), ..list(2, "", MANUAL) }];
+        assert!(locate(&twins, &pointer(Some(1), None, "List 1"), None).unwrap_err().contains("More than one"));
+    }
+
+    #[test]
+    fn an_old_global_id_still_points_somewhere_and_a_number_wins() {
+        let lists = two_lists();
+        assert_eq!(locate(&lists, &pointer(None, Some(21), ""), None), Ok(Target::Id { id: 21, list_id: None }));
+        assert_eq!(locate(&lists, &pointer(None, Some(21), "List 2"), Some(1)), Ok(Target::Id { id: 21, list_id: Some(2) }));
+        assert_eq!(locate(&lists, &pointer(Some(1), Some(21), "List 1"), None), Ok(at(1, 1)));
+        assert!(locate(&lists, &pointer(None, None, ""), Some(1)).unwrap_err().contains("Say which"));
+    }
+
+    fn names<'a>(list: &'a dyn Fn(i64) -> String, agent: &'a dyn Fn(&str) -> String) -> Names<'a> {
+        Names { list, agent }
+    }
+
+    fn found(id: i64, number: i64, title: &str) -> Todo {
+        Todo { number, title: title.into(), ..todo(id, 1, None) }
+    }
+
+    #[test]
+    fn check_reports_open_done_moved_deleted_and_unknown() {
+        let (list, agent) = (|id: i64| format!("List {id}"), |id: &str| id.to_uppercase());
+        let n = names(&list, &agent);
+        let open = Todo { notes: "Use the new logo.".into(), agent_id: Some("karen".into()), ..found(12, 3, "Fix the splash") };
+        let said = check_report(&Standing::Found(open.clone()), 1, 3, &n);
+        assert!(said.starts_with("OPEN:") && said.contains("\"Fix the splash\"") && said.contains("ref T12"), "{said}");
+        assert!(said.contains("Assigned to KAREN") && said.contains("Use the new logo."), "{said}");
+
+        let ticked = Todo { done: Some(1_700_000_000_000), done_by: Some("friday".into()), ..open };
+        let said = check_report(&Standing::Found(ticked), 1, 3, &n);
+        assert!(said.starts_with("DONE:") && said.contains("ticked off by FRIDAY") && said.contains("skip it"), "{said}");
+
+        let said = check_report(&Standing::Moved { title: "Fix the splash".into(), task_id: None, list_id: 2, number: 7 }, 1, 3, &n);
+        assert!(said.starts_with("MOVED:") && said.contains("\"List 2\"") && said.contains("#7"), "{said}");
+
+        let said = check_report(&Standing::Deleted { title: "Fix the splash".into(), task_id: None, at: 1_700_000_000_000 }, 1, 3, &n);
+        assert!(said.starts_with("DELETED:") && said.contains("skip it"), "{said}");
+
+        let said = check_report(&Standing::Missing, 1, 9, &n);
+        assert!(said.starts_with("NOT FOUND:") && said.contains("#9"), "{said}");
+    }
+
+    #[test]
+    fn a_tick_is_refused_for_each_way_the_todo_can_be_gone() {
+        let (list, agent) = (|id: i64| format!("List {id}"), |id: &str| id.to_uppercase());
+        let n = names(&list, &agent);
+        let open = found(12, 3, "Fix the splash");
+        assert_eq!(tick_refusal(&Standing::Found(open.clone()), 1, 3, true, &n), None, "an open one may be ticked");
+
+        let ticked = Todo { done: Some(5), done_by: Some(BY_DEVELOPER.into()), ..open };
+        let why = tick_refusal(&Standing::Found(ticked), 1, 3, true, &n).unwrap();
+        assert!(why.starts_with("Not ticked") && why.contains("already done") && why.contains("the developer"), "{why}");
+
+        let deleted = Standing::Deleted { title: "Fix the splash".into(), task_id: Some("task-1".into()), at: 5 };
+        let why = tick_refusal(&deleted, 1, 3, true, &n).unwrap();
+        assert!(why.contains("was deleted") && why.contains("removed while you were working on it"), "{why}");
+        let why = tick_refusal(&deleted, 1, 3, false, &n).unwrap();
+        assert!(why.contains("was deleted") && !why.contains("while you were working"), "an agent that wasn't on it is not told that: {why}");
+
+        let moved = Standing::Moved { title: "Fix the splash".into(), task_id: None, list_id: 2, number: 7 };
+        let why = tick_refusal(&moved, 1, 3, true, &n).unwrap();
+        assert!(why.contains("moved to \"List 2\"") && why.contains("#7") && why.contains("removed while you were working"), "{why}");
+
+        let why = tick_refusal(&Standing::Missing, 1, 9, true, &n).unwrap();
+        assert!(why.starts_with("Not ticked") && why.contains("no to-do #9"), "{why}");
+    }
+
+    #[test]
+    fn a_gone_todo_was_the_agents_when_its_task_or_handed_list_says_so() {
+        let deleted = Standing::Deleted { title: "x".into(), task_id: Some("task-1".into()), at: 0 };
+        assert!(was_mine(&deleted, 1, Some("task-1"), None), "the task it was started for");
+        assert!(was_mine(&deleted, 1, Some("task-9"), Some(1)), "the list the agent was handed whole");
+        assert!(!was_mine(&deleted, 1, Some("task-9"), Some(2)));
+        assert!(!was_mine(&deleted, 1, None, None));
+        assert!(!was_mine(&Standing::Missing, 1, Some("task-1"), None));
+    }
+
+    #[test]
+    fn a_tick_must_name_the_same_todo_by_title_or_ref_and_never_falls_back() {
+        let t = found(12, 3, "Fix the splash");
+        assert!(identity_problem(&t, "List 1", "Fix the splash", "").is_none());
+        assert!(identity_problem(&t, "List 1", "  fix  the SPLASH. ", "").is_none(), "case, spacing and a full stop don't matter");
+        assert!(identity_problem(&t, "List 1", "", "T12").is_none());
+        assert!(identity_problem(&t, "List 1", "", "#t12").is_none());
+        assert!(identity_problem(&t, "List 1", "Fix the splash", "T12").is_none());
+        let why = identity_problem(&t, "List 1", "Update the icons", "").unwrap();
+        assert!(why.starts_with("Not ticked") && why.contains("different to-do") && why.contains("Fix the splash"), "{why}");
+        assert!(identity_problem(&t, "List 1", "", "T99").unwrap().contains("different to-do"));
+        assert!(identity_problem(&t, "List 1", "Fix the splash", "T99").is_some(), "both must match");
+        assert!(identity_problem(&t, "List 1", "Update the icons", "T12").is_some(), "both must match");
+        let none = identity_problem(&t, "List 1", " ", "").unwrap();
+        assert!(none.contains("say which to-do") || none.contains("Say") || none.contains("which to-do"), "{none}");
+    }
+
+    #[test]
+    fn the_scheduler_skips_a_todo_that_changed_before_it_was_dispatched() {
+        use crate::ledger::Ledger;
+        let dir = std::env::temp_dir().join(format!("stark-todos-sched-{}-{}", std::process::id(), crate::ledger::now_ms()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let l = Ledger::open(&dir.join("ledger.db")).unwrap();
+        let waiting = l.save_todo_list(&TodoList { id: 0, name: "W".into(), project: String::new(), start_mode: WHEN_FREE.into(), position: 0, created: 0, updated: 0 }).unwrap();
+        let other = l.save_todo_list(&TodoList { id: 0, name: "O".into(), project: String::new(), start_mode: WHEN_FREE.into(), position: 0, created: 0, updated: 0 }).unwrap();
+        let add = |title: &str| l.save_todo(&Todo { list_id: waiting.id, title: title.into(), agent_id: Some("karen".into()), ..todo(0, waiting.id, None) }).unwrap();
+
+        let still_there = add("still there");
+        assert_eq!(recheck_before_start(&l, &still_there).map(|t| t.id), Ok(still_there.id));
+
+        let deleted = add("deleted meanwhile");
+        l.delete_todo(deleted.id);
+        assert!(recheck_before_start(&l, &deleted).unwrap_err().contains("deleted"));
+
+        let ticked = add("ticked meanwhile");
+        assert!(l.tick_if_unchanged(&ticked, BY_DEVELOPER));
+        assert!(recheck_before_start(&l, &ticked).unwrap_err().contains("ticked"));
+
+        let moved = add("moved meanwhile");
+        l.save_todo(&Todo { list_id: other.id, ..l.todo(moved.id).unwrap() }).unwrap();
+        assert!(recheck_before_start(&l, &moved).unwrap_err().contains("moved"));
+
+        let reassigned = add("reassigned meanwhile");
+        l.save_todo(&Todo { agent_id: Some("friday".into()), ..l.todo(reassigned.id).unwrap() }).unwrap();
+        assert!(recheck_before_start(&l, &reassigned).unwrap_err().contains("someone else"));
+
+        let started = add("started meanwhile");
+        l.save_todo(&Todo { task_id: Some("t".into()), ..l.todo(started.id).unwrap() }).unwrap();
+        assert!(recheck_before_start(&l, &started).is_err());
     }
 
     #[test]

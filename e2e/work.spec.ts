@@ -42,10 +42,9 @@ test.describe("work", () => {
     await composer.press("Enter");
     await composer.pressSequentially("tidy the settings copy");
     await composer.press("Enter");
-    await expect(page.getByText("FRIDAY has started.")).toBeVisible();
     const start = (await fakeCalls(page)).find((c) => c.cmd === "start_task");
     expect(start?.args).toMatchObject({ agentId: "friday", prompt: "tidy the settings copy" });
-    await page.getByRole("button", { name: "Open task" }).click();
+    // The new task's chat opens straight away.
     const log = page.getByRole("log", { name: "Conversation with FRIDAY" });
     await expect(log.getByText("tidy the settings copy", { exact: true })).toBeVisible();
     // Her busy chat carries on: its messages aren't in this one.
@@ -57,8 +56,6 @@ test.describe("work", () => {
     const composer = page.getByRole("textbox", { name: /Ask JARVIS/ });
     await composer.fill("@EDITH summarise the refund incidents");
     await composer.press("Enter");
-    await expect(page.getByText("EDITH has started.")).toBeVisible();
-    await page.getByRole("button", { name: "Open task" }).click();
     await expect(page.getByRole("heading", { name: "summarise the refund incidents", level: 1 })).toBeVisible();
     const log = page.getByRole("log", { name: "Conversation with EDITH" });
     await expect(log.getByText("summarise the refund incidents", { exact: true })).toBeVisible();

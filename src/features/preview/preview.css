@@ -33,6 +33,7 @@
 
 /* ---- Browser ------------------------------------------------------------------------ */
 .browser-view { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.browser-view > .tab-strip { background: var(--surface-sunken); }
 .browser-toolbar {
   position: relative;
   display: flex;

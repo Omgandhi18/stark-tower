@@ -7,6 +7,7 @@
 
 use crate::chat::{self, Input, Launch, Sink, TurnUsage};
 use crate::rpc::{Incoming, Rpc, METHOD_NOT_FOUND};
+use crate::tool_output::Output;
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader};
@@ -54,6 +55,8 @@ struct Codex {
     log: Mutex<VecDeque<String>>,
     /// The agent's effort level for each turn ("" = the model's own).
     effort: String,
+    /// Skills Codex listed for this folder, as (name, path to its SKILL.md): `/name` attaches one.
+    skills: Mutex<Vec<(String, String)>>,
 }
 
 /// The sandbox each turn runs in: writes inside the project, no network. A
@@ -74,6 +77,16 @@ fn turn_input(turn: &chat::UserTurn) -> Value {
         }
     }
     Value::Array(items)
+}
+
+/// A message that starts with `/skill-name` for a skill Codex listed, as the words Codex expects
+/// (`$skill-name rest`) with the skill to attach: (words, name, path).
+fn skill_invocation(text: &str, skills: &[(String, String)]) -> Option<(String, String, String)> {
+    let rest = text.strip_prefix('/').filter(|r| r.chars().next().is_some_and(|c| !c.is_whitespace()))?;
+    let name = rest.split_whitespace().next()?;
+    let (_, path) = skills.iter().find(|(n, _)| n == name)?;
+    let words = rest[name.len()..].trim();
+    Some((format!("${name} {words}").trim().to_string(), name.to_string(), path.clone()))
 }
 
 /// Thread settings Codex doesn't keep between runs, so every start and resume sends them.
@@ -116,6 +129,81 @@ fn change_tool(change: &Value) -> &'static str {
 }
 
 /// Codex's plan, as the to-do list the task engine reads.
+/// What an MCP tool call returned: its content blocks (text and images), else its structured
+/// result, else the error it failed with.
+fn mcp_output(item: &Value) -> Output {
+    if let Some(message) = item.pointer("/error/message").and_then(Value::as_str) {
+        return Output::text(message);
+    }
+    let result = item.get("result").unwrap_or(&Value::Null);
+    let blocks = result.get("content").and_then(Value::as_array).map(|b| Output::from_blocks(b)).unwrap_or_default();
+    if !blocks.is_empty() {
+        return blocks;
+    }
+    match result.get("structuredContent") {
+        Some(v) if !v.is_null() => Output::text(serde_json::to_string_pretty(v).unwrap_or_default()),
+        _ => Output::default(),
+    }
+}
+
+/// Whether a finished command failed (declined, interrupted or a non-zero exit), and what it printed.
+fn command_result(item: &Value) -> (bool, Output) {
+    let exit = item.get("exitCode").and_then(Value::as_i64);
+    let failed = item.get("status").and_then(Value::as_str) != Some("completed") || exit.is_some_and(|code| code != 0);
+    (failed, Output::text(item.get("aggregatedOutput").and_then(Value::as_str).unwrap_or("")))
+}
+
+/// A finished web search in Starkline's tool vocabulary: the tool, what it was given, and what
+/// came back. Codex names the query only once the search is done (it starts out empty), and
+/// may instead open or search inside a page; the results, when it shares them, are listed.
+fn web_search_call(item: &Value) -> (&'static str, Value, Output) {
+    let action = item.get("action").unwrap_or(&Value::Null);
+    let text = |v: &Value, key: &str| v.get(key).and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()).map(str::to_string);
+    let (tool, input) = match action.get("type").and_then(Value::as_str) {
+        Some("openPage") => ("WebFetch", json!({ "url": text(action, "url").unwrap_or_default() })),
+        Some("findInPage") => {
+            let pattern = text(action, "pattern").unwrap_or_default();
+            let url = text(action, "url").unwrap_or_default();
+            ("WebSearch", json!({ "query": format!("“{pattern}” in {url}") }))
+        }
+        _ => {
+            let queries = action.get("queries").and_then(Value::as_array).map(|q| q.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "));
+            let query = text(item, "query").or_else(|| text(action, "query")).or(queries.filter(|q| !q.is_empty())).unwrap_or_default();
+            ("WebSearch", json!({ "query": query }))
+        }
+    };
+    let listed: Vec<String> = item
+        .get("results")
+        .and_then(Value::as_array)
+        .map(|rs| {
+            rs.iter()
+                .filter_map(|r| {
+                    let title = text(r, "title").or_else(|| text(r, "domain"))?;
+                    let lines = [Some(title), text(r, "url"), text(r, "snippet")];
+                    Some(lines.into_iter().flatten().collect::<Vec<_>>().join("\n"))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let output = if listed.is_empty() { Output::text("Codex searched the web and didn’t share what it found.") } else { Output::text(listed.join("\n\n")) };
+    (tool, input, output)
+}
+
+/// A plan update as a plain list: what's done, what's under way, what's next.
+fn plan_output(params: &Value) -> Output {
+    let steps = params.get("plan").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    let mut lines: Vec<String> = params.get("explanation").and_then(Value::as_str).map(str::trim).filter(|e| !e.is_empty()).map(|e| vec![e.to_string(), String::new()]).unwrap_or_default();
+    lines.extend(steps.iter().map(|s| {
+        let mark = match s.get("status").and_then(Value::as_str) {
+            Some("completed") => "✓",
+            Some("inProgress") => "▸",
+            _ => "○",
+        };
+        format!("{mark} {}", s.get("step").and_then(Value::as_str).unwrap_or(""))
+    }));
+    Output::text(lines.join("\n"))
+}
+
 fn plan_as_todos(plan: &Value) -> Value {
     let todos: Vec<Value> = plan
         .as_array()
@@ -181,7 +269,12 @@ impl Codex {
 
     fn handle(self: &Arc<Self>, incoming: Incoming) {
         match incoming {
-            Incoming::Notification { method, params } => self.notified(&method, &params),
+            Incoming::Notification { method, params } => {
+                self.notified(&method, &params);
+                if method == "mcpServer/startupStatus/updated" {
+                    self.mcp_startup(&params);
+                }
+            }
             Incoming::Request { id, method, params } => self.answer(id, method, params),
         }
     }
@@ -220,9 +313,6 @@ impl Codex {
                         let tool = Self::str_of(&item, "tool");
                         chat::tool_called(app, sink, agent, &id, tool, &item.get("arguments").cloned().unwrap_or(Value::Null));
                     }
-                    "webSearch" => {
-                        chat::tool_called(app, sink, agent, &id, "WebSearch", &json!({ "query": Self::str_of(&item, "query") }));
-                    }
                     _ => {}
                 }
             }
@@ -248,27 +338,39 @@ impl Codex {
                         chat::thought(app, sink, agent, &text);
                     }
                     "commandExecution" => {
-                        let exit = item.get("exitCode").and_then(Value::as_i64);
-                        chat::tool_returned(app, id, status != "completed" || exit.is_some_and(|code| code != 0));
+                        let (failed, output) = command_result(&item);
+                        chat::tool_returned(app, id, failed, output);
                     }
                     "fileChange" => {
                         let changes = self.turns.lock().unwrap().changes.remove(id).unwrap_or_default();
+                        let diffs = item.get("changes").and_then(Value::as_array);
                         for n in 0..changes.len() {
-                            chat::tool_returned(app, &format!("{id}:{n}"), status != "completed");
+                            let diff = diffs.and_then(|d| d.get(n)).map(|c| Self::str_of(c, "diff")).unwrap_or("");
+                            chat::tool_returned(app, &format!("{id}:{n}"), status != "completed", Output::text(diff));
                         }
                     }
-                    "mcpToolCall" => chat::tool_returned(app, id, status == "failed"),
+                    "mcpToolCall" => chat::tool_returned(app, id, status == "failed", mcp_output(&item)),
+                    // Started with no query; the search is shown once it says what it was.
+                    "webSearch" => {
+                        let (tool, input, output) = web_search_call(&item);
+                        chat::tool_called(app, sink, agent, id, tool, &input);
+                        chat::tool_returned(app, id, false, output);
+                    }
                     _ => {}
                 }
             }
+            "item/commandExecution/outputDelta" => chat::tool_streaming(app, Self::str_of(params, "itemId"), Self::str_of(params, "delta")),
             "turn/plan/updated" => {
                 let turn = Self::str_of(params, "turnId");
-                chat::tool_called(app, sink, agent, &format!("plan-{turn}"), "TodoWrite", &plan_as_todos(params.get("plan").unwrap_or(&Value::Null)));
+                let call = format!("plan-{turn}");
+                chat::tool_called(app, sink, agent, &call, "TodoWrite", &plan_as_todos(params.get("plan").unwrap_or(&Value::Null)));
+                chat::tool_returned(app, &call, false, plan_output(params));
             }
             "thread/tokenUsage/updated" => {
                 let last = |k: &str| params.pointer(&format!("/tokenUsage/last/{k}")).and_then(Value::as_u64).unwrap_or(0);
                 self.turns.lock().unwrap().usage = TurnUsage { input_tokens: last("inputTokens"), output_tokens: last("outputTokens"), context_tokens: last("inputTokens") + last("outputTokens"), ..Default::default() };
             }
+            "account/rateLimits/updated" => crate::limits::codex_updated(app, params),
             "error" if params.get("willRetry").and_then(Value::as_bool) != Some(true) => {
                 let message = params.pointer("/error/message").and_then(Value::as_str).unwrap_or("Codex reported an error.");
                 self.turns.lock().unwrap().errored = true;
@@ -333,6 +435,52 @@ impl Codex {
         });
     }
 
+    /// The turn as Codex input, with the skill a leading `/skill-name` asks for attached.
+    fn input(&self, turn: &chat::UserTurn) -> Value {
+        let invocation = skill_invocation(&turn.text, &self.skills.lock().unwrap());
+        let Some((words, name, path)) = invocation else { return turn_input(turn) };
+        let mut input = turn_input(&chat::UserTurn { text: words, attachments: turn.attachments.clone() });
+        if let Some(items) = input.as_array_mut() {
+            items.push(json!({ "type": "skill", "name": name, "path": path }));
+        }
+        input
+    }
+
+    /// Tell the slash menu this thread's skills and MCP servers. The answers arrive on the
+    /// reading thread; a Codex too old to know the methods simply leaves the menu on disk.
+    fn report_slash(self: &Arc<Self>, thread: &str) {
+        let Some(conversation) = self.sink.conversation else { return };
+        let me = self.clone();
+        let _ = self.rpc.request_then("skills/list", json!({ "cwds": [self.cwd] }), move |reply| {
+            if let Ok(reply) = reply {
+                *me.skills.lock().unwrap() = crate::slash::codex_skill_paths(&reply);
+                crate::slash::provider_commands(&me.app, conversation, &me.agent_id, &me.cwd, crate::slash::codex_skills(&reply));
+            }
+        });
+        self.report_servers(thread);
+    }
+
+    fn report_servers(self: &Arc<Self>, thread: &str) {
+        let Some(conversation) = self.sink.conversation else { return };
+        let me = self.clone();
+        let _ = self.rpc.request_then("mcpServerStatus/list", json!({ "detail": "toolsAndAuthOnly", "threadId": thread }), move |reply| {
+            if let Ok(reply) = reply {
+                crate::slash::provider_servers(&me.app, conversation, &me.agent_id, &me.cwd, crate::slash::codex_servers(&reply));
+            }
+        });
+    }
+
+    /// An MCP server is starting, ready or failed: show it in the /mcp list as it happens, then
+    /// re-list once the burst settles so the tool counts catch up.
+    fn mcp_startup(self: &Arc<Self>, params: &Value) {
+        let (Some(conversation), Some((name, status, error))) = (self.sink.conversation, crate::slash::codex_startup(params)) else { return };
+        crate::slash::provider_startup(&self.app, conversation, &self.agent_id, &self.cwd, &name, status, error);
+        if let Some(thread) = self.turns.lock().unwrap().thread.clone() {
+            let me = self.clone();
+            crate::slash::queue_provider_refresh(conversation, move || me.report_servers(&thread));
+        }
+    }
+
     /// Start a turn, or steer the one running.
     fn send(&self, turn: &chat::UserTurn) -> Result<(), String> {
         let (thread, active) = {
@@ -347,9 +495,9 @@ impl Codex {
             }
         };
         match active {
-            Some(running) => self.rpc.request_then("turn/steer", json!({ "threadId": thread, "input": turn_input(turn), "expectedTurnId": running }), report),
+            Some(running) => self.rpc.request_then("turn/steer", json!({ "threadId": thread, "input": self.input(turn), "expectedTurnId": running }), report),
             None => {
-                let mut params = json!({ "threadId": thread, "input": turn_input(turn), "approvalPolicy": APPROVAL_POLICY, "sandboxPolicy": sandbox() });
+                let mut params = json!({ "threadId": thread, "input": self.input(turn), "approvalPolicy": APPROVAL_POLICY, "sandboxPolicy": sandbox() });
                 if !self.effort.is_empty() {
                     params["effort"] = json!(self.effort);
                 }
@@ -379,6 +527,7 @@ fn connect(app: &tauri::AppHandle, launch: &Launch, sink: Sink, gen: Option<u64>
         turns: Mutex::new(Turns::default()),
         log: Mutex::new(VecDeque::new()),
         effort: launch.effort.trim().to_string(),
+        skills: Mutex::new(Vec::new()),
     });
     // Codex logs to stderr; it's read continuously (a full pipe would stall it) and the tail kept.
     if let Some(stderr) = stderr {
@@ -529,6 +678,7 @@ pub(crate) fn start_chat(app: &tauri::AppHandle, launch: &Launch, gen: u64) -> R
     };
     codex.turns.lock().unwrap().thread = Some(thread.clone());
     chat::session_ready(app, &launch.agent_id, &codex.sink, Some(&thread), Some(launch.cwd.clone()));
+    codex.report_slash(&thread);
     Ok((child, Input::Turns(Box::new(move |turn| codex.send(turn)))))
 }
 
@@ -575,6 +725,88 @@ pub(crate) mod tests {
         assert!(models[0].default && models[0].description == "Latest.");
         assert!(models[4].older && !models[3].older, "the first few up front, the rest under More models");
         assert_eq!(models[4].default_effort, None, "a default it doesn't list isn't offered");
+    }
+
+    // The shapes below were captured from codex-cli 0.148.0's app-server (Oct 2026).
+    #[test]
+    fn a_failed_command_reports_its_output_and_exit_code() {
+        let item = json!({ "type": "commandExecution", "id": "exec-1", "command": "/bin/zsh -lc \"sh -c 'echo out-line; echo err-line >&2; exit 3'\"", "status": "failed", "aggregatedOutput": "err-line\nout-line\n", "exitCode": 3, "durationMs": 0 });
+        let (failed, output) = command_result(&item);
+        assert!(failed);
+        assert_eq!(output.text, "err-line\nout-line\n");
+        let ok = json!({ "status": "completed", "aggregatedOutput": "fine\n", "exitCode": 0 });
+        assert!(!command_result(&ok).0);
+        assert!(command_result(&json!({ "status": "declined", "aggregatedOutput": null, "exitCode": null })).0, "a refused command didn't succeed");
+    }
+
+    #[test]
+    fn real_mcp_results_keep_their_image_and_failures() {
+        let snap = json!({ "type": "mcpToolCall", "status": "completed", "result": { "content": [
+            { "type": "text", "text": "snap-text" },
+            { "type": "image", "data": "iVBORw0KGgo=", "mimeType": "image/png" }
+        ], "structuredContent": { "k": 1 }, "_meta": null }, "error": null });
+        let out = mcp_output(&snap);
+        assert_eq!(out.text, "snap-text");
+        assert_eq!(out.images.len(), 1);
+        assert_eq!(out.images[0].media_type, "image/png");
+        let boom = json!({ "type": "mcpToolCall", "status": "failed", "result": { "content": [{ "type": "text", "text": "boom-failed" }], "structuredContent": null }, "error": null });
+        assert_eq!(mcp_output(&boom).text, "boom-failed");
+    }
+
+    #[test]
+    fn real_file_changes_are_writes_and_edits_with_their_diffs() {
+        let item = json!({ "type": "fileChange", "id": "exec-2", "status": "completed", "changes": [
+            { "path": "/tmp/p/a.txt", "kind": { "type": "update", "move_path": null }, "diff": "@@ -1 +1 @@\n-hello\n+changed\n" },
+            { "path": "/tmp/p/b.txt", "kind": { "type": "add" }, "diff": "new-file\n" }
+        ] });
+        let changes = item["changes"].as_array().unwrap();
+        assert_eq!(change_tool(&changes[0]), "Edit");
+        assert_eq!(change_tool(&changes[1]), "Write");
+    }
+
+    #[test]
+    fn a_web_search_names_its_query_and_lists_results_once_done() {
+        let started = json!({ "type": "webSearch", "id": "exec-3", "query": "", "action": null, "results": null });
+        assert_eq!(web_search_call(&started).1, json!({ "query": "" }));
+        let done = json!({ "type": "webSearch", "id": "exec-3", "query": "site:blog.rust-lang.org Rust stable release",
+            "action": { "type": "search", "query": "site:blog.rust-lang.org Rust stable release", "queries": null },
+            "results": [
+                { "type": "text_result", "domain": "blog.rust-lang.org", "ref_id": "turn0search0", "snippet": "The Rust Release Team", "title": "Announcing Rust 1.99.0 | Rust Blog", "url": "https://blog.rust-lang.org/2026/10/01/Rust-1.99.0/" },
+                { "type": "text_result", "domain": "blog.rust-lang.org", "snippet": "Pre-release testing" }
+            ] });
+        let (tool, input, output) = web_search_call(&done);
+        assert_eq!(tool, "WebSearch");
+        assert_eq!(input, json!({ "query": "site:blog.rust-lang.org Rust stable release" }));
+        assert!(output.text.starts_with("Announcing Rust 1.99.0 | Rust Blog\nhttps://blog.rust-lang.org/2026/10/01/Rust-1.99.0/\nThe Rust Release Team\n\nblog.rust-lang.org\nPre-release testing"));
+        // No results shared: a plain line, never an empty row.
+        let bare = json!({ "type": "webSearch", "query": "x", "action": { "type": "search", "query": "x" }, "results": null });
+        assert!(web_search_call(&bare).2.text.contains("searched the web"));
+        let page = json!({ "action": { "type": "openPage", "url": "https://a.dev/" } });
+        assert_eq!(web_search_call(&page).0, "WebFetch");
+        let find = json!({ "action": { "type": "findInPage", "url": "https://a.dev/", "pattern": "stable" } });
+        assert_eq!(web_search_call(&find).1, json!({ "query": "“stable” in https://a.dev/" }));
+        let many = json!({ "action": { "type": "search", "query": null, "queries": ["a", "b"] } });
+        assert_eq!(web_search_call(&many).1, json!({ "query": "a, b" }));
+    }
+
+    #[test]
+    fn a_plan_update_reads_as_a_checklist() {
+        let update = json!({ "explanation": null, "plan": [
+            { "step": "Look", "status": "completed" }, { "step": "Act", "status": "inProgress" }, { "step": "Report", "status": "pending" }
+        ] });
+        assert_eq!(plan_output(&update).text, "✓ Look\n▸ Act\n○ Report");
+        let explained = json!({ "explanation": "Found the cause", "plan": [{ "step": "Fix", "status": "pending" }] });
+        assert_eq!(plan_output(&explained).text, "Found the cause\n\n○ Fix");
+    }
+
+    #[test]
+    fn mcp_calls_report_content_structure_or_the_error() {
+        let text = json!({ "result": { "content": [{ "type": "text", "text": "hello" }] } });
+        assert_eq!(mcp_output(&text).text, "hello");
+        let structured = json!({ "result": { "content": [], "structuredContent": { "n": 1 } } });
+        assert!(mcp_output(&structured).text.contains("\"n\": 1"));
+        assert_eq!(mcp_output(&json!({ "error": { "message": "boom" } })).text, "boom");
+        assert!(mcp_output(&json!({})).is_empty());
     }
 
     #[test]
@@ -734,5 +966,15 @@ pub(crate) mod tests {
         assert_eq!(sandbox()["type"], "workspaceWrite");
         assert_eq!(sandbox()["networkAccess"], false);
         assert_eq!(turn_input(&chat::UserTurn::plain("hi"))[0]["text"], "hi");
+    }
+
+    #[test]
+    fn a_leading_slash_names_a_skill_codex_listed() {
+        let skills = vec![("pdf".to_string(), "/s/pdf/SKILL.md".to_string())];
+        assert_eq!(skill_invocation("/pdf summarise report.pdf", &skills), Some(("$pdf summarise report.pdf".into(), "pdf".into(), "/s/pdf/SKILL.md".into())));
+        assert_eq!(skill_invocation("/pdf", &skills).map(|s| s.0), Some("$pdf".into()));
+        assert_eq!(skill_invocation("/unknown x", &skills), None);
+        assert_eq!(skill_invocation("/ pdf", &skills), None);
+        assert_eq!(skill_invocation("use /pdf", &skills), None);
     }
 }

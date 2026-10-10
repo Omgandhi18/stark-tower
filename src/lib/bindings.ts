@@ -30,8 +30,39 @@ async conversationSpend(conversationId: number) : Promise<Result<ConversationSpe
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * How much of each provider's usage limit is left, as last read. Readings older than
+ * `max_age_secs` are read again in the background (`limits://changed` says when).
+ */
+async usageLimits(maxAgeSecs: number) : Promise<UsageLimits> {
+    return await TAURI_INVOKE("usage_limits", { maxAgeSecs });
+},
+/**
+ * Read every provider's usage limits again now.
+ */
+async refreshUsageLimits() : Promise<UsageLimits> {
+    return await TAURI_INVOKE("refresh_usage_limits");
+},
 async listAgents() : Promise<Agent[]> {
     return await TAURI_INVOKE("list_agents");
+},
+/**
+ * What the slash menu offers in an agent's chat: its skills, commands, MCP prompts and MCP servers.
+ * Read from disk until the chat's session reports its own; the window hears `slash://changed` then.
+ */
+async slashCatalog(agentId: string, conversation: number | null, folder: string) : Promise<Result<SlashCatalog, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("slash_catalog", { agentId, conversation, folder }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Ask a chat's session for its MCP servers' status again. False when the chat has no session that can say.
+ */
+async slashRefreshMcp(conversation: number) : Promise<boolean> {
+    return await TAURI_INVOKE("slash_refresh_mcp", { conversation });
 },
 async getLedger(limit: number | null) : Promise<LedgerEntry[]> {
     return await TAURI_INVOKE("get_ledger", { limit });
@@ -530,6 +561,12 @@ async browserHide() : Promise<void> {
     await TAURI_INVOKE("browser_hide");
 },
 /**
+ * ⌘W with no tab strip focused: close the window, which hides it (agents keep working).
+ */
+async closeMainWindow() : Promise<void> {
+    await TAURI_INVOKE("close_main_window");
+},
+/**
  * Open what was typed in the address bar.
  */
 async browserNavigate(url: string) : Promise<Result<BrowserPage, string>> {
@@ -552,10 +589,54 @@ async browserGo(action: string) : Promise<Result<null, string>> {
 }
 },
 /**
- * The page the built-in browser is on.
+ * The built-in browser's tabs, and the one showing.
  */
-async browserPage() : Promise<BrowserPage> {
-    return await TAURI_INVOKE("browser_page");
+async browserTabs() : Promise<BrowserTabs> {
+    return await TAURI_INVOKE("browser_tabs");
+},
+/**
+ * A new tab, switched to; on an address if one is given.
+ */
+async browserNewTab(url: string | null) : Promise<Result<BrowserTabs, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("browser_new_tab", { url }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Switch to a tab.
+ */
+async browserSelectTab(id: number) : Promise<Result<BrowserTabs, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("browser_select_tab", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Close a tab.
+ */
+async browserCloseTab(id: number) : Promise<Result<BrowserTabs, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("browser_close_tab", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Show a page in its own tab, or the tab already on it.
+ */
+async browserOpenTab(url: string) : Promise<Result<BrowserTabs, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("browser_open_tab", { url }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 },
 async devserverCandidates(folder: string) : Promise<Result<Candidates, string>> {
     try {
@@ -1116,6 +1197,14 @@ async setAutoMode(conversationId: number, on: boolean) : Promise<Result<null, st
 async runtimeHealth() : Promise<RuntimeHealth> {
     return await TAURI_INVOKE("runtime_health");
 },
+/**
+ * Check the runtime again from scratch: read the login shell's PATH again in the
+ * background, then ask every CLI its version and sign-in again. Returns the health
+ * as it stands; `health://changed` says when the new PATH is in.
+ */
+async recheckRuntime() : Promise<RuntimeHealth> {
+    return await TAURI_INVOKE("recheck_runtime");
+},
 async studioAvailable() : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("studio_available") };
@@ -1547,8 +1636,20 @@ export type BrowserPage = {
 /**
  * "" before anything has been opened.
  */
-url: string; title: string; loading: boolean }
+url: string; title: string; loading: boolean; 
+/**
+ * The page's icon, as an address the interface can show ("" until it has told us one).
+ */
+favicon: string }
 export type BrowserPick = { selector: string; tag: string; id: string; classes: string[]; role: string; accessible_name: string; text: string; attributes: Partial<{ [key in string]: string }>; styles: Partial<{ [key in string]: string }>; bounds: Bounds; url: string; title: string; viewport: Partial<{ [key in string]: number }>; device_pixel_ratio: number; outer_html: string }
+/**
+ * One tab, as the panel's tab strip shows it.
+ */
+export type BrowserTab = { id: number; url: string; title: string; loading: boolean; favicon: string }
+/**
+ * The open tabs and which one is showing.
+ */
+export type BrowserTabs = { tabs: BrowserTab[]; active: number | null }
 export type Budget = { period: BudgetPeriod; limit_usd: number; warn_percent: number }
 export type BudgetPeriod = "day" | "week" | "month"
 /**
@@ -1685,8 +1786,35 @@ export type FileClaim = { workspace: string; path: string; agent_id: string; tas
 export type Host = { kind: HostKind; hostname: string; repository: string; remote: string; connection: string | null }
 export type HostKind = "github" | "gitlab" | "unknown"
 export type LedgerEntry = { id: number; ts: number; agent_id: string; kind: string; detail: string; load: number }
+export type LimitWindow = { 
+/**
+ * Stable key: "five_hour", "seven_day", "seven_day:fable", "codex:primary".
+ */
+id: string; label: string; used_percent: number; 
+/**
+ * When the window resets, in Unix milliseconds.
+ */
+resets_at: number | null; 
+/**
+ * The CLI's own words for the reset, when the time couldn't be read.
+ */
+resets_text: string | null }
 export type Look = { id: string; choices: Choices; paths: Partial<{ [key in string]: string }>; progress: Partial<{ [key in string]: string }>; errors: Partial<{ [key in string]: string }>; revision: number; saved: boolean }
 export type MacNotifications = { enabled?: boolean; in_front?: boolean; reminders?: boolean; requests?: boolean; work?: boolean; code_review?: boolean; automations?: boolean; budget?: boolean; checks?: boolean; claims?: boolean }
+export type McpServer = { name: string; status: McpStatus; 
+/**
+ * user | project | local | plugin | claude.ai …
+ */
+source: string; tools: number | null; error: string | null; 
+/**
+ * stdio | http | sse; empty when not known.
+ */
+transport: string }
+export type McpStatus = "connected" | "pending" | "failed" | "needs-auth" | "disabled" | 
+/**
+ * Set up, but no session has reported on it yet.
+ */
+"unknown"
 /**
  * A model an agent can run on.
  */
@@ -1841,6 +1969,31 @@ helpers: Capability;
  * Starkline's team tools: delegate, ask you, message teammates, report bugs.
  */
 team_tools: Capability }
+export type ProviderLimits = { 
+/**
+ * "claude" | "codex".
+ */
+provider: string; name: string; 
+/**
+ * The plan the provider reports ("ChatGPT Plus"), when it says.
+ */
+plan: string | null; windows: LimitWindow[]; 
+/**
+ * Why there are no numbers, or why the ones shown couldn't be refreshed.
+ */
+unavailable: string | null; 
+/**
+ * The provider says a limit has been reached.
+ */
+limited: boolean; 
+/**
+ * When the numbers shown were read, in Unix milliseconds.
+ */
+updated_at: number | null; 
+/**
+ * A read is under way.
+ */
+checking: boolean }
 export type Recording = { path: string; started: number }
 /**
  * Something the developer wants reminding of, and the agent who reminds them.
@@ -1971,6 +2124,10 @@ liveSessions: number;
  */
 node: string | null; nodePath: string | null; 
 /**
+ * Whether the login shell's PATH (nvm, OpenCode, Homebrew…) was read for finding CLIs.
+ */
+shellPath: ShellPathHealth; 
+/**
  * Agent sessions keep running with the window closed.
  */
 background: boolean }
@@ -1992,6 +2149,34 @@ export type Schedule =
  */
 { kind: "everyHours"; hours: number }
 export type Server = { folder: string; command: string; status: Status; address: string | null; exit_code: number | null; generation: number; open_page: boolean }
+/**
+ * What reading the login shell's PATH came to, for Diagnostics.
+ */
+export type ShellPathHealth = { 
+/**
+ * The shell asked, e.g. "/bin/zsh".
+ */
+shell: string; 
+/**
+ * Its PATH was read; otherwise CLIs are looked for in the standard install folders only.
+ */
+read: boolean; 
+/**
+ * Why it couldn't be read, when it couldn't.
+ */
+error: string | null; elapsedMs: number; 
+/**
+ * Folders the shell's PATH added to the one Starkline started with.
+ */
+added: number; 
+/**
+ * When it was read (or tried), in ms since the epoch.
+ */
+readAt: number; 
+/**
+ * It's being read again right now; until then the last reading is used.
+ */
+reading: boolean }
 /**
  * A provider CLI's own account of whether it can reach its models.
  */
@@ -2022,6 +2207,42 @@ problem: string | null; devices: SimDevice[];
  * AXe or idb is installed, so taps, swipes and typing go through from Starkline.
  */
 touch: boolean }
+export type SlashCatalog = { items: SlashItem[]; servers: McpServer[]; 
+/**
+ * A running session reported this; otherwise it's read from disk.
+ */
+live: boolean }
+export type SlashItem = { 
+/**
+ * What follows the slash: `review`, `sarathi:review`, `mcp__docs__summarize`.
+ */
+name: string; description: string; 
+/**
+ * The arguments it takes, as its author wrote them (`[branch]`); empty when none.
+ */
+hint: string; kind: SlashKind; source: SlashSource; 
+/**
+ * The plugin or MCP server it comes from; empty otherwise.
+ */
+origin: string }
+export type SlashKind = "skill" | "command" | 
+/**
+ * A prompt an MCP server offers.
+ */
+"prompt" | 
+/**
+ * One of the provider's own commands.
+ */
+"builtin"
+export type SlashSource = "project" | "user" | "plugin" | 
+/**
+ * Skills the developer's claude.ai account syncs.
+ */
+"synced" | "mcp" | 
+/**
+ * Built into the agent's provider.
+ */
+"provider"
 export type SpendDay = { date: string; total: SpendTotal }
 export type SpendGroup = { key: string; total: SpendTotal }
 export type SpendSummary = { today: SpendTotal; week: SpendTotal; month: SpendTotal; budget: Budget; budget_spend: number; days: SpendDay[]; agents: SpendGroup[]; projects: SpendGroup[]; models: SpendGroup[]; first_date: string | null; has_spend: boolean }
@@ -2034,7 +2255,15 @@ export type StoredMessage = { id: number; ts: number; role: string; text?: strin
 /**
  * Files with the message: what the developer attached, or what the agent made or shared.
  */
-attachments: Attachment[] }
+attachments: Attachment[]; 
+/**
+ * A tool call's full input as JSON (command, path, arguments); long strings in it may be shortened.
+ */
+input?: string | null; 
+/**
+ * What a tool call put out, once it came back. Its images are in `attachments`.
+ */
+result?: ToolResult | null }
 export type Support = "yes" | 
 /**
  * Works in part (no built-in provider is limited today, but the interface shows it).
@@ -2132,7 +2361,12 @@ export type TerminalOutput = { data: number[]; offset: number; exit_code: number
 /**
  * One thing to do, done by you or by the agent it's assigned to.
  */
-export type Todo = { id: number; list_id: number; title: string; notes: string; 
+export type Todo = { id: number; list_id: number; 
+/**
+ * Its number on its list: #1, #2, … Fixed when it's added, so ticking or reordering never
+ * renumbers anything; a to-do moved to another list takes that list's next number.
+ */
+number: number; title: string; notes: string; 
 /**
  * Who'll do it.
  */
@@ -2215,6 +2449,31 @@ enthusiasm: number;
  * Brief (0) to thorough.
  */
 detail: number }
+/**
+ * What a finished call put out, as stored with its row.
+ */
+export type ToolResult = { 
+/**
+ * The output, shortened past [`TEXT_LIMIT`] (with a note saying so).
+ */
+text: string; 
+/**
+ * The text was cut short.
+ */
+truncated: boolean; 
+/**
+ * The call failed.
+ */
+isError: boolean; 
+/**
+ * Images the call returned that weren't kept (too large for the attachments store).
+ */
+imagesDropped: number; 
+/**
+ * The turn ended without the call ever reporting back (parallel calls cut short).
+ */
+noResult: boolean }
+export type UsageLimits = { providers: ProviderLimits[] }
 export type Voice = { name: string; speed: number; pitch: number }
 export type VoiceSettings = { enabled?: boolean; reminders?: boolean; ready?: boolean; needs_you?: boolean; failures?: boolean; replies?: boolean; background_only?: boolean; quiet_hours?: boolean; quiet_from?: string; quiet_to?: string; volume?: number }
 export type VoiceStatus = { model: string; downloaded: number; total: number; agent_id: string | null; token: string | null; error: string | null }

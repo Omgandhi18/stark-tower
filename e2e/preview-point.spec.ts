@@ -18,38 +18,41 @@ async function menu(page: Page, name: string) {
   await page.getByRole("menuitem", { name, exact: true }).click();
 }
 
-test("browser picks insert at the caret, attach a picture and stay in the selected chat", async ({ page }) => {
+test("browser picks become chips with a picture and stay in the selected chat", async ({ page }) => {
   const scenario = withBrowserPick(defaultScenario());
   const preview = await openPreview(page, false, scenario);
   const input = page.getByRole("textbox", { name: "Message FRIDAY…" });
+  const chips = page.getByRole("list", { name: "Quoted and pointed-at" }).getByRole("listitem");
   await input.fill("Before after");
   await input.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(7, 7));
   await preview.getByRole("button", { name: "Point at something" }).click();
-  await expect(input).toHaveValue(/Before \nIn the browser at http:\/\/localhost:5173\/settings/);
-  await expect(input).toHaveValue(/button.primary "Save changes" \(#save\)/);
-  await expect(input).toHaveValue(/after$/);
+  await expect(chips).toHaveCount(1);
+  await expect(chips.first()).toContainText('button “Save changes”');
+  await expect(input).toHaveValue("Before after");
   await expect(input).toBeFocused();
-  await expect(page.getByRole("list", { name: "Attached files" })).toContainText("browser-point.jpg");
   await page.evaluate((pick) => {
     (window as unknown as { __fake: { state: { browserPick: typeof pick } } }).__fake.state.browserPick = pick;
   }, scenario.browserPick);
   await preview.getByRole("button", { name: "Point at something" }).click();
-  await expect(page.getByRole("list", { name: "Attached files" }).getByRole("listitem")).toHaveCount(2);
+  await expect(chips).toHaveCount(2);
+  await chips.last().getByRole("button", { name: /^Remove/ }).click();
+  await expect(chips).toHaveCount(1);
   await preview.getByRole("button", { name: "Point at something" }).click();
   await expect(preview.getByRole("button", { name: "Point at something" })).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("Escape");
   await expect(preview.getByRole("button", { name: "Point at something" })).toHaveAttribute("aria-pressed", "false");
-  const draft = await input.inputValue();
   await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: /^Work/ }).click();
   await page.getByRole("region", { name: "Team" }).getByRole("button", { name: /VERONICA/ }).click();
   await expect(page.getByRole("textbox", { name: "Message VERONICA…" })).toHaveValue("");
-  await expect(page.getByRole("list", { name: "Attached files" })).toHaveCount(0);
+  await expect(page.getByRole("list", { name: "Quoted and pointed-at" })).toHaveCount(0);
   await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: /^Work/ }).click();
   await page.getByRole("region", { name: "Team" }).getByRole("button", { name: /FRIDAY/ }).click();
-  await expect(input).toHaveValue(draft);
+  await expect(input).toHaveValue("Before after");
+  await expect(chips).toHaveCount(1);
   await input.press("Enter");
   const log = page.getByRole("log", { name: "Conversation with FRIDAY" });
   const html = log.getByText("Element HTML", { exact: true }).first();
+  await log.getByText("Details", { exact: true }).first().click();
   await expect(html).toBeVisible();
   expect(await html.evaluate((el) => el.closest("details")?.open)).toBe(false);
   await html.click();
@@ -63,9 +66,12 @@ test("simulator pointing marks the screen and adds device points without tapping
   await preview.getByRole("button", { name: "Point at something" }).click();
   await screen.click({ position: { x: 20, y: 30 } });
   const input = page.getByRole("textbox", { name: "Message FRIDAY…" });
-  await expect(input).toHaveValue(/On iPhone 17 Pro, at .* \(points\): Button “Sign in”/);
+  await expect(page.getByRole("list", { name: "Quoted and pointed-at" })).toContainText("Button “Sign in”");
   await expect(input).toBeFocused();
-  await expect(page.getByRole("list", { name: "Attached files" })).toContainText("simulator-point.png");
+  await input.press("Enter");
+  const sentPoint = (await fakeCalls(page)).filter((c) => c.cmd === "chat_send").at(-1);
+  expect(String(sentPoint?.args.text)).toMatch(/On iPhone 17 Pro, at .* \(points\): Button “Sign in”/);
+  expect(JSON.stringify(sentPoint?.args.attachments)).toContain("simulator-point.png");
   const calls = await fakeCalls(page);
   expect(calls.filter((c) => c.cmd === "simulator_tap")).toHaveLength(0);
   const image = calls.find((c) => c.cmd === "attach_data");
@@ -146,7 +152,7 @@ test("booting is required for simulator controls; pointing still works without a
   const preview = await openPreview(page, true, scenario);
   await preview.getByRole("button", { name: "Point at something" }).click();
   await preview.getByRole("img", { name: "iPhone 17 Pro's screen" }).click({ position: { x: 10, y: 10 } });
-  await expect(page.getByRole("textbox", { name: "Message FRIDAY…" })).toHaveValue(/\(points\)/);
+  await expect(page.getByRole("list", { name: "Quoted and pointed-at" })).toContainText("iPhone 17 Pro");
   await preview.getByRole("combobox", { name: "Simulator" }).selectOption("SIM-16E");
   for (const name of ["Point at something", "Record a video", "Logs", "Dark appearance"]) {
     await expect(preview.getByRole("button", { name, exact: true })).toBeDisabled();

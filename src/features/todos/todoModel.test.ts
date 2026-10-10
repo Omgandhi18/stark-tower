@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Task, Todo, TodoList } from "../../lib/types";
-import { listsFor, openCounts, overdue, splitTodos, todoState } from "./todoModel";
+import { deleteWarning, listsFor, openCounts, overdue, splitTodos, todoState } from "./todoModel";
 
 const todo = (patch: Partial<Todo> = {}): Todo => ({
   id: 1,
   list_id: 1,
+  number: 1,
   title: "Build the APK",
   notes: "",
   agent_id: null,
@@ -35,6 +36,19 @@ describe("to-do model", () => {
     expect(todoState({ ...base, todo: todo({ task_id: "t1" }), task: task("done") }).label).toBe("Ready for review");
     expect(todoState({ ...base, todo: todo({ task_id: "t1" }), task: task("blocked") })).toMatchObject({ label: "Blocked", canStart: true });
     expect(todoState({ ...base, todo: todo({ done: 5, task_id: "t1" }), task: task("doing") }).label).toBe("Done");
+  });
+
+  it("warns before deleting a to-do an agent is working on, and only then", () => {
+    const base = { list: list("manual"), agentName: "FRIDAY", waitingOnYou: false };
+    const working = todoState({ ...base, todo: todo({ agent_id: "friday", task_id: "t1" }), task: task("doing") });
+    expect(deleteWarning(working, "FRIDAY")).toBe("FRIDAY is working on this. Delete anyway?");
+    const waiting = todoState({ ...base, waitingOnYou: true, todo: todo({ task_id: "t1" }), task: task("doing") });
+    expect(deleteWarning(waiting, "FRIDAY")).not.toBeNull();
+    for (const status of ["done", "blocked", "idle", "closed"]) {
+      expect(deleteWarning(todoState({ ...base, todo: todo({ task_id: "t1" }), task: task(status) }), "FRIDAY")).toBeNull();
+    }
+    expect(deleteWarning(todoState({ ...base, todo: todo({ agent_id: "friday" }), task: undefined }), "FRIDAY")).toBeNull();
+    expect(deleteWarning(todoState({ ...base, todo: todo({ done: 5, task_id: "t1" }), task: task("doing") }), "FRIDAY")).toBeNull();
   });
 
   it("keeps open to-dos in your order and done ones latest first", () => {

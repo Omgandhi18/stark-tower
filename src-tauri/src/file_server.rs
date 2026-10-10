@@ -82,6 +82,11 @@ fn answer(mut stream: TcpStream) {
     let _ = stream.write_all(&response);
 }
 
+/// Whether an address is one of the kept files served from here (it won't exist after a restart).
+pub fn serves(url: &str) -> bool {
+    SERVER.get().and_then(|s| s.as_ref().ok()).is_some_and(|server| url.starts_with(&format!("http://127.0.0.1:{}/", server.port)))
+}
+
 /// The address the built-in browser opens a file at; the file is served from now on.
 pub fn url_for(path: &Path) -> Result<String, String> {
     let server = server()?;

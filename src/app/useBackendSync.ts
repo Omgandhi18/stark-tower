@@ -5,6 +5,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   checkUpdate,
   onSpendChanged,
+  onLimitsChanged,
   onCodeReviewsChanged,
   refreshCodeReviews,
   onCaptureOpenTask,
@@ -18,13 +19,16 @@ import {
   onAutomationsChanged,
   onAutoModeChanged,
   onMemoryChanged,
-  browserPage,
+  browserTabs,
   browserNavigate,
   devserverList,
   onDevserverChanged,
   onDevserverOutput,
   onBrowserChanged,
   onBrowserReveal,
+  onMenuClose,
+  onMenuNewTab,
+  closeMainWindow,
   onSimulatorReveal,
   onRemindersChanged,
   onTodosChanged,
@@ -61,12 +65,14 @@ import { useDevServers } from "../stores/devservers";
 import { usePreview } from "../stores/preview";
 import { useReminders } from "../stores/reminders";
 import { useTodos } from "../stores/todos";
+import { runTabShortcut } from "../design";
 import { useChats } from "../stores/chats";
 import { useNavigation } from "../stores/navigation";
 import { useConfig } from "../stores/config";
 import { useNotifications } from "../stores/notifications";
 import { useSystem } from "../stores/system";
 import { useSpend } from "../stores/spend";
+import { LIMITS_AFTER_TURN_SECS, useLimits } from "../stores/limits";
 import { useWorkspace } from "../stores/workspace";
 
 /** Statuses arrive as events; this only catches anything that slipped past. */
@@ -134,6 +140,7 @@ export function useBackendSync() {
       stopped,
     );
     first("spending", useSpend.getState().refresh);
+    first("usage limits", () => useLimits.getState().load());
     first("projects", workspace.refreshProjects);
     first("saved chats", workspace.refreshConversations);
     first("worktrees", workspace.refreshWorktrees);
@@ -147,7 +154,7 @@ export function useBackendSync() {
     first("reminders", useReminders.getState().refresh);
     first("to-dos", useTodos.getState().refresh);
     first("dev servers", () => devserverList().then((servers) => servers.forEach(useDevServers.getState().apply)));
-    first("browser", () => browserPage().then(usePreview.getState().applyPage));
+    first("browser", () => browserTabs().then(usePreview.getState().applyTabs));
     first("runtime health", system.refreshHealth);
     first("keep-awake state", system.refreshPower);
     first("update status", checkUpdate);
@@ -174,7 +181,12 @@ export function useBackendSync() {
       }),
       onChatSwitched((s) => useChats.getState().switchTo(s.agentId, s.conversationId)),
       onChatStatus((s) => useChats.getState().applyStatus(s.conversationId, s.status)),
-      onSpendChanged(() => useSpend.getState().changed().catch(report("spending"))),
+      onSpendChanged(() => {
+        useSpend.getState().changed().catch(report("spending"));
+        // A turn was recorded: it used some of the plan's limits.
+        useLimits.getState().load(LIMITS_AFTER_TURN_SECS).catch(report("usage limits"));
+      }),
+      onLimitsChanged(() => useLimits.getState().load().catch(report("usage limits"))),
       onWorkspacesChanged(() => useWorkspace.getState().refreshWorktrees().catch(report("worktrees"))),
       onTasksChanged(() => useWorkspace.getState().refreshTasks().catch(report("tasks"))),
       onConversationsChanged(() => useWorkspace.getState().refreshConversations().catch(report("saved chats"))),
@@ -195,8 +207,11 @@ export function useBackendSync() {
         }
       }),
       onDevserverOutput((output) => useDevServers.getState().append(output)),
-      onBrowserChanged((page) => usePreview.getState().applyPage(page)),
+      onBrowserChanged((tabs) => usePreview.getState().applyTabs(tabs)),
       onBrowserReveal(() => usePreview.getState().show("browser")),
+      // ⌘W closes the tab in the tab strip that has focus, else the window; ⌘T opens a tab there.
+      onMenuClose(() => { if (!runTabShortcut("close")) closeMainWindow().catch(report("close the window")); }),
+      onMenuNewTab(() => void runTabShortcut("new")),
       onSimulatorReveal((udid) => {
         usePreview.getState().showSimulator(udid);
         usePreview.getState().show("simulator");
@@ -211,6 +226,7 @@ export function useBackendSync() {
 
     const agentTimer = window.setInterval(reloadAgents, AGENT_RECONCILE_MS);
     const spendTimer = window.setInterval(() => useSpend.getState().refresh().catch(report("spending")), HEALTH_REFRESH_MS);
+    const limitsTimer = window.setInterval(() => useLimits.getState().load().catch(report("usage limits")), HEALTH_REFRESH_MS);
     const healthTimer = window.setInterval(() => useSystem.getState().refreshHealth().catch(report("runtime health")), HEALTH_REFRESH_MS);
     return () => {
       unmounted = true;
@@ -218,6 +234,7 @@ export function useBackendSync() {
       window.clearInterval(agentTimer);
       window.clearInterval(healthTimer);
       window.clearInterval(spendTimer);
+      window.clearInterval(limitsTimer);
       for (const unlisten of subscriptions) unlisten.then((off) => off()).catch(() => {});
     };
   }, []);

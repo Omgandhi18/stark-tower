@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Agent } from "../../lib/types";
-import { mentionSuggestions, routeMessage } from "./mentions";
+import { leadingAgent, mentionSuggestions, routeMessage } from "./mentions";
 
 const agent = (id: string, name: string): Agent => ({
   id,
@@ -48,5 +48,24 @@ describe("mentionSuggestions", () => {
   it("stops once the message has started", () => {
     expect(mentionSuggestions("@friday do it", team)).toEqual([]);
     expect(mentionSuggestions("no mention", team)).toEqual([]);
+  });
+});
+
+describe("leadingAgent", () => {
+  it("names the agent a message opens with and the text before what follows", () => {
+    expect(leadingAgent("@friday /review the diff", team)).toMatchObject({ agent: { id: "friday" }, prefix: "@friday " });
+    expect(leadingAgent("@VISION  \n/review", team)?.prefix).toBe("@VISION  \n");
+  });
+
+  it("is null without an agent by that name, or with nothing after it yet", () => {
+    expect(leadingAgent("@nobody /review", team)).toBeNull();
+    expect(leadingAgent("@friday", team)).toBeNull();
+    expect(leadingAgent("/review @friday", team)).toBeNull();
+    expect(leadingAgent("plain", team)).toBeNull();
+  });
+
+  it("routes the command after it to that agent, and a bare command to the orchestrator", () => {
+    expect(routeMessage("@friday /review the diff", team, "jarvis")).toEqual({ ok: true, agentId: "friday", message: "/review the diff" });
+    expect(routeMessage("/review the diff", team, "jarvis")).toEqual({ ok: true, agentId: "jarvis", message: "/review the diff" });
   });
 });

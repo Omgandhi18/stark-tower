@@ -35,7 +35,7 @@ export default function ProviderEditor({ saved, config, health }: ProviderEditor
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const apply = useConfig((s) => s.apply);
-  const refreshHealth = useSystem((s) => s.refreshHealth);
+  const recheckHealth = useSystem((s) => s.recheckHealth);
   const problems = validateProvider(draft);
   const dirty = isProviderDirty(draft, saved);
   const users = config.agents.filter((a) => a.engine === saved.id);
@@ -50,7 +50,7 @@ export default function ProviderEditor({ saved, config, health }: ProviderEditor
     setError(null);
     try {
       apply(await updateEngine({ ...draft, label: draft.label.trim(), command: draft.command.trim() }));
-      refreshHealth().catch((e) => console.error("[settings] couldn't re-check providers", e));
+      recheckHealth().catch((e) => console.error("[settings] couldn't re-check providers", e));
       setJustSaved(true);
       window.setTimeout(() => setJustSaved(false), SAVED_NOTICE_MS);
     } catch (e) {

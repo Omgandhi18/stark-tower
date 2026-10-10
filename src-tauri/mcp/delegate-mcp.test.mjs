@@ -13,6 +13,9 @@ import readline from "node:readline";
 const SCRIPT = new URL("./delegate-mcp.mjs", import.meta.url).pathname;
 const TOKEN = "test-token";
 
+/** The environment without Starkline's own variables, so a run inside an agent's session tests only what each case sets. */
+const BASE_ENV = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("STARK_")));
+
 /** A fake app: records each request and answers with `answer(request)`. */
 async function fakeApp(answer) {
   const sock = join(mkdtempSync(join(tmpdir(), "starkline-mcp-")), "bridge.sock");
@@ -35,7 +38,7 @@ async function fakeApp(answer) {
 /** Start the bridge script (with any extra environment) and send it one tools/call; resolve with the reply. */
 function callTool(sock, name, args, extraEnv = {}) {
   const child = spawn(process.execPath, [SCRIPT], {
-    env: { ...process.env, STARK_DELEGATE_SOCK: sock, STARK_AGENT_ID: "friday", STARK_ROLE: "worker", STARK_DELEGATE_TOKEN: TOKEN, ...extraEnv },
+    env: { ...BASE_ENV, STARK_DELEGATE_SOCK: sock, STARK_AGENT_ID: "friday", STARK_ROLE: "worker", STARK_DELEGATE_TOKEN: TOKEN, ...extraEnv },
     stdio: ["pipe", "pipe", "ignore"],
   });
   const lines = readline.createInterface({ input: child.stdout });
@@ -49,6 +52,26 @@ function callTool(sock, name, args, extraEnv = {}) {
     });
     child.on("error", reject);
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) + "\n");
+  });
+}
+
+/** Start the bridge script and ask it for its tools. */
+function listTools(sock, extraEnv = {}) {
+  const child = spawn(process.execPath, [SCRIPT], {
+    env: { ...BASE_ENV, STARK_DELEGATE_SOCK: sock, STARK_AGENT_ID: "friday", STARK_ROLE: "worker", STARK_DELEGATE_TOKEN: TOKEN, ...extraEnv },
+    stdio: ["pipe", "pipe", "ignore"],
+  });
+  const lines = readline.createInterface({ input: child.stdout });
+  return new Promise((resolve, reject) => {
+    lines.on("line", (line) => {
+      const message = JSON.parse(line);
+      if (message.id === 1) {
+        child.kill();
+        resolve(message.result);
+      }
+    });
+    child.on("error", reject);
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) + "\n");
   });
 }
 
@@ -100,13 +123,86 @@ test("says which chat it works in, so an agent in several chats is answered in t
 });
 
 test("adds and ticks off to-dos for the developer, as the agent running it", async () => {
-  const app = await fakeApp((request) => ({ result: request.action === "add" ? "Added to-do #7 to \"Inbox\"." : "Ticked off to-do #7." }));
+  const app = await fakeApp((request) => ({ result: request.action === "add" ? "Added to-do #3 to \"Release\"." : "Ticked off to-do #3." }));
   try {
     const added = await callTool(app.sock, "add_todo", { title: "Add an error state to the login form", list: "Release" });
-    assert.match(added.content[0].text, /Added to-do #7/);
+    assert.match(added.content[0].text, /Added to-do #3/);
+    // Numbers are per list: the number goes with the list it is on.
+    await callTool(app.sock, "complete_todo", { number: 3, list: "Release" });
+    // Without a list, the app decides (the list the agent was handed); the number alone is sent as is.
+    await callTool(app.sock, "complete_todo", { number: 3 });
+    // The old global id still goes through.
     await callTool(app.sock, "complete_todo", { id: 7 });
+    // The title it worked on, or its ref, goes along so the app can tell it is the same to-do.
+    await callTool(app.sock, "complete_todo", { number: 3, list: "Release", title: "Add an error state to the login form", ref: "T12" });
     assert.deepEqual(app.requests[0], { type: "todo", agentId: "friday", action: "add", title: "Add an error state to the login form", notes: "", list: "Release", token: TOKEN });
-    assert.deepEqual(app.requests[1], { type: "todo", agentId: "friday", action: "done", title: "", notes: "", list: "", id: 7, token: TOKEN });
+    assert.deepEqual(app.requests[1], { type: "todo", agentId: "friday", action: "done", title: "", notes: "", list: "Release", number: 3, token: TOKEN });
+    assert.deepEqual(app.requests[2], { type: "todo", agentId: "friday", action: "done", title: "", notes: "", list: "", number: 3, token: TOKEN });
+    assert.deepEqual(app.requests[3], { type: "todo", agentId: "friday", action: "done", title: "", notes: "", list: "", id: 7, token: TOKEN });
+    assert.deepEqual(app.requests[4], {
+      type: "todo", agentId: "friday", action: "done", title: "Add an error state to the login form", notes: "", list: "Release", ref: "T12", number: 3, token: TOKEN,
+    });
+  } finally {
+    app.close();
+  }
+});
+
+test("complete_todo explains that numbers belong to a list, and no longer requires a global id", async () => {
+  const app = await fakeApp(() => ({ result: "" }));
+  try {
+    const { tools } = await listTools(app.sock);
+    const complete = tools.find((t) => t.name === "complete_todo");
+    assert.deepEqual(Object.keys(complete.inputSchema.properties).sort(), ["id", "list", "number", "ref", "title"]);
+    assert.equal(complete.inputSchema.required, undefined, "either a number or the legacy id");
+    assert.match(complete.description, /own list/);
+    assert.match(complete.inputSchema.properties.id.description, /Deprecated/);
+    assert.match(tools.find((t) => t.name === "list_todos").description, /per list/);
+  } finally {
+    app.close();
+  }
+});
+
+test("check_todo asks the app whether a to-do is still there, by number and list", async () => {
+  const app = await fakeApp(() => ({ result: "OPEN: to-do #3 on \"Release\" is \"Build the APK\" (ref T12)." }));
+  try {
+    const reply = await callTool(app.sock, "check_todo", { number: 3, list: "Release" });
+    assert.match(reply.content[0].text, /^OPEN:/);
+    assert.notEqual(reply.isError, true);
+    await callTool(app.sock, "check_todo", { number: 5 });
+    assert.deepEqual(app.requests[0], { type: "todo", agentId: "friday", action: "check", title: "", notes: "", list: "Release", number: 3, token: TOKEN });
+    assert.deepEqual(app.requests[1], { type: "todo", agentId: "friday", action: "check", title: "", notes: "", list: "", number: 5, token: TOKEN });
+  } finally {
+    app.close();
+  }
+});
+
+test("a refused tick comes back to the agent as an error it can read", async () => {
+  const app = await fakeApp(() => ({ error: "Not ticked: to-do #3 on \"Release\" was deleted. It was removed while you were working on it." }));
+  try {
+    const reply = await callTool(app.sock, "complete_todo", { number: 3, list: "Release", title: "Build the APK" });
+    assert.equal(reply.isError, true);
+    assert.match(reply.content[0].text, /complete_todo failed: Not ticked.*removed while you were working on it/);
+  } finally {
+    app.close();
+  }
+});
+
+test("the to-do tools tell agents to check before starting and before ticking, and never to fall back", async () => {
+  const app = await fakeApp(() => ({ result: "" }));
+  try {
+    const { tools } = await listTools(app.sock);
+    const check = tools.find((t) => t.name === "check_todo");
+    assert.ok(check, "check_todo is offered");
+    assert.deepEqual(check.inputSchema.required, ["number"]);
+    assert.deepEqual(Object.keys(check.inputSchema.properties).sort(), ["list", "number"]);
+    assert.match(check.description, /before you START/);
+    assert.match(check.description, /before you .*TICK|again immediately before you TICK/);
+    assert.match(check.description, /OPEN.*DONE.*MOVED.*DELETED.*NOT FOUND/s);
+    const complete = tools.find((t) => t.name === "complete_todo");
+    assert.match(complete.description, /REFUSES/);
+    assert.match(complete.description, /title/);
+    assert.match(complete.description, /never ticks a different to-do/);
+    assert.match(tools.find((t) => t.name === "list_todos").description, /check_todo/);
   } finally {
     app.close();
   }
@@ -116,7 +212,7 @@ test("the lead picks a teammate's stopped work back up by its task id", async ()
   const app = await fakeApp(() => ({ result: "Picked KAREN back up on \"Slice 2c\"." }));
   try {
     const child = spawn(process.execPath, [SCRIPT], {
-      env: { ...process.env, STARK_DELEGATE_SOCK: app.sock, STARK_AGENT_ID: "jarvis", STARK_ROLE: "orchestrator", STARK_DELEGATE_TOKEN: TOKEN, STARK_CONVERSATION_ID: "20" },
+      env: { ...BASE_ENV, STARK_DELEGATE_SOCK: app.sock, STARK_AGENT_ID: "jarvis", STARK_ROLE: "orchestrator", STARK_DELEGATE_TOKEN: TOKEN, STARK_CONVERSATION_ID: "20" },
       stdio: ["pipe", "pipe", "ignore"],
     });
     const lines = readline.createInterface({ input: child.stdout });
@@ -212,6 +308,17 @@ test("passes what to click and relays the page's answer", async () => {
     const result = await callTool(app.sock, "browser", { action: "click", target: "3" });
     assert.equal(app.requests[0].target, "3");
     assert.equal(result.content[0].text, "Clicked \"Save\".");
+  } finally {
+    app.close();
+  }
+});
+
+test("switches the browser to a tab by number", async () => {
+  const app = await fakeApp(() => ({ result: "Switched to tab 2." }));
+  try {
+    await callTool(app.sock, "browser", { action: "switch_tab", tab: 2 });
+    assert.equal(app.requests[0].action, "switch_tab");
+    assert.equal(app.requests[0].tab, 2);
   } finally {
     app.close();
   }

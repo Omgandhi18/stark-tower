@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ArrowUpRight, Play, Trash2, X } from "lucide-react";
-import { Button, IconButton, SelectField, StatusPill, TextArea, TextField } from "../../design";
+import { Button, Dialog, IconButton, SelectField, StatusPill, TextArea, TextField } from "../../design";
 import { errorMessage } from "../../lib/errors";
 import { formatRelative } from "../../lib/time";
 import type { Todo, TodoList } from "../../lib/types";
@@ -11,7 +11,7 @@ import { useWorkspace } from "../../stores/workspace";
 import { fromLocalInput, toLocalInput } from "../reminders/reminderModel";
 import AgentPicker from "./AgentPicker";
 import { removeTodo, startWork, toggleDone, updateTodo } from "./todoActions";
-import { byWhom, todoState } from "./todoModel";
+import { byWhom, deleteWarning, todoState } from "./todoModel";
 
 interface TodoDetailProps {
   todo: Todo;
@@ -30,10 +30,12 @@ export default function TodoDetail({ todo, lists, now, onClose }: TodoDetailProp
   const [notes, setNotes] = useState(todo.notes);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const list = lists.find((l) => l.id === todo.list_id);
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? id;
   const state = todoState({ todo, task, list, agentName: todo.agent_id ? nameOf(todo.agent_id) : "", waitingOnYou });
   const done = todo.done !== null;
+  const warning = deleteWarning(state, nameOf(task?.assignee ?? todo.agent_id ?? ""));
 
   const run = async (action: () => Promise<unknown>, failure: string) => {
     setBusy(true);
@@ -46,12 +48,17 @@ export default function TodoDetail({ todo, lists, now, onClose }: TodoDetailProp
       setBusy(false);
     }
   };
+  const remove = () =>
+    run(async () => {
+      await removeTodo(todo.id);
+      onClose();
+    }, "That to-do couldn't be deleted.");
   const save = (change: Parameters<typeof updateTodo>[1]) => run(() => updateTodo(todo, change), "That change couldn't be saved.");
 
   return (
     <aside className="todo-detail" aria-label="To-do">
       <header className="todo-detail-head">
-        <span className="todo-detail-kicker">To-do</span>
+        <span className="todo-detail-kicker">To-do #{todo.number}</span>
         <IconButton icon={X} size="sm" label="Close" onClick={onClose} />
       </header>
       <TextField
@@ -126,13 +133,34 @@ export default function TodoDetail({ todo, lists, now, onClose }: TodoDetailProp
           Added by {byWhom(todo.added_by, nameOf)} {formatRelative(todo.created, now)}
           {done && `, ticked off by ${byWhom(todo.done_by, nameOf)} ${formatRelative(todo.done ?? now, now)}`}
         </span>
-        <Button size="sm" variant="ghost" icon={Trash2} disabled={busy} onClick={() => void run(async () => {
-          await removeTodo(todo.id);
-          onClose();
-        }, "That to-do couldn't be deleted.")}>
+        <Button size="sm" variant="ghost" icon={Trash2} disabled={busy} onClick={() => (warning ? setConfirmingDelete(true) : void remove())}>
           Delete
         </Button>
       </footer>
+      <Dialog
+        open={confirmingDelete}
+        onClose={() => setConfirmingDelete(false)}
+        icon={Trash2}
+        tone="danger"
+        title={warning ?? "Delete this to-do?"}
+        description="If you delete it, they'll be told it was removed when they try to tick it off."
+        actions={
+          <>
+            <Button variant="ghost" onClick={() => setConfirmingDelete(false)}>
+              Keep it
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                setConfirmingDelete(false);
+                void remove();
+              }}
+            >
+              Delete anyway
+            </Button>
+          </>
+        }
+      />
     </aside>
   );
 }

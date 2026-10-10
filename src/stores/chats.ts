@@ -3,7 +3,7 @@
 // it's open in (the Environment's side panel). One store, so drafts survive switching screens.
 import { create } from "zustand";
 import { activeConversation, conversationChat, getChat } from "../lib/api";
-import type { AgentStatus, Attachment, ChatEvent, StoredMessage } from "../lib/types";
+import type { AgentStatus, Attachment, ChatEvent, StoredMessage, ToolResult } from "../lib/types";
 
 /** "artifact": files an agent made or shared (`detail` says which). */
 export type MessageRole = "user" | "agent" | "tool" | "thinking" | "error" | "system" | "artifact";
@@ -17,6 +17,12 @@ export interface ChatMessage {
   detail?: string;
   /** Files with the message: attached by the developer, or made or shared by the agent. */
   attachments?: Attachment[];
+  /** A tool call's full input, as JSON. */
+  input?: string;
+  /** What a tool call put out, once it came back (its images are `attachments`). Absent while it runs, and on calls saved before outputs were kept. */
+  result?: ToolResult;
+  /** Output streamed while a tool call runs; replaced by `result` when it ends. */
+  liveOutput?: string;
   /** The transcript row, once known; how a live message and its saved copy are matched. */
   storedId?: number;
 }
@@ -35,6 +41,14 @@ export interface ChatRef {
 /** The conversation a key names, if it names one. */
 export const conversationOfKey = (key: ChatKey): number | null => (key.startsWith("c:") ? Number(key.slice(2)) : null);
 
+/** Something attached to the message being written, shown as a chip above the input: a quoted excerpt, or a point in the preview. */
+export type ComposerReference =
+  | { id: number; kind: "quote"; text: string }
+  /** `text` is the point exactly as the agent receives it; `image` is the marked screenshot that goes with it. */
+  | { id: number; kind: "point"; text: string; image?: Attachment };
+
+export type NewReference = { kind: "quote"; text: string } | { kind: "point"; text: string; image?: Attachment };
+
 export interface ChatThread {
   /** Whose chat it is ("" until known). */
   agentId: string;
@@ -50,6 +64,8 @@ export interface ChatThread {
   draft: string;
   /** Files attached to the message being written (kept copies). */
   files: Attachment[];
+  /** Quotes and points attached to the message being written. */
+  references: ComposerReference[];
   /** The folder this chat runs in ("" until known). */
   folder: string;
 }
@@ -73,6 +89,10 @@ interface ChatsState {
   setDraft: (key: ChatKey, draft: string) => void;
   /** Change the files attached to the message being written. */
   updateFiles: (key: ChatKey, update: (current: readonly Attachment[]) => Attachment[]) => void;
+  /** Attach a quote or point to the message being written (the same quote twice is kept once). */
+  addReference: (key: ChatKey, reference: NewReference) => void;
+  removeReference: (key: ChatKey, id: number) => void;
+  clearReferences: (key: ChatKey) => void;
   setFolder: (key: ChatKey, folder: string) => void;
   /** Forget the thread (a new or reopened conversation); it re-hydrates on next view. */
   reset: (key: ChatKey) => void;
@@ -89,6 +109,7 @@ const EMPTY: ChatThread = {
   conversationId: null,
   draft: "",
   files: [],
+  references: [],
   folder: "",
 };
 
@@ -105,7 +126,7 @@ export function messageFor(event: ChatEvent): Omit<ChatMessage, "id"> | null {
     case "text":
       return { role: "agent", text: event.text, storedId };
     case "tool":
-      return { role: "tool", tool: event.tool, detail: event.detail, storedId };
+      return { role: "tool", tool: event.tool, detail: event.detail, input: event.input, storedId };
     case "thinking":
       return { role: "thinking", text: event.text, storedId };
     case "error":
@@ -160,8 +181,22 @@ const restore = (rows: readonly StoredMessage[]): ChatMessage[] =>
     tool: r.tool ?? undefined,
     detail: r.detail ?? undefined,
     attachments: r.attachments?.length ? r.attachments : undefined,
+    input: r.input ?? undefined,
+    result: r.result ?? undefined,
     storedId: r.id,
   }));
+
+/** The most output kept on screen for a call still running. */
+const LIVE_OUTPUT_LIMIT = 64 * 1024;
+
+/** A tool call's row after a live event about it: its result arrived, or more of its output did. */
+export function withToolEvent(message: ChatMessage, event: ChatEvent): ChatMessage {
+  if (event.kind === "tool_result") {
+    const { liveOutput: _streamed, ...rest } = message;
+    return { ...rest, result: event.result, ...(event.attachments?.length ? { attachments: event.attachments } : {}) };
+  }
+  return { ...message, liveOutput: ((message.liveOutput ?? "") + (event.text ?? "")).slice(-LIVE_OUTPUT_LIMIT) };
+}
 
 /** A chat's transcript, folder and state from the backend: one conversation, or the one the agent is open in. */
 async function load(key: ChatKey, agentId: string) {
@@ -204,6 +239,16 @@ export const useChats = create<ChatsState>((set, get) => {
       }));
     },
     apply: (event) => {
+      if (event.kind === "tool_result" || event.kind === "tool_output") {
+        // Fills in the row of the call it's about, in every thread showing it.
+        if (event.messageId === undefined) return;
+        for (const [key, thread] of Object.entries(get().threads)) {
+          if (!thread.messages.some((m) => m.storedId === event.messageId)) continue;
+          if (thread.agentId !== event.agentId || !belongsTo(event, thread)) continue;
+          update(key, (t) => ({ messages: t.messages.map((m) => (m.storedId === event.messageId ? withToolEvent(m, event) : m)) }));
+        }
+        return;
+      }
       const message = messageFor(event);
       const settles = event.kind === "text" || event.kind === "error" || event.kind === "result" || event.kind === "exit";
       if (!message && !settles) return;
@@ -250,6 +295,14 @@ export const useChats = create<ChatsState>((set, get) => {
     setPending: (key, pending) => update(key, () => ({ pending })),
     setDraft: (key, draft) => update(key, () => ({ draft })),
     updateFiles: (key, change) => update(key, (t) => ({ files: change(t.files) })),
+    addReference: (key, reference) =>
+      update(key, (t) =>
+        reference.kind === "quote" && t.references.some((r) => r.kind === "quote" && r.text === reference.text)
+          ? {}
+          : { references: [...t.references, { id: id(), ...reference }] },
+      ),
+    removeReference: (key, referenceId) => update(key, (t) => ({ references: t.references.filter((r) => r.id !== referenceId) })),
+    clearReferences: (key) => update(key, () => ({ references: [] })),
     setFolder: (key, folder) => update(key, () => ({ folder })),
     reset: (key) =>
       set((s) => {

@@ -1,0 +1,44 @@
+{
+ "id": 4,
+ "result": {
+  "data": [
+   {
+    "cwd": "/tmp/veronica-slash/proj",
+    "skills": [
+     {
+      "name": "starkcheck",
+      "description": "Starkline smoke-check skill. Use only when invoked explicitly.",
+      "path": "/private/tmp/veronica-slash/proj/.agents/skills/starkcheck/SKILL.md",
+      "scope": "repo",
+      "enabled": true
+     },
+     {
+      "name": "anthropic-skills:brainstorming",
+      "description": "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.",
+      "path": "/Users/dev/.codex/plugins/cache/claude-cowork/anthropic-skills/1.0.0/skills/brainstorming/SKILL.md",
+      "scope": "user",
+      "enabled": true
+     },
+     {
+      "name": "imagegen",
+      "description": "Generate or edit raster images when the task benefits from AI-created bitmap visuals such as photos, illustrations, textures, sprites, mockups, or transparent-background cutouts. Use when Codex should create a brand-new image, transform an existing image, or derive visual variants from references, and the output should be a bitmap asset rather than repo-native code or vector. Do not use when the task is better handled by editing existing SVG/vector/code-native assets, extending an established icon or logo system, or building the visual directly in HTML/CSS/canvas.",
+      "interface": {
+       "displayName": "Image Gen",
+       "shortDescription": "Generate or edit images for websites, games, and more",
+       "iconSmall": "/Users/dev/.codex/skills/.system/imagegen/assets/imagegen-small.svg",
+       "iconLarge": "/Users/dev/.codex/skills/.system/imagegen/assets/imagegen.png",
+       "iconSmallUrl": null,
+       "iconLargeUrl": null,
+       "brandColor": null,
+       "defaultPrompt": "Use $imagegen to make or edit an image for this project."
+      },
+      "path": "/Users/dev/.codex/skills/.system/imagegen/SKILL.md",
+      "scope": "system",
+      "enabled": true
+     }
+    ],
+    "errors": []
+   }
+  ]
+ }
+}

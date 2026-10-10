@@ -1,4 +1,5 @@
 use crate::attachments::Attachment;
+use crate::tool_output::ToolResult;
 use rusqlite::Connection;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -74,7 +75,16 @@ pub struct StoredMessage {
     /// Files with the message: what the developer attached, or what the agent made or shared.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<Attachment>,
+    /// A tool call's full input as JSON (command, path, arguments); long strings in it may be shortened.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
+    /// What a tool call put out, once it came back. Its images are in `attachments`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<ToolResult>,
 }
+
+/// Columns every transcript query selects, in the order `stored_message` reads them.
+const MESSAGE_COLUMNS: &str = "id, ts, role, text, tool, detail, attachments, tool_input, tool_result";
 
 /// Attachments as stored in a column: a JSON list, or nothing.
 fn attachments_column(attachments: &[Attachment]) -> String {
@@ -98,6 +108,8 @@ fn stored_message(r: &rusqlite::Row) -> rusqlite::Result<StoredMessage> {
         tool: r.get(4)?,
         detail: r.get(5)?,
         attachments: attachments_from(r.get(6)?),
+        input: r.get::<_, Option<String>>(7)?.filter(|c| !c.is_empty()),
+        result: r.get::<_, Option<String>>(8)?.filter(|c| !c.is_empty()).and_then(|c| serde_json::from_str(&c).ok()),
     })
 }
 
@@ -695,6 +707,9 @@ impl Ledger {
         )?;
         // Files with a message (JSON): attached by the developer, or made or shared by the agent.
         ensure_column(&conn, "messages", "attachments", "TEXT NOT NULL DEFAULT ''")?;
+        // A tool call's full input (JSON), and what it put out once it came back (JSON). Older rows have neither.
+        ensure_column(&conn, "messages", "tool_input", "TEXT NOT NULL DEFAULT ''")?;
+        ensure_column(&conn, "messages", "tool_result", "TEXT NOT NULL DEFAULT ''")?;
         // Bugs agents report about the app, for the maintenance agent to fix.
         conn.execute(
             "CREATE TABLE IF NOT EXISTS bugs (
@@ -710,6 +725,7 @@ impl Ledger {
         )?;
         conn.execute_batch(crate::spend::SCHEMA)?;
         conn.execute_batch(crate::todo_store::SCHEMA)?;
+        crate::todo_store::migrate(&conn)?;
         Ok(Ledger {
             conn: Mutex::new(conn),
             active: Mutex::new(HashMap::new()),
@@ -1530,7 +1546,8 @@ impl Ledger {
             .query_row("SELECT title FROM conversations WHERE id = ?1", [conv], |r| r.get(0))
             .ok();
         if matches!(cur.as_deref(), Some("New chat") | Some("Chat")) {
-            let t: String = text.trim().lines().next().unwrap_or("").chars().take(48).collect();
+            let words = crate::references::readable(text);
+            let t: String = words.lines().next().unwrap_or("").chars().take(48).collect();
             let title = if t.trim().is_empty() { "Chat".to_string() } else { t };
             let _ = conn.execute(
                 "UPDATE conversations SET title = ?2 WHERE id = ?1",
@@ -1606,6 +1623,25 @@ impl Ledger {
         id
     }
 
+    /// Append a tool call's row with its full input. Returns the stored message's id.
+    pub fn add_tool_message(&self, conv: i64, agent_id: &str, tool: &str, detail: &str, input: Option<&str>) -> Option<i64> {
+        let id = self.add_message_with(conv, agent_id, "tool", None, Some(tool), Some(detail), &[])?;
+        if let Some(input) = input {
+            let conn = self.conn.lock().unwrap();
+            let _ = conn.execute("UPDATE messages SET tool_input = ?2 WHERE id = ?1", rusqlite::params![id, input]);
+        }
+        Some(id)
+    }
+
+    /// Fill in what a tool call put out. Its images are kept as the row's files.
+    pub fn set_tool_result(&self, message_id: i64, result: &ToolResult, images: &[Attachment]) {
+        let conn = self.conn.lock().unwrap();
+        let _ = conn.execute(
+            "UPDATE messages SET tool_result = ?2, attachments = ?3 WHERE id = ?1 AND role = 'tool'",
+            rusqlite::params![message_id, serde_json::to_string(result).unwrap_or_default(), attachments_column(images)],
+        );
+    }
+
     /// The last `limit` messages of the agent's current conversation, chronological.
     pub fn messages(&self, agent_id: &str, limit: i64) -> Vec<StoredMessage> {
         match self.current_conversation(agent_id) {
@@ -1618,8 +1654,8 @@ impl Ledger {
     pub fn conversation_messages(&self, conv: i64, limit: i64) -> Vec<StoredMessage> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = match conn.prepare(
-            "SELECT id, ts, role, text, tool, detail, attachments FROM messages \
-             WHERE conversation_id = ?1 ORDER BY id DESC LIMIT ?2",
+            &format!("SELECT {MESSAGE_COLUMNS} FROM messages \
+             WHERE conversation_id = ?1 ORDER BY id DESC LIMIT ?2"),
         ) {
             Ok(s) => s,
             Err(_) => return vec![],
@@ -1648,8 +1684,8 @@ impl Ledger {
             .ok()
             .flatten();
         let mut stmt = match conn.prepare(
-            "SELECT id, ts, role, text, tool, detail, attachments FROM messages \
-             WHERE conversation_id = ?1 AND ts >= ?2 AND (?3 IS NULL OR ts < ?3) ORDER BY id DESC LIMIT ?4",
+            &format!("SELECT {MESSAGE_COLUMNS} FROM messages \
+             WHERE conversation_id = ?1 AND ts >= ?2 AND (?3 IS NULL OR ts < ?3) ORDER BY id DESC LIMIT ?4"),
         ) {
             Ok(s) => s,
             Err(_) => return vec![],
@@ -1751,6 +1787,24 @@ mod tests {
         let p = std::env::temp_dir().join(format!("stark-led-{}-{n}.db", std::process::id()));
         let _ = std::fs::remove_file(&p);
         (Ledger::open(&p).unwrap(), p)
+    }
+
+    #[test]
+    fn a_tool_call_keeps_its_input_and_what_it_put_out() {
+        let l = Ledger::open(std::path::Path::new(":memory:")).unwrap();
+        let chat = l.new_conversation("friday", "/w");
+        let id = l.add_tool_message(chat, "friday", "Bash", "npm test", Some(r#"{"command":"npm test"}"#)).unwrap();
+        let old = l.add_message_to(chat, "friday", "text", Some("hi"), None, None).unwrap();
+        let before = l.conversation_messages(chat, 10);
+        assert_eq!(before[0].input.as_deref(), Some(r#"{"command":"npm test"}"#));
+        assert!(before[0].result.is_none(), "a running call has no result yet");
+        assert!(before[1].input.is_none() && before[1].result.is_none(), "rows without a tool call carry neither");
+        let result = ToolResult { text: "1 failed".into(), is_error: true, ..Default::default() };
+        l.set_tool_result(id, &result, &[]);
+        l.set_tool_result(old, &result, &[]);
+        let after = l.conversation_messages(chat, 10);
+        assert_eq!(after[0].result, Some(result));
+        assert!(after[1].result.is_none(), "only tool rows take a result");
     }
 
     #[test]

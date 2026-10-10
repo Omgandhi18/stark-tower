@@ -97,8 +97,11 @@ test("todo adds a to-do to the chosen list, for an agent, and opens the list", a
 test("Esc hides without losing a draft, and shown refocuses it", async ({ page }) => {
   await openCapture(page);
   await input(page).fill("Keep this draft");
+  // Shift+Tab leaves the box as usual; only Tab switches the mode. Which control it lands on follows
+  // macOS's keyboard navigation setting (WebKit skips plain buttons unless that's on), so it isn't checked.
   await input(page).press("Shift+Tab");
-  await expect(page.getByRole("button", { name: "Close", exact: true })).toBeFocused();
+  await expect(input(page)).not.toBeFocused();
+  await expect(page.getByRole("tab", { name: "Task", selected: true })).toBeVisible();
   await input(page).focus();
   await input(page).press("Escape");
   expect(await lastCall(page, "hide_capture")).toEqual({});

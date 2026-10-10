@@ -22,6 +22,7 @@ const health = (over: Partial<RuntimeHealth> = {}): RuntimeHealth => ({
   liveSessions: 0,
   node: "v22.11.0",
   nodePath: "/opt/homebrew/bin/node",
+  shellPath: { shell: "/bin/zsh", read: true, error: null, elapsedMs: 640, added: 12, readAt: 0, reading: false },
   background: true,
   ...over,
 });

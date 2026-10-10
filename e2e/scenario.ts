@@ -57,6 +57,8 @@ export interface Scenario {
   macNotificationTestError?: string;
   spend: SpendSummary;
   conversationSpend: Record<number, ConversationSpend>;
+  /** Each provider's usage limits; none by default, so the top bar shows no meter. */
+  usageLimits?: import("../src/lib/bindings").UsageLimits;
   studio?: { available: boolean; looks: Record<string, import("../src/lib/bindings").Look>; failTheme?: string };
   /** How long after the page loads the backend starts answering (the launch race); by default at once. */
   backendReadyAfterMs?: number;
@@ -347,11 +349,12 @@ const message = (id: number, role: string, fields: Partial<StoredMessage>): Stor
   ...fields,
 });
 
-/** A to-do on a list, as the backend keeps it. */
+/** A to-do on a list, as the backend keeps it. Its number on the list defaults to its id; say `number` where the two differ. */
 export function todo(id: number, listId: number, title: string, patch: Partial<Todo> = {}): Todo {
   return {
     id,
     list_id: listId,
+    number: id,
     title,
     notes: "",
     agent_id: null,
@@ -492,13 +495,28 @@ export function defaultScenario(): Scenario {
     transcripts: {
       11: [
         message(1, "user", { text: "Can you redesign the settings page? Group the options and add a search box." }),
-        message(2, "tool", { tool: "Read", detail: "src/pages/Settings.tsx" }),
-        message(3, "tool", { tool: "Grep", detail: "SettingsSection" }),
+        message(2, "tool", {
+          tool: "Read",
+          detail: "src/pages/Settings.tsx",
+          input: '{"file_path":"src/pages/Settings.tsx"}',
+          result: { text: "export function Settings() {\n  return <SettingsSection title=\"Account\" />;\n}\n" },
+        }),
+        message(3, "tool", { tool: "Grep", detail: "SettingsSection", input: '{"pattern":"SettingsSection","path":"src"}', result: { text: "src/pages/Settings.tsx:2\nsrc/pages/Billing.tsx:9" } }),
         message(4, "agent", {
           text: "I grouped the options into **Account**, **Payments** and **Notifications**, and added a search box that filters them as you type.\n\n```tsx\nconst visible = sections.filter((s) => s.title.toLowerCase().includes(query));\n```\n\nNext I'll update the tests.",
         }),
-        message(5, "tool", { tool: "Edit", detail: "src/pages/Settings.tsx" }),
-        message(6, "tool", { tool: "Bash", detail: "npm test -- settings" }),
+        message(5, "tool", {
+          tool: "Edit",
+          detail: "src/pages/Settings.tsx",
+          input: '{"file_path":"src/pages/Settings.tsx","old_string":"Account","new_string":"Your account"}',
+          result: { text: "The file src/pages/Settings.tsx has been updated." },
+        }),
+        message(6, "tool", {
+          tool: "Bash",
+          detail: "npm test -- settings",
+          input: '{"command":"npm test -- settings"}',
+          result: { text: "FAIL src/pages/Settings.test.tsx\n  ✕ groups the options (14 ms)\n\nTests: 1 failed, 3 passed", isError: true },
+        }),
         message(7, "artifact", {
           detail: "made",
           attachments: [
@@ -597,6 +615,7 @@ export function defaultScenario(): Scenario {
       liveSessions: 4,
       node: "v22.11.0",
       nodePath: "/opt/homebrew/bin/node",
+      shellPath: { shell: "/bin/zsh", read: true, error: null, elapsedMs: 640, added: 12, readAt: NOW - 3 * 60 * 60_000, reading: false },
       background: true,
       engines: [
         {

@@ -2,6 +2,12 @@
 // by the `export_typescript_bindings` test). Re-exported here so the rest of the
 // app keeps importing from `./types` while the shapes can never drift from Rust.
 export type {
+  SlashCatalog,
+  SlashItem,
+  SlashKind,
+  SlashSource,
+  McpServer,
+  McpStatus,
   MacNotifications,
   NotificationPermission,
   ActiveContext,
@@ -31,6 +37,7 @@ export type {
   EngineConfig,
   LedgerEntry,
   StoredMessage,
+  ToolResult,
   Task,
   DispatchResult,
   ProjectInfo,
@@ -67,6 +74,8 @@ export type {
   TodoList,
   TodoListInput,
   BrowserPage,
+  BrowserTab,
+  BrowserTabs,
   BrowserPick,
   SimulatorPoint,
   ExtraState,
@@ -80,7 +89,7 @@ export type {
   SimulatorStatus,
 } from "./bindings";
 
-import type { AgentStatus, Attachment } from "./bindings";
+import type { AgentStatus, Attachment, ToolResult } from "./bindings";
 
 // ---- UI / event-payload types (not command types, so not generated) ----
 
@@ -119,7 +128,8 @@ export interface UpdateStatus {
   url?: string;
 }
 
-export type ChatEventKind = "init" | "text" | "thinking" | "tool" | "result" | "error" | "exit" | "system" | "artifact";
+/** "tool_result": a tool call came back (`messageId` names its row); "tool_output": more of a running call's output. */
+export type ChatEventKind = "init" | "text" | "thinking" | "tool" | "tool_result" | "tool_output" | "result" | "error" | "exit" | "system" | "artifact";
 
 export interface ChatEvent {
   agentId: string;
@@ -136,6 +146,10 @@ export interface ChatEvent {
   taskId?: string;
   /** Files with it: what the agent made ("made") or shared on purpose ("shared"), named by `detail`. */
   attachments?: Attachment[];
+  /** A tool call's full input, as JSON. */
+  input?: string;
+  /** What a tool call put out; its images are `attachments`. */
+  result?: ToolResult;
 }
 
 /** An agent now talks in a different conversation (chat://switched). */

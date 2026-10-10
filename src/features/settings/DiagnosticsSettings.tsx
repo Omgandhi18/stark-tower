@@ -5,6 +5,7 @@ import { errorMessage } from "../../lib/errors";
 import type { StateTone } from "../../lib/status";
 import { useSystem } from "../../stores/system";
 import CrashLog from "../crashes/CrashLog";
+import { shellPathSummary } from "./diagnosticsModel";
 import { installSummary, signInSummary } from "./providerDraft";
 
 const COPIED_MS = 1600;
@@ -35,7 +36,7 @@ function CheckRow({ label, value, detail, tone }: CheckRowProps) {
 /** What the agent runtime can do right now, in plain words, plus a report to share. */
 export default function DiagnosticsSettings() {
   const health = useSystem((s) => s.health);
-  const refreshHealth = useSystem((s) => s.refreshHealth);
+  const recheckHealth = useSystem((s) => s.recheckHealth);
   const [checking, setChecking] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,13 +45,17 @@ export default function DiagnosticsSettings() {
     setChecking(true);
     setError(null);
     try {
-      await refreshHealth();
+      await recheckHealth();
     } catch (e) {
       setError(errorMessage(e, "The runtime couldn't be checked."));
     } finally {
       setChecking(false);
     }
   };
+
+  // The shell's PATH is read again in the background; health://changed brings the result.
+  const busy = checking || health?.shellPath.reading === true;
+  const shellPath = health ? shellPathSummary(health.shellPath) : null;
 
   const copyReport = () => {
     const report = JSON.stringify({ checkedAt: new Date().toISOString(), userAgent: navigator.userAgent, health }, null, 2);
@@ -73,11 +78,11 @@ export default function DiagnosticsSettings() {
       <section className="settings-card">
         <div className="settings-card-head">
           <h2 className="settings-card-title">Runtime</h2>
-          <Button size="sm" variant="ghost" icon={RefreshCw} disabled={checking} onClick={recheck}>
+          <Button size="sm" variant="ghost" icon={RefreshCw} disabled={busy} onClick={recheck}>
             Check again
           </Button>
         </div>
-        {health ? (
+        {health && shellPath ? (
           <div className="check-list">
             <CheckRow
               label="Agent sessions"
@@ -93,6 +98,7 @@ export default function DiagnosticsSettings() {
               }
               tone={health.nodePath ? "success" : "danger"}
             />
+            <CheckRow label="Shell PATH" value={shellPath.value} detail={shellPath.detail} tone={shellPath.tone} />
             <CheckRow
               label="Local data"
               value={health.dataStore ? "Reading and writing" : "Not responding"}

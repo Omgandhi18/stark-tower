@@ -39,30 +39,24 @@ describe("adding preview references to the composer", () => {
     expect(useChats.getState().threads.friday.draft).toBe("Keep this draft");
     expect(useChats.getState().threads.friday.files).toEqual([]);
   });
-  it("uses the target chat's caret and leaves another chat's draft alone", () => {
+  it("adds a point as a chip with its screenshot, leaving the draft and files alone", () => {
     useChats.getState().setDraft("friday", "Before after");
     useChats.getState().setDraft("edith", "Other chat");
-    const input = document.createElement("textarea");
-    input.dataset.chatKey = "friday";
-    input.value = "Before after";
-    input.setSelectionRange(7, 7);
-    document.body.append(input);
     addPoint(friday, "Point\n", file);
-    expect(useChats.getState().threads.friday.draft).toBe("Before \nPoint\nafter");
-    expect(useChats.getState().threads.friday.files).toEqual([file]);
+    const thread = useChats.getState().threads.friday;
+    expect(thread.draft).toBe("Before after");
+    expect(thread.files).toEqual([]);
+    expect(thread.references).toMatchObject([{ kind: "point", text: "Point\n", image: file }]);
     expect(useChats.getState().threads.edith.draft).toBe("Other chat");
+    expect(useChats.getState().threads.edith.references ?? []).toEqual([]);
   });
-  it("attaches a recording once without inserting a newline or deleting a selection", () => {
+  it("attaches a recording once without touching the draft", () => {
     useChats.getState().setDraft("friday", "Keep this draft");
-    const input = document.createElement("textarea");
-    input.dataset.chatKey = "friday";
-    input.value = "Keep this draft";
-    input.setSelectionRange(0, 4);
-    document.body.append(input);
     addPoint(friday, "", file);
     addPoint(friday, "", file);
     expect(useChats.getState().threads.friday.draft).toBe("Keep this draft");
     expect(useChats.getState().threads.friday.files).toEqual([file]);
+    expect(useChats.getState().threads.friday.references).toEqual([]);
   });
   it("refuses a delayed result when that agent has switched to another saved chat", () => {
     useChats.getState().setDraft("friday", "New chat");
@@ -71,5 +65,6 @@ describe("adding preview references to the composer", () => {
     expect(() => addPoint(friday, "Old pick\n", file, 11)).toThrow("That chat changed");
     expect(useChats.getState().threads.friday.draft).toBe("New chat");
     expect(useChats.getState().threads.friday.files).toEqual([]);
+    expect(useChats.getState().threads.friday.references).toEqual([]);
   });
 });

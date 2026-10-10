@@ -7,7 +7,10 @@ import { useAgents, selectOrchestrator } from "../../stores/agents";
 import { useNavigation } from "../../stores/navigation";
 import { AttachButton, AttachmentTray } from "../attachments/AttachmentTray";
 import type { AttachmentDraft } from "../attachments/useAttachmentDraft";
-import { mentionSuggestions, routeMessage } from "./mentions";
+import { clearToNewChat } from "../conversation/chatActions";
+import { useSlashMenu } from "../slash/useSlashMenu";
+import { useWorkspace } from "../../stores/workspace";
+import { leadingAgent, mentionSuggestions, routeMessage } from "./mentions";
 
 interface ComposerProps {
   /** The project Work is filtered to: messages run there. */
@@ -16,13 +19,10 @@ interface ComposerProps {
   attachments: AttachmentDraft;
 }
 
-type Notice =
-  | { kind: "started"; taskId: string; name: string }
-  | { kind: "error"; text: string };
-
 /**
- * Ask the orchestrator, or @mention any agent, with files attached if you like. It sits under
- * the board, so attached files and the agent list open above it. ⌘K focuses it from anywhere on Work.
+ * Ask the orchestrator, or @mention any agent, with files attached if you like. Sending opens
+ * the task's chat straight away. It sits under the board, so attached files and the agent list
+ * open above it. ⌘K focuses it from anywhere on Work.
  */
 export default function Composer({ project, attachments }: ComposerProps) {
   const agents = useAgents((s) => s.agents);
@@ -31,10 +31,11 @@ export default function Composer({ project, attachments }: ComposerProps) {
   const route = useNavigation((s) => s.route);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [highlightState, setHighlightState] = useState({ text: "", index: 0 });
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const listId = useId();
+  const activeProject = useWorkspace((s) => s.activeProject);
 
   const humans = agents.filter((a) => a.kind !== "maintenance");
   const suggestions = mentionSuggestions(text, humans);
@@ -42,6 +43,33 @@ export default function Composer({ project, attachments }: ComposerProps) {
   // A new keystroke starts the highlight over at the top of the list.
   const highlight = highlightState.text === text ? Math.min(highlightState.index, Math.max(0, suggestions.length - 1)) : 0;
   const setHighlight = (index: number) => setHighlightState({ text, index });
+
+  // The "/" menu is the one a chat has, for whoever the request goes to: the @mentioned agent, else
+  // the orchestrator. It works on the text after "@agent ", so the command stays first when it's sent.
+  const addressed = leadingAgent(text, humans);
+  const prefix = addressed?.prefix ?? "";
+  const slashAgent = addressed?.agent ?? orchestrator;
+  const folder = project ?? activeProject;
+  const slash = useSlashMenu({
+    agentId: slashAgent?.id ?? "",
+    agentName: slashAgent?.name ?? "",
+    conversationId: null,
+    folder,
+    draft: text.slice(prefix.length),
+    setDraft: (body) => setText(prefix + body),
+    inputRef,
+    disabled: !slashAgent || sending,
+    caretOffset: prefix.length,
+    // "/clear" opens a new chat with that agent in Work's project, as it does in a chat.
+    onNewChat: () => {
+      if (slashAgent) void clearToNewChat({ agentId: slashAgent.id, key: slashAgent.id }, folder, { done: () => setText(""), failed: setError });
+    },
+    onBlocked: (notice) => setError(notice),
+  });
+  const track = (value: string, caret: number) => {
+    const lead = leadingAgent(value, humans)?.prefix.length ?? 0;
+    slash.track(value.slice(lead), caret - lead);
+  };
 
   // ⌘K jumps to the composer while Work is on screen.
   useEffect(() => {
@@ -63,30 +91,33 @@ export default function Composer({ project, attachments }: ComposerProps) {
 
   const submit = async (e?: FormEvent) => {
     e?.preventDefault();
+    if (slash.interceptSubmit(text.slice(prefix.length))) return;
     const routing = routeMessage(text, humans, orchestrator?.id);
     if (!routing.ok) {
-      setNotice({ kind: "error", text: routing.reason });
+      setError(routing.reason);
       return;
     }
     const target = humans.find((a) => a.id === routing.agentId);
     setSending(true);
-    setNotice(null);
+    setError(null);
     const name = target?.name ?? routing.agentId;
     try {
       // Work handed over here becomes a task, in that project's chat with the agent.
       const task = await startTask(routing.agentId, routing.message, project ?? undefined, [...attachments.files]);
       setText("");
       attachments.sent();
-      // Work starts at once: beside the agent's busy chat, in a new one, if they're working already.
-      setNotice({ kind: "started", taskId: task.id, name });
+      // Work starts at once (beside the agent's busy chat, in a new one, if they're working
+      // already), and its chat opens so you can follow along.
+      openTask(task.id);
     } catch (err) {
-      setNotice({ kind: "error", text: errorMessage(err, `The task couldn't be handed to ${name}.`) });
+      setError(errorMessage(err, `The task couldn't be handed to ${name}.`));
     } finally {
       setSending(false);
     }
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slash.handleKey(e)) return;
     if (showSuggestions && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
       e.preventDefault();
       const step = e.key === "ArrowDown" ? 1 : -1;
@@ -121,13 +152,16 @@ export default function Composer({ project, attachments }: ComposerProps) {
           placeholder={placeholder}
           aria-label={placeholder}
           aria-autocomplete="list"
-          aria-expanded={showSuggestions}
-          aria-controls={showSuggestions ? listId : undefined}
-          aria-activedescendant={showSuggestions ? `${listId}-${highlight}` : undefined}
+          aria-expanded={showSuggestions || slash.aria.expanded}
+          aria-controls={showSuggestions ? listId : slash.aria.controls}
+          aria-activedescendant={showSuggestions ? `${listId}-${highlight}` : slash.aria.activeDescendant}
           onChange={(e) => {
             setText(e.target.value);
-            if (notice?.kind === "error") setNotice(null);
+            track(e.target.value, e.target.selectionStart ?? e.target.value.length);
+            if (error) setError(null);
           }}
+          onSelect={(e) => track(e.currentTarget.value, e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+          onBlur={slash.close}
           onKeyDown={onKeyDown}
           onPaste={(e) => {
             const pasted = Array.from(e.clipboardData.files);
@@ -140,6 +174,7 @@ export default function Composer({ project, attachments }: ComposerProps) {
         <Kbd>⌘K</Kbd>
         <span className="composer-divider" aria-hidden />
         <IconButton icon={SendHorizontal} label="Send" type="submit" disabled={sending || !text.trim() || attachments.adding > 0} />
+        {slash.menu}
         {showSuggestions && (
           <ul id={listId} role="listbox" className="mention-list" aria-label="Agents">
             {suggestions.map((a, i) => (
@@ -166,15 +201,7 @@ export default function Composer({ project, attachments }: ComposerProps) {
         )}
       </form>
       <p className="composer-notice" role="status" aria-live="polite">
-        {notice?.kind === "started" && (
-          <>
-            {`${notice.name} has started.`}{" "}
-            <button type="button" className="link-button" onClick={() => openTask(notice.taskId)}>
-              Open task
-            </button>
-          </>
-        )}
-        {notice?.kind === "error" && <span className="composer-error">{notice.text}</span>}
+        {error && <span className="composer-error">{error}</span>}
       </p>
     </div>
   );

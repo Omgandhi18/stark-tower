@@ -6,6 +6,8 @@ import { errorMessage } from "../../lib/errors";
 import { formatCost, formatTokens } from "../../lib/format";
 import { useConfig } from "../../stores/config";
 import { useSpend } from "../../stores/spend";
+import { useLimits } from "../../stores/limits";
+import LimitsDetail from "../limits/LimitsDetail";
 import { barPercent, budgetMeter, folderName, reportedCost, spendDate } from "./spendModel";
 import "./spend.css";
 
@@ -106,6 +108,24 @@ function BudgetCard({ summary }: { summary: SpendSummary }) {
   );
 }
 
+function PlanLimits() {
+  const limits = useLimits((s) => s.limits);
+  return (
+    <section className="settings-card" aria-label="Plan usage limits">
+      <h2 className="settings-card-title">Plan limits</h2>
+      {limits ? (
+        <LimitsDetail limits={limits} onRefresh={() => void useLimits.getState().refresh().catch((e) => console.error("[limits] couldn't read usage limits", e))} />
+      ) : (
+        <SkeletonRows label="Loading usage limits" />
+      )}
+      <p className="spend-note">
+        Claude's numbers come from Claude Code's own usage check and each turn's report; Codex's come from Codex. Starkline checks every few minutes and after
+        each turn, and never reads either sign-in.
+      </p>
+    </section>
+  );
+}
+
 function Breakdown({ title, rows, kind }: { title: string; rows: SpendGroup[]; kind: "agent" | "project" | "model" }) {
   const agents = useConfig((s) => s.config?.agents);
   return (
@@ -183,13 +203,14 @@ export default function SpendSettings() {
     <div className="settings-section spend-settings">
       <header className="screen-header">
         <h1 className="screen-title">Spend</h1>
-        <p className="screen-subtitle">What your agents use, and the budget you set.</p>
+        <p className="screen-subtitle">What your agents use, how much of your plans is left, and the budget you set.</p>
       </header>
       {error && (
         <p role="alert">
           {error} <Button onClick={retry}>Try again</Button>
         </p>
       )}
+      <PlanLimits />
       <div className="spend-totals">
         {totals.map(({ label, total }) => (
           <section className="settings-card" aria-label={label} key={label}>

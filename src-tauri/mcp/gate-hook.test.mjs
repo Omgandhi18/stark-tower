@@ -10,6 +10,9 @@ import net from "node:net";
 
 const SCRIPT = new URL("./gate-hook.mjs", import.meta.url).pathname;
 
+/** The environment without Starkline's own variables, so a run inside an agent's session tests only what each case sets. */
+const BASE_ENV = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("STARK_")));
+
 async function fakeApp(answer) {
   const sock = join(mkdtempSync(join(tmpdir(), "starkline-hook-")), "bridge.sock");
   const requests = [];
@@ -26,7 +29,7 @@ async function fakeApp(answer) {
 
 function runHook(sock, event) {
   const child = spawn(process.execPath, [SCRIPT], {
-    env: { ...process.env, STARK_DELEGATE_SOCK: sock, STARK_AGENT_ID: "friday", STARK_DELEGATE_TOKEN: "t" },
+    env: { ...BASE_ENV, STARK_DELEGATE_SOCK: sock, STARK_AGENT_ID: "friday", STARK_DELEGATE_TOKEN: "t" },
     stdio: ["pipe", "pipe", "ignore"],
   });
   let out = "";

@@ -70,6 +70,7 @@ export default function TodoRow({ todo, list, now, onSelect, selected = false, s
           <span className="todo-title">{todo.title}</span>
         )}
         <span className="todo-meta">
+          <span title={`To-do ${todo.number} on ${list?.name ?? "its list"}`}>#{todo.number}</span>
           {showList && list && <Tag>{list.name}</Tag>}
           {todo.due !== null && !done && (
             <span className={cx("todo-due", overdue(todo, now) && "is-overdue")}>

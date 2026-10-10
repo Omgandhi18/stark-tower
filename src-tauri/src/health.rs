@@ -85,6 +85,8 @@ pub struct RuntimeHealth {
     /// approval: its version, or None when it isn't installed.
     pub node: Option<String>,
     pub node_path: Option<String>,
+    /// Whether the login shell's PATH (nvm, OpenCode, Homebrew…) was read for finding CLIs.
+    pub shell_path: crate::shellenv::ShellPathHealth,
     /// Agent sessions keep running with the window closed.
     pub background: bool,
 }
@@ -129,25 +131,39 @@ struct ProbeState {
     sign_ins: HashMap<String, (Instant, Option<SignIn>)>,
     /// Questions being asked right now, so each is asked once at a time.
     asking: HashSet<String>,
+    /// Answers asked before this are out of date (the shell's PATH was read again).
+    expired: Option<Instant>,
+}
+
+impl ProbeState {
+    fn current(&self, asked: Instant) -> bool {
+        self.expired.is_none_or(|e| asked >= e)
+    }
 }
 
 impl Probes {
+    /// Ask every CLI again: its version and sign-in. Last answers show until the new ones are in.
+    pub fn expire(&self) {
+        self.0.lock().unwrap().expired = Some(Instant::now());
+    }
+
     pub fn version_of(&self, app: &tauri::AppHandle, path: &str) -> Option<String> {
         let key = format!("version:{path}");
         let mut state = self.0.lock().unwrap();
         let known = state.versions.get(path).cloned();
-        // A version, once known, holds for the launch; no answer is asked again after a while.
+        // A version, once known, holds until the runtime is checked again; no answer is asked again after a while.
         if let Some((at, version)) = &known {
-            if version.is_some() || at.elapsed() < SIGN_IN_TTL {
+            if state.current(*at) && (version.is_some() || at.elapsed() < SIGN_IN_TTL) {
                 return version.clone();
             }
         }
         if state.asking.insert(key.clone()) {
             let (probes, app, path) = (self.clone(), app.clone(), path.to_string());
+            let asked = Instant::now();
             std::thread::spawn(move || {
                 let version = run(&path, &["--version"]).and_then(|(_, out)| first_line(&out));
                 let mut state = probes.0.lock().unwrap();
-                state.versions.insert(path, (Instant::now(), version));
+                state.versions.insert(path, (asked, version));
                 state.asking.remove(&key);
                 drop(state);
                 let _ = app.emit("health://changed", ());
@@ -161,14 +177,15 @@ impl Probes {
         let key = format!("sign-in:{path}");
         let mut state = self.0.lock().unwrap();
         let known = state.sign_ins.get(path).cloned();
-        let fresh = known.as_ref().is_some_and(|(at, _)| at.elapsed() < SIGN_IN_TTL);
+        let fresh = known.as_ref().is_some_and(|(at, _)| at.elapsed() < SIGN_IN_TTL && state.current(*at));
         if !fresh && state.asking.insert(key.clone()) {
             let (probes, app, kind, path) = (self.clone(), app.clone(), kind.to_string(), path.to_string());
+            let asked = Instant::now();
             std::thread::spawn(move || {
                 let answer = probe_sign_in(&kind, &path);
                 let mut state = probes.0.lock().unwrap();
                 let changed = state.sign_ins.get(&path).map(|(_, s)| s) != Some(&answer);
-                state.sign_ins.insert(path, (Instant::now(), answer));
+                state.sign_ins.insert(path, (asked, answer));
                 state.asking.remove(&key);
                 drop(state);
                 if changed {
@@ -250,10 +267,15 @@ fn strip_ansi(text: &str) -> String {
     out
 }
 
-/// Run a CLI with a timeout: whether it succeeded, and what it printed.
+/// Run a CLI with a timeout: whether it succeeded, and what it printed. It runs in
+/// its own process group, so a CLI that hangs is stopped along with anything it started.
 fn run(path: &str, args: &[&str]) -> Option<(bool, String)> {
+    use std::os::unix::process::CommandExt;
     let mut child = std::process::Command::new(path)
         .args(args)
+        .process_group(0)
+        // A Node CLI (Codex) needs `node` on PATH from a Finder launch too.
+        .env("PATH", crate::shellenv::child_path())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -280,7 +302,7 @@ fn run(path: &str, args: &[&str]) -> Option<(bool, String)> {
             Some((ok, if text.trim().is_empty() { errors } else { text }))
         }
         Err(_) => {
-            let _ = child.kill();
+            crate::proc::kill_tree(child.id());
             let _ = child.wait();
             None
         }
@@ -315,6 +337,36 @@ mod tests {
         assert!(parse_codex_status(ok, &text).signed_in);
         let (_, text) = run("/bin/sh", &["-c", "printf '{\"loggedIn\":true}'; printf warning >&2"]).unwrap();
         assert!(parse_claude_status(&text).unwrap().signed_in);
+    }
+
+    #[test]
+    fn checking_again_makes_earlier_answers_out_of_date() {
+        let before = Instant::now();
+        let probes = Probes::default();
+        assert!(probes.0.lock().unwrap().current(before), "nothing has expired yet");
+        probes.expire();
+        let state = probes.0.lock().unwrap();
+        assert!(!state.current(before));
+        assert!(state.current(Instant::now()));
+    }
+
+    #[test]
+    fn a_hung_cli_is_stopped_with_everything_it_started() {
+        let dir = std::env::temp_dir().join(format!("stark-health-hung-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pid_file = dir.join("pid");
+        let script = format!("sleep 30 & echo $! > '{}'; wait", pid_file.display());
+        assert_eq!(run("/bin/sh", &["-c", &script]), None);
+        let pid: i32 = std::fs::read_to_string(&pid_file).unwrap().trim().parse().unwrap();
+        let gone = (0..20).any(|_| {
+            // SAFETY: signal 0 only checks whether the process exists.
+            let alive = unsafe { libc::kill(pid, 0) } == 0;
+            if alive {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            !alive
+        });
+        assert!(gone, "the CLI's child {pid} outlived the timeout");
     }
 
     #[test]

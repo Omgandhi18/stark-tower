@@ -6,6 +6,7 @@ import {
   CircleCheckBig,
   FastForward,
   FileSearch,
+  FileX,
   MessageCircleQuestion,
   OctagonAlert,
   ShieldAlert,
@@ -51,6 +52,7 @@ const KINDS: Record<string, KindPresentation> = {
   automation_missed: { label: "Missed run", verb: "missed a scheduled run", tone: "attention", icon: CalendarX2 },
   automation_failed: { label: "Run didn't start", verb: "couldn't start a scheduled run", tone: "danger", icon: CalendarX2 },
   budget: { label: "Budget", verb: "reports a budget warning", tone: "attention", icon: Wallet },
+  todo_removed: { label: "To-do removed", verb: "lost a to-do while working on it", tone: "attention", icon: FileX },
   claim_refused: { label: "File claim", verb: "couldn't change a shared file", tone: "attention", icon: FileSearch },
   reminder: { label: "Reminder", verb: "reminds you", tone: "attention", icon: AlarmClock },
 };

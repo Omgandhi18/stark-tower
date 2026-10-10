@@ -5,6 +5,7 @@ import { errorMessage } from "../../lib/errors";
 import type { Agent, Attachment, Conversation, ReviewRequest } from "../../lib/types";
 import { useAttention } from "../../stores/attention";
 import { conversationOfKey, selectThread, useChats, type ChatRef } from "../../stores/chats";
+import { useNavigation } from "../../stores/navigation";
 import { useWorkspace } from "../../stores/workspace";
 
 /** The conversation a chat's messages go to: the one its key names, else the one its thread shows. */
@@ -68,7 +69,7 @@ export async function reopenChat(agentId: string, conversationId: number): Promi
 // Every chat opens as its task: the backend gives a chat that never had one an idle task.
 
 /** A fresh chat with the agent, as its task. The agent may be working elsewhere: it works in both. */
-export async function startChatTask(agent: Agent, inFolder?: string): Promise<string> {
+export async function startChatTask(agent: Pick<Agent, "id">, inFolder?: string): Promise<string> {
   return (await taskForChat(await startNewChat(agent.id, inFolder))).id;
 }
 
@@ -83,4 +84,37 @@ export async function agentChatTask(agentId: string): Promise<string> {
   const conversation = await activeConversation(agentId);
   const chat = conversation?.id ?? (await startNewChat(agentId, useWorkspace.getState().activeProject || undefined));
   return (await taskForChat(chat)).id;
+}
+
+const clearing = new Set<string>();
+
+/** Where "/clear" reports to: the chat's own thread and draft unless the caller has its own box. */
+export interface ClearReport {
+  /** The new chat is open: the box the command was typed in is done with its text. */
+  done: () => void;
+  failed: (message: string) => void;
+}
+
+/**
+ * "/clear" in a chat: what the task page's "New chat" does, started from the composer. The chat's draft
+ * goes with the command; the chat itself stays in the agent's earlier chats. Reports a failure in the chat,
+ * or to `report` when the command was typed somewhere else (Work's request box).
+ */
+export async function clearToNewChat(chat: ChatRef, folder: string, report?: ClearReport): Promise<void> {
+  // A second Enter while the first is starting the chat must not start another.
+  if (clearing.has(chat.key)) return;
+  clearing.add(chat.key);
+  const chats = useChats.getState();
+  try {
+    const taskId = await startChatTask({ id: chat.agentId }, folder || undefined);
+    if (report) report.done();
+    else chats.setDraft(chat.key, "");
+    useNavigation.getState().openTask(taskId);
+  } catch (error) {
+    const message = errorMessage(error, "A new chat couldn't be started.");
+    if (report) report.failed(message);
+    else chats.pushError(chat.key, message);
+  } finally {
+    clearing.delete(chat.key);
+  }
 }

@@ -58,6 +58,11 @@ export function todoState({ todo, task, list, agentName, waitingOnYou }: StateIn
   return state(`For ${agentName}`, "idle", false, true);
 }
 
+/** What deleting a to-do should ask first: someone is working on it. Null when nobody is. */
+export function deleteWarning(state: Pick<TodoState, "running">, workerName: string): string | null {
+  return state.running ? `${workerName} is working on this. Delete anyway?` : null;
+}
+
 /** A list's to-dos: open ones in your order, then done ones, latest first. */
 export function splitTodos(todos: readonly Todo[]): { open: Todo[]; done: Todo[] } {
   const open = todos.filter((t) => t.done === null).sort((a, b) => a.position - b.position || a.id - b.id);

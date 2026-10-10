@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { fakeCalls } from "./fakeBackend";
 import { expect, goTo, openApp, test } from "./fixtures";
+import { defaultScenario, todo } from "./scenario";
 
 const lists = (page: Page) => page.getByRole("navigation", { name: "Main" }).getByRole("list", { name: "To-do lists" });
 const row = (page: Page, title: string) => page.getByRole("listitem", { name: title });
@@ -56,6 +57,35 @@ test.describe("to-dos", () => {
     await expect(row(page, "Write the release notes").getByText("Notes", { exact: true })).toBeVisible();
   });
 
+  test("asks before deleting a to-do an agent is working on, and deletes the rest at once", async ({ page }) => {
+    await openLaunch(page);
+    const karens = row(page, "Add an empty state to the cart");
+    await karens.getByRole("button", { name: "Start" }).click();
+    await expect(karens.getByText("KAREN is on it")).toBeVisible();
+
+    const detail = page.getByRole("complementary", { name: "To-do" });
+    await page.getByRole("button", { name: "Add an empty state to the cart", exact: true }).click();
+    await detail.getByRole("button", { name: "Delete" }).click();
+    const ask = page.getByRole("dialog", { name: "KAREN is working on this. Delete anyway?" });
+    await expect(ask).toBeVisible();
+    // Keeping it deletes nothing.
+    await ask.getByRole("button", { name: "Keep it" }).click();
+    await expect(ask).toHaveCount(0);
+    expect((await fakeCalls(page)).some((c) => c.cmd === "delete_todo")).toBe(false);
+    await expect(karens).toBeVisible();
+
+    await detail.getByRole("button", { name: "Delete" }).click();
+    await page.getByRole("dialog", { name: "KAREN is working on this. Delete anyway?" }).getByRole("button", { name: "Delete anyway" }).click();
+    await expect.poll(async () => (await fakeCalls(page)).some((c) => c.cmd === "delete_todo" && c.args.id === 2)).toBe(true);
+    await expect(karens).toHaveCount(0);
+
+    // A to-do nobody's on goes straight away, with no question.
+    await page.getByRole("button", { name: "Write the release notes", exact: true }).click();
+    await page.getByRole("complementary", { name: "To-do" }).getByRole("button", { name: "Delete" }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect.poll(async () => (await fakeCalls(page)).some((c) => c.cmd === "delete_todo" && c.args.id === 1)).toBe(true);
+  });
+
   test("hands a whole list to the lead agent", async ({ page }) => {
     await openLaunch(page);
     await page.getByRole("button", { name: "Hand to JARVIS" }).click();
@@ -84,5 +114,59 @@ test.describe("to-dos", () => {
     await goTo(page, "Work");
     await nav.getByRole("button", { name: "payments-api", exact: true }).click();
     await expect(page.getByRole("region", { name: /To-dos/ }).getByRole("button", { name: "Remove the v1 refund endpoint", exact: true })).toBeVisible();
+  });
+
+  test("numbers each to-do within its own list, and keeps the number through ticking off and moving", async ({ page }) => {
+    const scenario = defaultScenario();
+    // The second list's first to-do is database row 7, as in the report: it must still read #1.
+    scenario.todoLists.push({ id: 2, name: "Weekend errands", project: "", start_mode: "manual", position: 1, created: 0, updated: 0 });
+    scenario.todos.push(
+      todo(7, 2, "Book the car service", { number: 1, position: 0 }),
+      todo(8, 2, "Renew the passport", { number: 2, position: 1 }),
+    );
+    await openApp(page, scenario);
+    await goTo(page, "To-dos");
+
+    await lists(page).getByRole("button", { name: /Checkout launch/ }).click();
+    await expect(row(page, "Write the release notes").getByText("#1", { exact: true })).toBeVisible();
+    await expect(row(page, "Check the refund emails render in dark mode").getByText("#3", { exact: true })).toBeVisible();
+
+    await lists(page).getByRole("button", { name: /Weekend errands/ }).click();
+    await expect(row(page, "Book the car service").getByText("#1", { exact: true })).toBeVisible();
+    await expect(row(page, "Renew the passport").getByText("#2", { exact: true })).toBeVisible();
+    await expect(page.getByText("#7", { exact: true })).toHaveCount(0);
+
+    // A new one is the list's next number (not the next row in the database).
+    await page.getByRole("textbox", { name: "Add a to-do to Weekend errands" }).fill("Buy a birthday card");
+    await page.getByRole("textbox", { name: "Add a to-do to Weekend errands" }).press("Enter");
+    await expect(row(page, "Buy a birthday card").getByText("#3", { exact: true })).toBeVisible();
+
+    // Ticking the first off renumbers nothing.
+    await page.getByRole("checkbox", { name: "Tick off “Book the car service”" }).click();
+    await expect(row(page, "Renew the passport").getByText("#2", { exact: true })).toBeVisible();
+    await expect(row(page, "Buy a birthday card").getByText("#3", { exact: true })).toBeVisible();
+    await page.getByText("Done (1)").click();
+    await expect(row(page, "Book the car service").getByText("#1", { exact: true })).toBeVisible();
+
+    // Opened in full, it says the same number; moved to another list it takes that list's next one.
+    await page.getByRole("button", { name: "Renew the passport" }).click();
+    const detail = page.getByRole("complementary", { name: "To-do" });
+    await expect(detail.getByText("To-do #2")).toBeVisible();
+    await detail.getByRole("combobox", { name: "List" }).selectOption({ label: "Checkout launch" });
+    await expect(detail.getByText("To-do #5")).toBeVisible();
+  });
+
+  test("a long list scrolls instead of being cut off", async ({ page }) => {
+    const scenario = defaultScenario();
+    for (let i = 0; i < 40; i++) scenario.todos.push(todo(100 + i, 1, `Long list item ${i}`, { position: 10 + i }));
+    await openApp(page, scenario);
+    await goTo(page, "To-dos");
+    await lists(page).getByRole("button", { name: /Checkout launch/ }).click();
+    const last = row(page, "Long list item 39");
+    await expect(last).toBeAttached();
+    await page.getByRole("list", { name: "Open on Checkout launch" }).hover();
+    await page.mouse.wheel(0, 4000);
+    await expect(last).toBeInViewport();
+    await expect(page.getByText("Done (1)")).toBeInViewport();
   });
 });

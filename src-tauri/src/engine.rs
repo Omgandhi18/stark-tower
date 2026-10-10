@@ -29,7 +29,7 @@ pub fn resolve_engine(engine_id: &str) -> EngineSpec {
 /// sure `claude` (and Node, Homebrew tools) resolve even when the app is
 /// launched from Finder with a minimal PATH.
 pub fn build_command(spec: &EngineSpec, cwd: &str) -> CommandBuilder {
-    // Resolve via a login shell so a Finder-launched app finds nvm/brew CLIs.
+    // Resolve on the login shell's PATH so a Finder-launched app finds nvm/brew CLIs.
     let program = crate::chat::resolve_program(&spec.program).unwrap_or_else(|| spec.program.clone());
     let mut cmd = CommandBuilder::new(&program);
     for a in &spec.args {
@@ -42,16 +42,8 @@ pub fn build_command(spec: &EngineSpec, cwd: &str) -> CommandBuilder {
         cmd.env(k, v);
     }
 
-    // Then guarantee the common install locations are on PATH.
-    let home = std::env::var("HOME").unwrap_or_default();
-    let extra = format!(
-        "{home}/.local/bin:{home}/.nvm/versions/node/current/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-    );
-    let path = match std::env::var("PATH") {
-        Ok(p) => format!("{extra}:{p}"),
-        Err(_) => extra,
-    };
-    cmd.env("PATH", path);
+    // Then the PATH the developer's own terminal has (see shellenv).
+    cmd.env("PATH", crate::shellenv::child_path());
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd

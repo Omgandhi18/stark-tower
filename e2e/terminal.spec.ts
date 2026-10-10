@@ -43,12 +43,12 @@ test("tabs ask before stopping a foreground program", async ({ page }) => {
   await expect(tabs.getByRole("tab").last()).toBeFocused();
   await typeCommand(page, "npm run dev");
   await expect(tabs.getByRole("tab", { name: /npm run dev/ })).toHaveAttribute("aria-selected", "true");
-  await page.getByRole("button", { name: "Close terminal tab" }).click();
+  await page.getByRole("button", { name: "Close npm run dev" }).click();
   const dialog = page.getByRole("dialog", { name: "Stop npm run dev and close this terminal?" });
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Keep terminal" }).click();
   await expect(tabs.getByRole("tab")).toHaveCount(2);
-  await page.getByRole("button", { name: "Close terminal tab" }).click();
+  await page.getByRole("button", { name: "Close npm run dev" }).click();
   await dialog.getByRole("button", { name: "Stop and close" }).click();
   await expect(tabs.getByRole("tab")).toHaveCount(1);
   expect((await fakeCalls(page)).filter((c) => c.cmd === "terminal_close")).toHaveLength(1);

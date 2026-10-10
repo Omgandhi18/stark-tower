@@ -9,6 +9,19 @@ export const BROWSER_SIZES = [
 ] as const;
 export type BrowserSize = (typeof BROWSER_SIZES)[number]["value"];
 
+const EMPTY_TAB = "New tab";
+
+/** What a tab is called: its page's title, else the site it's on, else that it's empty. */
+export function tabLabel(tab: { url: string; title: string }): string {
+  const title = tab.title.trim();
+  if (title) return title;
+  try {
+    return new URL(tab.url).host || EMPTY_TAB;
+  } catch {
+    return EMPTY_TAB;
+  }
+}
+
 export function fitBrowser(panel: Bounds, size: BrowserSize) {
   const device = BROWSER_SIZES.find((s) => s.value === size) ?? BROWSER_SIZES[0];
   if (!device.width) return { bounds: panel, zoom: 1, label: "" };

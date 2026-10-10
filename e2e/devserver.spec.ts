@@ -78,7 +78,7 @@ test("an empty project offers a custom command", async ({ page }) => {
 });
 
 test("shows output below the page, copies and clears it, and explains a crash", async ({ page }) => {
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.context().grantPermissions(["clipboard-read"]);
   const preview = await openPreview(page);
   await preview.getByRole("button", { name: "Run", exact: true }).click();
   await fakeEmit(page, "devserver://changed", running());

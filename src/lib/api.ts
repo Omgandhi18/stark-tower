@@ -1,7 +1,7 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { commands, type AutomationInput, type Bounds, type BrowserPage, type Budget, type CodeReviews, type CommitInput, type ExtraArgs, type MacNotifications, type Output, type PowerState, type ReminderInput, type RequestInput, type Result, type Server, type WorktreeSetup } from "./bindings";
+import { commands, type AutomationInput, type Bounds, type BrowserTabs, type Budget, type CodeReviews, type CommitInput, type ExtraArgs, type MacNotifications, type Output, type PowerState, type ReminderInput, type RequestInput, type Result, type Server, type WorktreeSetup } from "./bindings";
 import type { Attachment, ChatEvent, ChatStatus, ChatSwitch, TodoInput, TodoListInput, TaskEvent, LedgerEntry, PtyData, ReviewRequest, StatusEvent, UsageUpdate, UpdateStatus } from "./types";
 
 // Commands are the tauri-specta-generated, typed wrappers (bindings.ts). Fallible
@@ -43,6 +43,12 @@ export const quitApp = () => commands.quitApp();
 
 /** Quitting was asked for while agents work; the payload is how many. */
 export const onQuitRequested = (cb: (busy: number) => void): Promise<UnlistenFn> => listen<number>("app://quit-requested", (evt) => cb(evt.payload));
+
+/** The app menu's Close (⌘W) and New Tab (⌘T): the page decides what they mean where focus is. */
+export const onMenuClose = (cb: () => void): Promise<UnlistenFn> => listen("menu://close", () => cb());
+export const onMenuNewTab = (cb: () => void): Promise<UnlistenFn> => listen("menu://new-tab", () => cb());
+/** Close the main window, which hides it (agents keep working): what ⌘W does when no tab strip has focus. */
+export const closeMainWindow = () => commands.closeMainWindow();
 
 export const loginItemEnabled = () => commands.loginItemEnabled();
 
@@ -107,8 +113,14 @@ export const browserHide = () => commands.browserHide();
 export const attachmentUrl = (path: string) => ok(commands.attachmentUrl(path));
 export const browserNavigate = (url: string) => ok(commands.browserNavigate(url));
 export const browserGo = (action: "back" | "forward" | "reload" | "stop") => ok(commands.browserGo(action));
-export const browserPage = () => commands.browserPage();
-export const onBrowserChanged = (cb: (page: BrowserPage) => void): Promise<UnlistenFn> => listen<BrowserPage>("browser://changed", (e) => cb(e.payload));
+/** The browser's tabs and which one is showing. */
+export const browserTabs = () => commands.browserTabs();
+export const browserNewTab = (url: string | null = null) => ok(commands.browserNewTab(url));
+export const browserSelectTab = (id: number) => ok(commands.browserSelectTab(id));
+export const browserCloseTab = (id: number) => ok(commands.browserCloseTab(id));
+/** Show a page in a tab of its own, or in the tab already on it. */
+export const browserOpenTab = (url: string) => ok(commands.browserOpenTab(url));
+export const onBrowserChanged = (cb: (tabs: BrowserTabs) => void): Promise<UnlistenFn> => listen<BrowserTabs>("browser://changed", (e) => cb(e.payload));
 /** An agent opened a page: the browser comes into view. */
 export const onBrowserReveal = (cb: (agentId: string) => void): Promise<UnlistenFn> =>
   listen<{ agentId: string }>("browser://reveal", (e) => cb(e.payload.agentId));
@@ -210,6 +222,17 @@ export const dispatchTask = (prompt: string, cols: number, rows: number) => ok(c
 /** Send a message in one of the agent's chats (by default the one it's open in). */
 export const chatSend = (agentId: string, text: string, dir?: string, attachments: Attachment[] = [], conversationId?: number | null) =>
   ok(commands.chatSend(agentId, text, dir ?? null, attachments, conversationId ?? null));
+
+// ---- Slash menu: what an agent's chat can run, and its MCP servers ----
+
+/** Skills, commands, MCP prompts and MCP servers for an agent's chat; read from disk until its session reports. */
+export const slashCatalog = (agentId: string, conversationId: number | null, folder: string) => ok(commands.slashCatalog(agentId, conversationId, folder));
+
+/** Ask a chat's session for its MCP servers' status again; false when it has none to ask. */
+export const slashRefreshMcp = (conversationId: number) => commands.slashRefreshMcp(conversationId);
+
+/** A chat's session reported new commands or MCP status (payload: the conversation). */
+export const onSlashChanged = (cb: (conversationId: number) => void): Promise<UnlistenFn> => listen<number>("slash://changed", (evt) => cb(evt.payload));
 
 // ---- attachments ----
 
@@ -397,7 +420,10 @@ export const onAssistLink = (cb: (e: { from: string; to: string }) => void): Pro
 /** Installed provider CLIs, data store and agent bridge, right now. */
 export const runtimeHealth = () => commands.runtimeHealth();
 
-/** A provider CLI answered a background check (its version, or whether it's signed in). */
+/** Check again from scratch: re-reads the login shell's PATH in the background and asks every CLI again. */
+export const recheckRuntime = () => commands.recheckRuntime();
+
+/** A provider CLI answered a background check (its version, or whether it's signed in), or the shell's PATH was read again. */
 export const onHealthChanged = (cb: () => void): Promise<UnlistenFn> => listen("health://changed", () => cb());
 
 export const powerState = () => commands.powerState();
@@ -442,6 +468,12 @@ export const spendSummary = () => ok(commands.spendSummary());
 export const setBudget = (budget: Budget) => ok(commands.setBudget(budget));
 export const conversationSpend = (id: number) => ok(commands.conversationSpend(id));
 export const onSpendChanged = (cb: () => void): Promise<UnlistenFn> => listen("spend://changed", cb);
+
+// ---- Usage limits ----
+/** Each provider's usage limits as last read; older than `maxAgeSecs` is read again in the background. */
+export const usageLimits = (maxAgeSecs: number) => commands.usageLimits(maxAgeSecs);
+export const refreshUsageLimits = () => commands.refreshUsageLimits();
+export const onLimitsChanged = (cb: () => void): Promise<UnlistenFn> => listen("limits://changed", () => cb());
 export const listWorktrees = () => commands.listWorktrees();
 export const setWorktreesEnabled = (enabled: boolean) => commands.setWorktreesEnabled(enabled);
 export const saveWorktreeSetup = (project: string, setup: WorktreeSetup) => ok(commands.saveWorktreeSetup(project, setup));

@@ -6,7 +6,7 @@
 use crate::agents::AgentStatus;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{AboutMetadata, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
 
@@ -88,6 +88,87 @@ pub fn request_quit(app: &tauri::AppHandle) {
 pub fn quit(app: &tauri::AppHandle) {
     QUITTING.store(true, Ordering::SeqCst);
     app.exit(0);
+}
+
+/// The File menu's items that ask the page first: a tab strip with focus takes them, else the window does.
+const MENU_CLOSE: &str = "app-close";
+const MENU_NEW_TAB: &str = "app-new-tab";
+
+/// What the menu items tell the page (it decides what ⌘W and ⌘T mean where focus is).
+pub const CLOSE_REQUESTED: &str = "menu://close";
+pub const NEW_TAB_REQUESTED: &str = "menu://new-tab";
+
+/// The app's menu bar, written out rather than left to Tauri's default so ⌘W and ⌘T have one
+/// owner. It is the default's standard items (About, Services, Hide, Quit, Edit's undo through
+/// select all, full screen, minimize, zoom) with two changes: File has New Tab (⌘T) and Close
+/// (⌘W), which ask the page before acting, and Window no longer carries a second Close Window.
+pub fn app_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let info = app.package_info();
+    let config = app.config();
+    let about = AboutMetadata {
+        name: Some(info.name.clone()),
+        version: Some(info.version.to_string()),
+        copyright: config.bundle.copyright.clone(),
+        authors: config.bundle.publisher.clone().map(|p| vec![p]),
+        ..Default::default()
+    };
+    let new_tab = MenuItem::with_id(app, MENU_NEW_TAB, "New Tab", true, Some("CmdOrCtrl+T"))?;
+    let close = MenuItem::with_id(app, MENU_CLOSE, "Close", true, Some("CmdOrCtrl+W"))?;
+    let separator = || PredefinedMenuItem::separator(app);
+    let application = Submenu::with_items(
+        app,
+        info.name.clone(),
+        true,
+        &[
+            &PredefinedMenuItem::about(app, None, Some(about))?,
+            &separator()?,
+            &PredefinedMenuItem::services(app, None)?,
+            &separator()?,
+            &PredefinedMenuItem::hide(app, None)?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &separator()?,
+            &PredefinedMenuItem::quit(app, None)?,
+        ],
+    )?;
+    let file = Submenu::with_items(app, "File", true, &[&new_tab, &separator()?, &close])?;
+    let edit = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &separator()?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
+    let view = Submenu::with_items(app, "View", true, &[&PredefinedMenuItem::fullscreen(app, None)?])?;
+    let window = Submenu::with_id_and_items(app, tauri::menu::WINDOW_SUBMENU_ID, "Window", true, &[&PredefinedMenuItem::minimize(app, None)?, &PredefinedMenuItem::maximize(app, None)?])?;
+    let help = Submenu::with_id_and_items(app, tauri::menu::HELP_SUBMENU_ID, "Help", true, &[])?;
+    Menu::with_items(app, &[&application, &file, &edit, &view, &window, &help])
+}
+
+/// A menu item was chosen (or its shortcut pressed).
+pub fn on_menu_event(app: &tauri::AppHandle, event: MenuEvent) {
+    match event.id.as_ref() {
+        MENU_CLOSE => {
+            let _ = app.emit(CLOSE_REQUESTED, ());
+        }
+        MENU_NEW_TAB => {
+            let _ = app.emit(NEW_TAB_REQUESTED, ());
+        }
+        _ => {}
+    }
+}
+
+/// What Close Window did before ⌘W was asked of the page first: close the main window, which hides it.
+pub fn close_main(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+        let _ = window.close();
+    }
 }
 
 /// The menu bar item: what's running, and a way back in or out.

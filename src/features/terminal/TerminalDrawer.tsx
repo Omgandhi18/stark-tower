@@ -1,9 +1,9 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { PanelBottom, PanelBottomClose, PanelRight, PanelRightClose, Plus, SquareTerminal, X } from "lucide-react";
-import { Button, Dialog, EmptyState, IconButton, InlineCode, Tabs, cx } from "../../design";
+import { PanelBottom, PanelBottomClose, PanelRight, PanelRightClose, SquareTerminal } from "lucide-react";
+import { Button, Dialog, EmptyState, IconButton, InlineCode, TabStrip, cx, useTabShortcuts } from "../../design";
 import type { TerminalInfo } from "../../lib/bindings";
 import { useTerminal, type TerminalPlace } from "../../stores/terminal";
-import { clampHeight, MIN_HEIGHT, terminalLabel } from "./terminalModel";
+import { clampHeight, MIN_HEIGHT, terminalLabels } from "./terminalModel";
 import { disposeTerminal, getTerminalRuntime } from "./terminalRuntime";
 import "@xterm/xterm/css/xterm.css";
 import "./terminal.css";
@@ -52,6 +52,7 @@ export default function TerminalDrawer({ folder, active = true, dock = "bottom",
   const [busy, setBusy] = useState(false);
   const [maxHeight, setMaxHeight] = useState(600);
   const items = [...state.items].sort((a, b) => Number(b.folder === folder) - Number(a.folder === folder));
+  const labels = terminalLabels(state.items, folder);
   const selected = items.find((t) => t.id === state.selected) ?? items[0];
   const height = clampHeight(state.height, maxHeight / 0.7);
 
@@ -88,16 +89,19 @@ export default function TerminalDrawer({ folder, active = true, dock = "bottom",
     disposeTerminal(id);
     setClosing(null);
   });
-  const requestClose = () => run(async () => {
-    if (!selected) return;
-    const latest = (await state.refresh()).find((t) => t.id === selected.id);
+  const requestClose = (id: string) => run(async () => {
+    const target = state.items.find((t) => t.id === id);
+    if (!target) return;
+    const latest = (await state.refresh()).find((t) => t.id === id);
     if (latest?.program_running) {
-      setClosing({ ...latest, title: selected.title });
+      setClosing({ ...latest, title: target.title });
     } else {
-      await state.remove(selected.id);
-      disposeTerminal(selected.id);
+      await state.remove(id);
+      disposeTerminal(id);
     }
   });
+  const newShell = () => void run(() => state.add(folder));
+  useTabShortcuts(ref, newShell, () => { if (selected) void requestClose(selected.id); });
   const restart = () => run(async () => {
     if (!selected) return;
     await state.add(selected.folder);
@@ -151,15 +155,17 @@ export default function TerminalDrawer({ folder, active = true, dock = "bottom",
         />
       )}
       <div className="terminal-toolbar">
-        <Tabs
+        <TabStrip
           label="Terminals"
           idPrefix={prefix}
-          tabs={items.map((t) => ({ id: t.id, label: `${terminalLabel(t.folder, t.title, t.shell)}${t.alive ? "" : " · Exited"}` }))}
-          value={selected?.id ?? ""}
-          onChange={state.select}
+          newLabel="Open new terminal"
+          tabs={items.map((t) => ({ id: t.id, label: labels.get(t.id) ?? t.shell, title: t.folder, icon: SquareTerminal }))}
+          value={selected?.id ?? null}
+          onSelect={state.select}
+          onClose={(id) => void requestClose(id)}
+          onNew={newShell}
+          disabled={busy}
         />
-        <IconButton icon={Plus} label="Open new terminal" disabled={busy} onClick={() => void run(() => state.add(folder))} />
-        {selected && <IconButton icon={X} label="Close terminal tab" disabled={busy} onClick={() => void requestClose()} />}
         {side ? (
           <IconButton icon={PanelBottom} label="Move terminal to the bottom" onClick={() => state.moveTo("bottom")} />
         ) : (

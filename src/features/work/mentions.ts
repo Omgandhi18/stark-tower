@@ -7,6 +7,7 @@ export type Routing =
   | { ok: false; reason: string };
 
 const MENTION = /^@(\S+)(?:\s+([\s\S]*))?$/;
+const LEADING_MENTION = /^@(\S+)\s+/;
 
 export function findAgent(agents: readonly Agent[], token: string): Agent | undefined {
   const t = token.toLowerCase();
@@ -26,6 +27,16 @@ export function routeMessage(text: string, agents: readonly Agent[], fallbackId:
   }
   if (!fallbackId) return { ok: false, reason: "There's no orchestrator to ask. Mention an agent with @." };
   return { ok: true, agentId: fallbackId, message: trimmed };
+}
+
+/**
+ * The agent a message opens with ("@friday /review the diff") and the text from "@friday " on, which
+ * the "/" menu leaves alone: its command is what comes after.
+ */
+export function leadingAgent(text: string, agents: readonly Agent[]): { agent: Agent; prefix: string } | null {
+  const mention = LEADING_MENTION.exec(text);
+  const agent = mention && findAgent(agents, mention[1]);
+  return mention && agent ? { agent, prefix: mention[0] } : null;
 }
 
 /** Agents to suggest while the developer is typing "@par…" (no space yet). */

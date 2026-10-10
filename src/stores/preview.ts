@@ -1,10 +1,12 @@
 // The built-in browser and the iOS Simulator, shown in a task's side panel, which you and the agents share.
 import { create } from "zustand";
-import type { BrowserPage } from "../lib/types";
+import type { BrowserPage, BrowserTabs } from "../lib/types";
 
 import type { BrowserSize } from "../features/preview/browserModel";
 
 export type PreviewTab = "browser" | "simulator";
+
+const NO_PAGE: BrowserPage = { url: "", title: "", loading: false, favicon: "" };
 
 const WIDTH_KEY = "starkline.preview.width";
 export const MIN_WIDTH = 360;
@@ -29,7 +31,9 @@ interface PreviewState {
   tab: PreviewTab;
   /** The side panel's width while it shows one. */
   width: number;
-  /** The browser's page, as the backend last reported it. */
+  /** The browser's tabs, as the backend last reported them. */
+  tabs: BrowserTabs;
+  /** The page in the tab showing (empty when there is none). */
   page: BrowserPage;
   /** The simulator on show; null for the first one running. */
   simulator: string | null;
@@ -38,7 +42,7 @@ interface PreviewState {
   show: (tab: PreviewTab) => void;
   close: () => void;
   setWidth: (width: number) => void;
-  applyPage: (page: BrowserPage) => void;
+  applyTabs: (tabs: BrowserTabs) => void;
   showSimulator: (udid: string | null) => void;
 }
 
@@ -46,7 +50,8 @@ export const usePreview = create<PreviewState>((set) => ({
   open: false,
   tab: "browser",
   width: savedWidth(),
-  page: { url: "", title: "", loading: false },
+  tabs: { tabs: [], active: null },
+  page: NO_PAGE,
   simulator: null,
   size: "fit",
   setSize: (size) => set({ size }),
@@ -60,6 +65,9 @@ export const usePreview = create<PreviewState>((set) => ({
     }
     set({ width });
   },
-  applyPage: (page) => set({ page }),
+  applyTabs: (tabs) => {
+    const current = tabs.tabs.find((t) => t.id === tabs.active);
+    set({ tabs, page: current ? { url: current.url, title: current.title, loading: current.loading, favicon: current.favicon } : NO_PAGE });
+  },
   showSimulator: (simulator) => set({ simulator }),
 }));

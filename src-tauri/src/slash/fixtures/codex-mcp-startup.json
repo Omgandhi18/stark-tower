@@ -1,0 +1,398 @@
+[
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "argent",
+   "status": "starting",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618712141
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "context7",
+   "status": "starting",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618712141
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "panchayat-local",
+   "status": "starting",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618712141
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "pika-mcp",
+   "status": "starting",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618712141
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "stitch",
+   "status": "starting",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618712141
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "codex_apps",
+   "status": "starting",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618712141
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "node_repl",
+   "status": "starting",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618712141
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "cua_repl",
+   "status": "starting",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618712141
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "panchayat-local",
+   "status": "failed",
+   "error": "MCP client for `panchayat-local` failed to start: MCP startup failed: Metadata error: OAuth metadata discovery failed for http://localhost:8484/api/mcp\n  Caused by: HTTP request failed: http/request failed: error sending request for url (http://localhost:8484/api/mcp)",
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618712142
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "panchayat-local",
+   "status": "starting",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618712142
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "panchayat-local",
+   "status": "failed",
+   "error": "MCP client for `panchayat-local` failed to start: MCP startup failed: Metadata error: OAuth metadata discovery failed for http://localhost:8484/api/mcp\n  Caused by: HTTP request failed: http/request failed: error sending request for url (http://localhost:8484/api/mcp)",
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618712142
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "pika-mcp",
+   "status": "failed",
+   "error": "The pika-mcp MCP server is not logged in. Run `codex mcp login pika-mcp`.",
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618712399
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "node_repl",
+   "status": "ready",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618712885
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "cua_repl",
+   "status": "ready",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618713068
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "codex_apps",
+   "status": "ready",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618713736
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "context7",
+   "status": "ready",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618714267
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "argent",
+   "status": "ready",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618714512
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "stitch",
+   "status": "ready",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618717683
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "panchayat-local",
+   "status": "starting",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618722099
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "pika-mcp",
+   "status": "starting",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618722099
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "panchayat-local",
+   "status": "failed",
+   "error": "MCP client for `panchayat-local` failed to start: MCP startup failed: Metadata error: OAuth metadata discovery failed for http://localhost:8484/api/mcp\n  Caused by: HTTP request failed: http/request failed: error sending request for url (http://localhost:8484/api/mcp)",
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618722104
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "pika-mcp",
+   "status": "failed",
+   "error": "The pika-mcp MCP server is not logged in. Run `codex mcp login pika-mcp`.",
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618722455
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "node_repl",
+   "status": "ready",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618722455
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "codex_apps",
+   "status": "ready",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618722455
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "argent",
+   "status": "ready",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618722455
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "stitch",
+   "status": "ready",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618722455
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "cua_repl",
+   "status": "ready",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618722455
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "context7",
+   "status": "ready",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618722455
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "pika-mcp",
+   "status": "starting",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618725590
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "panchayat-local",
+   "status": "starting",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618725590
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "panchayat-local",
+   "status": "failed",
+   "error": "MCP client for `panchayat-local` failed to start: MCP startup failed: Metadata error: OAuth metadata discovery failed for http://localhost:8484/api/mcp\n  Caused by: HTTP request failed: http/request failed: error sending request for url (http://localhost:8484/api/mcp)",
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618725594
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "pika-mcp",
+   "status": "failed",
+   "error": "The pika-mcp MCP server is not logged in. Run `codex mcp login pika-mcp`.",
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618725906
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "codex_apps",
+   "status": "ready",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618725906
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "node_repl",
+   "status": "ready",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618725906
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "argent",
+   "status": "ready",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618725906
+ },
+ {
+  "method": "mcpServer/startupStatus/updated",
+  "params": {
+   "threadId": "t1",
+   "name": "context7",
+   "status": "ready",
+   "error": null,
+   "failureReason": null
+  },
+  "emittedAtMs": 1791618725906
+ }
+]

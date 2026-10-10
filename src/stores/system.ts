@@ -1,7 +1,7 @@
 // The app's own condition: what the agent runtime can do, whether this Mac is
 // being kept awake, and whether a newer release exists.
 import { create } from "zustand";
-import { powerState, runtimeHealth, setKeepAwake } from "../lib/api";
+import { powerState, recheckRuntime, runtimeHealth, setKeepAwake } from "../lib/api";
 import type { StateTone } from "../lib/status";
 import type { PowerState, RuntimeHealth, UpdateStatus } from "../lib/types";
 
@@ -10,6 +10,8 @@ interface SystemState {
   power: PowerState | null;
   update: UpdateStatus | null;
   refreshHealth: () => Promise<void>;
+  /** "Check again": read the shell's PATH again (in the background) and ask every CLI again. */
+  recheckHealth: () => Promise<void>;
   refreshPower: () => Promise<void>;
   applyPower: (state: PowerState) => void;
   applyUpdate: (status: UpdateStatus) => void;
@@ -22,6 +24,7 @@ export const useSystem = create<SystemState>((set) => ({
   power: null,
   update: null,
   refreshHealth: async () => set({ health: await runtimeHealth() }),
+  recheckHealth: async () => set({ health: await recheckRuntime() }),
   refreshPower: async () => set({ power: await powerState() }),
   applyPower: (power) => set({ power }),
   applyUpdate: (update) => set({ update }),

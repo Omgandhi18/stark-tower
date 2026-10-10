@@ -6,6 +6,7 @@
 
 use crate::chat::{self, Input, Launch, Sink, TurnUsage};
 use crate::rpc::{Incoming, Rpc, METHOD_NOT_FOUND};
+use crate::tool_output::Output;
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader};
@@ -21,7 +22,8 @@ const PROTOCOL_VERSION: u64 = 1;
 /// Starkline's bridge, as OpenCode knows the MCP server (its tools read `stark_<tool>`).
 const BRIDGE_NAME: &str = "stark";
 /// OpenCode reads a prompt that starts with "/" as one of its own commands, and
-/// drops an unknown one silently. This invisible character keeps a message a message.
+/// drops an unknown one silently. This invisible character keeps a message a message,
+/// unless it names a command OpenCode listed (see `as_prompt`).
 const NOT_A_COMMAND: char = '\u{200B}';
 
 /// Ask before anything that changes or reaches outside the project; Starkline's
@@ -47,6 +49,8 @@ struct Call {
 #[derive(Default)]
 struct Turn {
     session: Option<String>,
+    /// The slash commands OpenCode says this session has.
+    commands: Vec<String>,
     /// A prompt is running; messages sent meanwhile wait their turn.
     busy: bool,
     queued: VecDeque<chat::UserTurn>,
@@ -95,6 +99,16 @@ fn as_message(text: &str) -> String {
     }
 }
 
+/// What to send as the prompt's words: a slash command OpenCode listed (`available_commands_update`)
+/// goes as typed, so OpenCode runs it; anything else that starts with "/" stays a message.
+fn as_prompt(text: &str, commands: &[String]) -> String {
+    let word = text.strip_prefix('/').and_then(|rest| rest.split_whitespace().next());
+    match word {
+        Some(word) if commands.iter().any(|c| c == word) => text.to_string(),
+        _ => as_message(text),
+    }
+}
+
 /// A local file as a `file://` URI (spaces and the like percent-encoded).
 fn file_uri(path: &str) -> String {
     let mut uri = String::from("file://");
@@ -110,8 +124,8 @@ fn file_uri(path: &str) -> String {
 
 /// A developer turn as ACP prompt content: the words (naming the files), images
 /// inline, and other files as links OpenCode can read.
-fn prompt_blocks(turn: &chat::UserTurn) -> Value {
-    let mut blocks = vec![json!({ "type": "text", "text": as_message(&turn.text_with_files()) })];
+fn prompt_blocks(turn: &chat::UserTurn, commands: &[String]) -> Value {
+    let mut blocks = vec![json!({ "type": "text", "text": as_prompt(&turn.text_with_files(), commands) })];
     for a in &turn.attachments {
         match crate::attachments::image_data(a) {
             Some((mime, data)) => blocks.push(json!({ "type": "image", "mimeType": mime, "data": data })),
@@ -205,6 +219,43 @@ fn call_failed(update: &Value) -> bool {
     str_of(update, "status") == "failed" || update.pointer("/rawOutput/metadata/exit").and_then(Value::as_i64).is_some_and(|code| code != 0)
 }
 
+/// What a finished tool call put out: the tool's own output, else the content blocks it
+/// reported (text, images, and edits shown as removed and added lines).
+fn call_output(update: &Value) -> Output {
+    let raw = update.get("rawOutput");
+    let own = raw.and_then(|r| r.as_str().or_else(|| r.get("output").and_then(Value::as_str)));
+    let blocks = update.get("content").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    let mut output = Output::from_blocks(blocks);
+    // An edit's own output is only "Edit applied successfully.": what it changed comes from the
+    // unified diff OpenCode attaches, else the removed and added lines it reported.
+    let changes = match raw.and_then(|r| r.pointer("/metadata/diff")).and_then(Value::as_str).filter(|d| !d.trim().is_empty()) {
+        Some(diff) => Some(diff.trim_end().to_string()),
+        None => {
+            let diffs: Vec<String> = blocks
+                .iter()
+                .filter(|b| str_of(b, "type") == "diff")
+                .map(|block| {
+                    let lines = |key: &str, mark: &str| block.get(key).and_then(Value::as_str).unwrap_or("").lines().map(|l| format!("{mark} {l}\n")).collect::<String>();
+                    format!("{}\n{}{}", str_of(block, "path"), lines("oldText", "-"), lines("newText", "+"))
+                })
+                .collect();
+            (!diffs.is_empty()).then(|| diffs.join("\n"))
+        }
+    };
+    let joined = |text: String| match &changes {
+        Some(changes) if text.is_empty() => changes.clone(),
+        Some(changes) => format!("{text}\n{changes}"),
+        None => text,
+    };
+    match own {
+        Some(text) if !text.is_empty() => Output { text: joined(text.to_string()), images: output.images },
+        _ => {
+            output.text = joined(std::mem::take(&mut output.text));
+            output
+        }
+    }
+}
+
 impl OpenCode {
     fn handle(self: &Arc<Self>, incoming: Incoming) {
         match incoming {
@@ -229,11 +280,20 @@ impl OpenCode {
     }
 
     fn updated(&self, params: &Value) {
+        let update = params.get("update").cloned().unwrap_or(Value::Null);
+        // Sent right after the session opens, which can be before its id is recorded here.
+        if str_of(&update, "sessionUpdate") == "available_commands_update" {
+            let items = crate::slash::acp_commands(&update);
+            self.turn.lock().unwrap().commands = items.iter().map(|i| i.name.clone()).collect();
+            if let Some(conversation) = self.sink.conversation {
+                crate::slash::provider_commands(&self.app, conversation, &self.agent_id, &self.cwd, items);
+            }
+            return;
+        }
         let mut turn = self.turn.lock().unwrap();
         if turn.session.as_deref() != Some(str_of(params, "sessionId")) {
             return;
         }
-        let update = params.get("update").cloned().unwrap_or(Value::Null);
         let (app, sink, agent) = (self.app.clone(), self.sink.clone(), self.agent_id.clone());
         match str_of(&update, "sessionUpdate") {
             kind @ ("agent_message_chunk" | "agent_thought_chunk") => {
@@ -277,7 +337,7 @@ impl OpenCode {
                     chat::tool_called(&app, &sink, &agent, &id, &tool, &input);
                 }
                 if finished {
-                    chat::tool_returned(&app, &id, call_failed(&update));
+                    chat::tool_returned(&app, &id, call_failed(&update), call_output(&update));
                 }
             }
             "usage_update" => {
@@ -325,7 +385,7 @@ impl OpenCode {
 
     /// Start a prompt, or queue the message while one runs.
     fn send(self: &Arc<Self>, message: &chat::UserTurn) -> Result<(), String> {
-        let session = {
+        let (session, commands) = {
             let mut turn = self.turn.lock().unwrap();
             let session = turn.session.clone().ok_or("OpenCode has no session open.")?;
             if turn.busy {
@@ -339,10 +399,10 @@ impl OpenCode {
             turn.input_tokens = 0;
             turn.output_tokens = 0;
             turn.context_tokens = 0;
-            session
+            (session, turn.commands.clone())
         };
         let me = self.clone();
-        let params = json!({ "sessionId": session, "prompt": prompt_blocks(message) });
+        let params = json!({ "sessionId": session, "prompt": prompt_blocks(message, &commands) });
         let sent = self.rpc.request_then("session/prompt", params, move |reply| me.prompt_ended(reply));
         if sent.is_err() {
             self.turn.lock().unwrap().busy = false;
@@ -564,7 +624,68 @@ pub(crate) fn run_once(app: &tauri::AppHandle, launch: &Launch, task: &str, sink
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_finished_call_reports_its_own_output_before_its_content() {
+        let shell = json!({ "status": "completed", "rawOutput": { "output": "ok\n", "metadata": { "exit": 0 } }, "content": [{ "type": "content", "content": { "type": "text", "text": "ignored" } }] });
+        assert_eq!(super::call_output(&shell).text, "ok\n");
+        let image = json!({ "content": [{ "type": "content", "content": { "type": "image", "data": "AAAA", "mimeType": "image/png" } }] });
+        assert_eq!(super::call_output(&image).images.len(), 1);
+        let edit = json!({ "content": [{ "type": "diff", "path": "a.rs", "oldText": "x", "newText": "y" }] });
+        assert_eq!(super::call_output(&edit).text, "a.rs\n- x\n+ y\n");
+    }
+
     use super::*;
+
+    // The updates below were captured from opencode 1.18.18's `acp` (Oct 2026).
+    #[test]
+    fn a_read_image_keeps_its_picture_beside_its_one_line_of_output() {
+        let read = json!({ "sessionUpdate": "tool_call_update", "status": "completed", "title": "red.png",
+            "content": [
+                { "type": "content", "content": { "type": "text", "text": "Image read successfully" } },
+                { "type": "content", "content": { "type": "image", "mimeType": "image/png", "data": "iVBORw0KGgo=" } }
+            ],
+            "rawOutput": { "output": "Image read successfully", "metadata": { "preview": "Image read successfully", "truncated": false, "loaded": [] },
+                "attachments": [{ "type": "file", "mime": "image/png", "url": "data:image/png;base64,iVBORw0KGgo=" }] } });
+        let out = call_output(&read);
+        assert_eq!(out.text, "Image read successfully");
+        assert_eq!(out.images, vec![crate::tool_output::Image { media_type: "image/png".into(), base64: "iVBORw0KGgo=".into() }]);
+        assert!(!call_failed(&read));
+    }
+
+    #[test]
+    fn a_failing_command_is_failed_by_its_exit_code_though_the_call_completed() {
+        let ls = json!({ "sessionUpdate": "tool_call_update", "status": "completed", "title": "ls /nonexistent-dir-xyz",
+            "content": [{ "type": "content", "content": { "type": "text", "text": "ls: /nonexistent-dir-xyz: No such file or directory\n" } }],
+            "rawOutput": { "output": "ls: /nonexistent-dir-xyz: No such file or directory\n", "metadata": { "output": "x", "exit": 1, "truncated": false } } });
+        assert!(call_failed(&ls));
+        assert_eq!(call_output(&ls).text, "ls: /nonexistent-dir-xyz: No such file or directory\n");
+    }
+
+    #[test]
+    fn an_edit_shows_what_it_changed_not_just_that_it_applied() {
+        let edit = json!({ "sessionUpdate": "tool_call_update", "status": "completed", "title": "a.txt",
+            "content": [
+                { "type": "content", "content": { "type": "text", "text": "Edit applied successfully." } },
+                { "type": "diff", "path": "/private/tmp/p/a.txt", "oldText": "hello", "newText": "changed" }
+            ],
+            "rawOutput": { "output": "Edit applied successfully.", "metadata": { "diff": "Index: /p/a.txt\n@@ -1,1 +1,1 @@\n-hello\n+changed\n", "truncated": false } } });
+        let text = call_output(&edit).text;
+        assert!(text.starts_with("Edit applied successfully.\nIndex: /p/a.txt"));
+        assert!(text.ends_with("-hello\n+changed"));
+        // Without the unified diff, the removed and added lines stand in for it.
+        let bare = json!({ "content": [{ "type": "diff", "path": "a.txt", "oldText": "hello", "newText": "changed" }], "rawOutput": { "output": "Edit applied successfully." } });
+        assert_eq!(call_output(&bare).text, "Edit applied successfully.\na.txt\n- hello\n+ changed\n");
+    }
+
+    #[test]
+    fn real_edit_and_read_calls_map_to_starklines_tools() {
+        let edit = json!({ "kind": "edit", "title": "edit", "locations": [{ "path": "/private/tmp/p/a.txt" }], "rawInput": { "filePath": "/private/tmp/p/a.txt", "oldString": "hello", "newString": "changed" } });
+        assert_eq!(as_tool(&edit, "/tmp/p"), ("Edit".to_string(), json!({ "file_path": "/private/tmp/p/a.txt" })));
+        let write = json!({ "kind": "edit", "title": "write", "locations": [{ "path": "/tmp/p/b.txt" }], "rawInput": { "filePath": "/tmp/p/b.txt", "content": "new" } });
+        assert_eq!(as_tool(&write, "/tmp/p").0, "Write");
+        let bash = json!({ "kind": "execute", "title": "ls /nonexistent-dir-xyz", "rawInput": { "command": "ls /nonexistent-dir-xyz", "cwd": "/tmp/p" } });
+        assert_eq!(as_tool(&bash, "/tmp/p"), ("Bash".to_string(), json!({ "command": "ls /nonexistent-dir-xyz" })));
+    }
 
     #[test]
     fn prompt_usage_keeps_the_reported_input_and_output_counts() {
@@ -577,6 +698,17 @@ mod tests {
         assert_eq!(as_message("Fix the bug"), "Fix the bug");
         let guarded = as_message("/Users/dev/app is the folder");
         assert!(guarded.starts_with(NOT_A_COMMAND) && guarded.ends_with("/Users/dev/app is the folder"));
+    }
+
+    #[test]
+    fn a_command_opencode_listed_is_sent_as_typed() {
+        let commands = vec!["review".to_string(), "compact".to_string()];
+        assert_eq!(as_prompt("/review the diff", &commands), "/review the diff");
+        assert_eq!(as_prompt("/compact", &commands), "/compact");
+        assert_eq!(as_prompt("Fix the bug", &commands), "Fix the bug");
+        assert!(as_prompt("/Users/dev/app is the folder", &commands).starts_with(NOT_A_COMMAND));
+        assert!(as_prompt("/unknown thing", &commands).starts_with(NOT_A_COMMAND));
+        assert!(as_prompt("/review", &[]).starts_with(NOT_A_COMMAND));
     }
 
     #[test]

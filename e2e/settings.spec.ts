@@ -14,6 +14,21 @@ test.describe("settings and automations", () => {
     await expect(table.getByRole("row", { name: /Codex.*Not found on this Mac/ })).toBeVisible();
   });
 
+  test("check again reads the shell's PATH again without blocking", async ({ page }) => {
+    await openApp(page);
+    await goTo(page, "Settings");
+    await page.getByRole("list", { name: "Settings sections" }).getByRole("button", { name: "Diagnostics" }).click();
+    await expect(page.getByText(/Read from \/bin\/zsh at .+, in 0\.6s/)).toBeVisible();
+    const again = page.getByRole("button", { name: "Check again" });
+    await again.click();
+    await expect(page.getByText("Reading it again…")).toBeVisible();
+    await expect(page.getByText(/^Last read at /)).toBeVisible();
+    await expect(again).toBeDisabled();
+    await expect(page.getByText(/Read from \/bin\/zsh at .+, in 0\.4s/)).toBeVisible();
+    await expect(again).toBeEnabled();
+    expect((await fakeCalls(page)).filter((c) => c.cmd === "recheck_runtime")).toHaveLength(1);
+  });
+
   test("edits a provider's sign-in", async ({ page }) => {
     await openApp(page);
     await goTo(page, "Settings");

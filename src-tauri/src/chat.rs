@@ -10,6 +10,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use tauri::{Emitter, Manager};
 
+/// Ids of the control requests Starkline sends a Claude Code session, to recognise their answers.
+const CONTROL_INITIALIZE: &str = "starkline-initialize";
+const CONTROL_MCP_STATUS: &str = "starkline-mcp-status";
+
 static TASK_SEQ: AtomicU64 = AtomicU64::new(1);
 /// Spawn counter for chat sessions; see [`ChatSession::gen`].
 static SESSION_GEN: AtomicU64 = AtomicU64::new(1);
@@ -125,6 +129,28 @@ impl ChatSession {
     }
 }
 
+impl ChatSession {
+    /// Send Claude Code a control request (its stream-json side channel); other providers have none.
+    fn control(&mut self, request_id: &str, request: serde_json::Value) -> Result<(), String> {
+        match &mut self.input {
+            Input::StreamJson(stdin) => {
+                let msg = serde_json::json!({ "type": "control_request", "request_id": request_id, "request": request });
+                stdin.write_all(format!("{msg}\n").as_bytes()).map_err(|e| e.to_string())?;
+                stdin.flush().map_err(|e| e.to_string())
+            }
+            Input::Turns(_) => Err("This provider has no control channel.".into()),
+        }
+    }
+}
+
+/// Ask a Claude Code chat's session for its MCP servers' status; the answer reaches the slash menu
+/// as an event. False when the chat has no Claude Code session to ask.
+pub(crate) fn request_mcp_status(app: &tauri::AppHandle, conversation: i64) -> bool {
+    let Some(state) = app.try_state::<crate::AppState>() else { return false };
+    let mut map = state.chat.sessions.lock().unwrap();
+    map.get_mut(&conversation).is_some_and(|s| s.control(CONTROL_MCP_STATUS, serde_json::json!({ "subtype": "mcp_status" })).is_ok())
+}
+
 impl Drop for ChatSession {
     fn drop(&mut self) {
         crate::proc::kill_tree(self.child.id());
@@ -170,7 +196,7 @@ pub struct DelegationState {
     pub gen: u64,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Default, Serialize)]
 pub struct ChatEvent {
     #[serde(rename = "agentId")]
     pub agent_id: String,
@@ -196,6 +222,12 @@ pub struct ChatEvent {
     /// Files with the message (an "artifact": what the agent made or shared).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<Attachment>,
+    /// A tool call's full input as JSON.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
+    /// What a tool call put out ("tool_result"); its images are `attachments`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<crate::tool_output::ToolResult>,
 }
 
 /// Where a session's output belongs.
@@ -300,6 +332,7 @@ fn record_files_in(
             conversation_id: conversation,
             task_id: sink.task_for(app),
             attachments: files.to_vec(),
+            ..Default::default()
         },
     );
 }
@@ -353,6 +386,7 @@ pub(crate) fn simple_in(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, kin
             }),
             task_id: sink.task_for(app),
             attachments: Vec::new(),
+            ..Default::default()
         },
     );
 }
@@ -360,6 +394,8 @@ pub(crate) fn simple_in(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, kin
 /// Save a developer message (and its files) in one of the agent's chats and send it,
 /// starting that chat's session in `cwd` if needed. Returns the stored message's id.
 pub fn send_user_turn(app: &tauri::AppHandle, agent_id: &str, conversation: i64, text: &str, files: &[Attachment], cwd: &str) -> Result<Option<i64>, String> {
+    // The one way a developer's message reaches any engine: a command that would swap or reset the session stays out.
+    crate::slash::refuse_session_command(text)?;
     let state = app.state::<crate::AppState>();
     state.workdirs.lock().unwrap().insert(agent_id.to_string(), cwd.to_string());
     let e = state.ledger.record(agent_id, "chat", &truncate(text, 80), 1);
@@ -389,61 +425,12 @@ pub(crate) fn base_name(p: &str) -> String {
         .unwrap_or_else(|| p.to_string())
 }
 
-fn program_cache() -> &'static Mutex<HashMap<String, String>> {
-    static C: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
-    C.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Resolve a CLI's absolute path the way a login shell would, so an engine
-/// binary installed via nvm / fnm / asdf / volta / Homebrew resolves even when
-/// the app is launched from Finder with a minimal PATH. Positive results are
-/// cached; misses are deliberately not, so a just-installed CLI is seen next try.
+/// A CLI's absolute path, found where the developer's own terminal would find it
+/// (the login shell's PATH, then the standard install folders; see `shellenv`), so
+/// an engine installed via nvm / fnm / mise / Volta / Homebrew resolves from a
+/// Finder launch too. Only executables count, never a shell function or alias.
 pub fn resolve_program(cmd: &str) -> Option<String> {
-    let cmd = cmd.trim();
-    if cmd.is_empty() {
-        return None;
-    }
-    // An explicit path is honored as-is (if it exists).
-    if cmd.contains('/') {
-        return std::path::Path::new(cmd).exists().then(|| cmd.to_string());
-    }
-    if let Some(p) = program_cache().lock().unwrap().get(cmd) {
-        if std::path::Path::new(p).exists() {
-            return Some(p.clone());
-        }
-    }
-    // Only a plain binary name may go through the shell (no metacharacters).
-    let simple = cmd.chars().all(|c| c.is_ascii_alphanumeric() || "._+-".contains(c));
-    if simple {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-        if let Ok(out) = Command::new(&shell)
-            .args(["-lc", &format!("command -v {cmd} 2>/dev/null | tail -n1")])
-            .output()
-        {
-            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !path.is_empty() && std::path::Path::new(&path).exists() {
-                program_cache().lock().unwrap().insert(cmd.to_string(), path.clone());
-                return Some(path);
-            }
-        }
-    }
-    // Fallback: probe the common install locations directly.
-    let home = std::env::var("HOME").unwrap_or_default();
-    let candidates = [
-        format!("{home}/.local/bin/{cmd}"),
-        format!("{home}/.claude/local/{cmd}"),
-        format!("{home}/.bun/bin/{cmd}"),
-        format!("{home}/.volta/bin/{cmd}"),
-        format!("/opt/homebrew/bin/{cmd}"),
-        format!("/usr/local/bin/{cmd}"),
-    ];
-    for c in candidates {
-        if std::path::Path::new(&c).exists() {
-            program_cache().lock().unwrap().insert(cmd.to_string(), c.clone());
-            return Some(c);
-        }
-    }
-    None
+    crate::shellenv::which(cmd)
 }
 
 /// Inject a steer message into a chat's live session (a new user turn).
@@ -630,13 +617,7 @@ pub(crate) fn bridge_server(launch: &Launch) -> BridgeServer {
 /// The environment every provider process gets: a PATH that finds Homebrew and
 /// nvm tools from a Finder launch, the provider's API keys, the agent's memory file.
 pub(crate) fn provider_env(cmd: &mut Command, launch: &Launch) {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let extra = format!("{home}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin");
-    let path = match std::env::var("PATH") {
-        Ok(p) => format!("{extra}:{p}"),
-        Err(_) => extra,
-    };
-    cmd.env("PATH", path);
+    cmd.env("PATH", crate::shellenv::child_path());
     // Values are hydrated from the secret store before we get here; skip any
     // still-sentinel (no stored secret) or empty entry.
     for (k, v) in &launch.engine.auth.env {
@@ -829,6 +810,7 @@ pub(crate) fn session_ready(app: &tauri::AppHandle, agent_id: &str, sink: &Sink,
             conversation_id: sink.conversation_for(app, agent_id),
             task_id: sink.task_for(app),
             attachments: Vec::new(),
+            ..Default::default()
         },
     );
     // A worker is busy from its first word; only a chat's session waits for you once it's up.
@@ -858,7 +840,7 @@ pub(crate) fn thought(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, text:
 pub(crate) fn tool_called(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, tool_use_id: &str, name: &str, input: &serde_json::Value) {
     runs::set(app, agent_id, sink.conversation, AgentStatus::Working);
     let detail = summarize_tool(name, input);
-    record_in(app, sink, agent_id, "tool", "tool", None, Some(name), Some(&detail));
+    record_tool(app, sink, agent_id, tool_use_id, name, &detail, input);
     let task = sink.task_for(app);
     let who = sink.actor(agent_id);
     crate::tasks::tool_use(app, &who, task.as_deref(), tool_use_id, name, input);
@@ -881,9 +863,96 @@ pub(crate) fn tool_called(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, t
     }
 }
 
-/// A tool call came back; checks are judged by it.
-pub(crate) fn tool_returned(app: &tauri::AppHandle, tool_use_id: &str, is_error: bool) {
+/// Store a tool call's row with its full input, and remember which row its result belongs in.
+fn record_tool(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, tool_use_id: &str, name: &str, detail: &str, input: &serde_json::Value) {
+    let conversation = sink.conversation_for(app, agent_id);
+    let task_id = sink.task_for(app);
+    let input_json = crate::tool_output::cap_input(input);
+    let message_id = match (app.try_state::<crate::AppState>(), conversation) {
+        (Some(state), Some(conv)) => state.ledger.add_tool_message(conv, agent_id, name, detail, input_json.as_deref()),
+        _ => None,
+    };
+    if let (Some(message_id), false) = (message_id, tool_use_id.is_empty()) {
+        crate::tool_output::remember(tool_use_id, crate::tool_output::Pending { message_id, conversation, agent_id: agent_id.to_string(), task_id: task_id.clone() });
+    }
+    emit(
+        app,
+        ChatEvent {
+            agent_id: agent_id.to_string(),
+            kind: "tool".into(),
+            tool: Some(name.to_string()),
+            detail: Some(detail.to_string()),
+            message_id,
+            conversation_id: conversation,
+            task_id,
+            input: input_json,
+            ..Default::default()
+        },
+    );
+}
+
+/// A tool call came back; checks are judged by it, and its output is kept with its row.
+pub(crate) fn tool_returned(app: &tauri::AppHandle, tool_use_id: &str, is_error: bool, output: crate::tool_output::Output) {
     crate::tasks::tool_result(app, tool_use_id, is_error);
+    let Some(call) = crate::tool_output::take(tool_use_id) else { return };
+    let Some(state) = app.try_state::<crate::AppState>() else { return };
+    let (result, images) = crate::tool_output::settle(&attachments::root(app), &output, is_error);
+    state.ledger.set_tool_result(call.message_id, &result, &images);
+    emit(
+        app,
+        ChatEvent {
+            agent_id: call.agent_id,
+            kind: "tool_result".into(),
+            message_id: Some(call.message_id),
+            conversation_id: call.conversation,
+            task_id: call.task_id,
+            attachments: images,
+            result: Some(result),
+            ..Default::default()
+        },
+    );
+}
+
+/// The turn ended (or the session closed) with calls that never reported back, such as
+/// parallel calls cut short: their rows settle as "no result" instead of spinning on.
+pub(crate) fn settle_unanswered(app: &tauri::AppHandle, agent_id: &str, conversation: Option<i64>) {
+    let Some(state) = app.try_state::<crate::AppState>() else { return };
+    for call in crate::tool_output::take_unanswered(agent_id, conversation) {
+        let result = crate::tool_output::ToolResult::none();
+        state.ledger.set_tool_result(call.message_id, &result, &[]);
+        emit(
+            app,
+            ChatEvent {
+                agent_id: call.agent_id,
+                kind: "tool_result".into(),
+                message_id: Some(call.message_id),
+                conversation_id: call.conversation,
+                task_id: call.task_id,
+                result: Some(result),
+                ..Default::default()
+            },
+        );
+    }
+}
+
+/// More of a running call's output, for engines that stream it. Shown live, not stored.
+pub(crate) fn tool_streaming(app: &tauri::AppHandle, tool_use_id: &str, delta: &str) {
+    let Some(call) = crate::tool_output::pending(tool_use_id) else { return };
+    if delta.is_empty() {
+        return;
+    }
+    emit(
+        app,
+        ChatEvent {
+            agent_id: call.agent_id,
+            kind: "tool_output".into(),
+            text: Some(delta.to_string()),
+            message_id: Some(call.message_id),
+            conversation_id: call.conversation,
+            task_id: call.task_id,
+            ..Default::default()
+        },
+    );
 }
 
 /// What a turn used: its cost where the provider reports one, and how full the context is.
@@ -899,6 +968,7 @@ pub(crate) struct TurnUsage {
 /// The agent's turn ended: the transcript, the HUD, the loop guard, delegation
 /// and the task engine all hear about it.
 pub(crate) fn turn_finished(app: &tauri::AppHandle, sink: &Sink, agent_id: &str, text: Option<String>, usage: TurnUsage) {
+    settle_unanswered(app, agent_id, sink.conversation_for(app, agent_id));
     let usage = crate::spend::record(app, sink, agent_id, usage);
     // Only replies in the developer's own chats can be read out; task workers stay quiet.
     if let (true, Some(reply)) = (sink.persistent, text.as_deref()) {
@@ -930,6 +1000,7 @@ pub(crate) fn turn_finished(app: &tauri::AppHandle, sink: &Sink, agent_id: &str,
             conversation_id: sink.conversation_for(app, agent_id),
             task_id: sink.task_for(app),
             attachments: Vec::new(),
+            ..Default::default()
         },
     );
     let _ = app.emit(
@@ -1032,10 +1103,12 @@ fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, si
                 for b in blocks.iter().filter(|b| b.get("type").and_then(|x| x.as_str()) == Some("tool_result")) {
                     let id = b.get("tool_use_id").and_then(|x| x.as_str()).unwrap_or("");
                     let is_error = b.get("is_error").and_then(|x| x.as_bool()).unwrap_or(false);
-                    tool_returned(app, id, is_error);
+                    tool_returned(app, id, is_error, crate::tool_output::Output::from_claude(b.get("content").unwrap_or(&serde_json::Value::Null)));
                 }
             }
         }
+        // How much of the plan's 5-hour and weekly limits this turn left.
+        "rate_limit_event" => crate::limits::claude_event(app, v),
         "result" => {
             // A failed turn says why in the chat; its "result" isn't an answer.
             let failure = failed_result(v);
@@ -1058,6 +1131,34 @@ fn handle_line(app: &tauri::AppHandle, agent_id: &str, v: &serde_json::Value, si
             }
             turn_finished(app, &sink, agent_id, text, usage);
         }
+        _ => {}
+    }
+}
+
+/// Hand the slash menu what a Claude Code session says about its commands and MCP servers:
+/// the answers to Starkline's control requests, `commands_changed`, and each turn's `init`.
+fn slash_line(app: &tauri::AppHandle, agent_id: &str, conversation: i64, cwd: &str, v: &serde_json::Value) {
+    match v.get("type").and_then(|t| t.as_str()) {
+        Some("control_response") => {
+            let answer = v.get("response").cloned().unwrap_or_default();
+            if answer.get("subtype").and_then(|s| s.as_str()) != Some("success") {
+                return;
+            }
+            let body = answer.get("response").cloned().unwrap_or_default();
+            match answer.get("request_id").and_then(|r| r.as_str()) {
+                Some(CONTROL_INITIALIZE) => crate::slash::claude_commands(app, conversation, agent_id, cwd, &body["commands"]),
+                Some(CONTROL_MCP_STATUS) => crate::slash::claude_mcp_status(app, conversation, agent_id, cwd, &body),
+                _ => {}
+            }
+        }
+        Some("system") => match v.get("subtype").and_then(|s| s.as_str()) {
+            Some("commands_changed") => {
+                crate::slash::claude_commands(app, conversation, agent_id, cwd, &v["commands"]);
+                crate::slash::queue_mcp_refresh(app, conversation);
+            }
+            Some("init") => crate::slash::claude_init(app, conversation, agent_id, cwd, v),
+            _ => {}
+        },
         _ => {}
     }
 }
@@ -1094,6 +1195,7 @@ pub(crate) fn session_finished(app: &tauri::AppHandle, agent_id: &str, conversat
     };
     if let Some(ended) = ended {
         drop(ended);
+        crate::slash::ended(conversation);
         let sink = Sink::chat(conversation);
         // The stored session no longer resolves (the provider rotated or pruned it).
         // Forget it so the next message starts fresh instead of re-resuming the dead
@@ -1110,6 +1212,7 @@ pub(crate) fn session_finished(app: &tauri::AppHandle, agent_id: &str, conversat
                 Some("The previous session expired, so this chat started fresh. Please send your last message again.".into()),
             );
         }
+        settle_unanswered(app, agent_id, Some(conversation));
         simple_in(app, &sink, agent_id, "exit", None);
         runs::ended(app, conversation);
         crate::tasks::session_ended(app, agent_id, conversation, crate::tasks::Ended::Unexpectedly);
@@ -1166,12 +1269,16 @@ fn start_claude(app: &tauri::AppHandle, launch: &Launch, gen: u64) -> Result<(Ch
     let conversation = launch.conversation.ok_or("A chat session needs its conversation.")?;
     let mut sink = Sink::chat(conversation).launched(launch);
     let mut child = build_headless(launch).spawn().map_err(|e| e.to_string())?;
-    let stdin = child.stdin.take().ok_or("no stdin")?;
+    let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     if let Some(stderr) = child.stderr.take() {
         spawn_stderr_pump(app, &launch.agent_id, &sink, stderr);
     }
-    let (app2, id2) = (app.clone(), launch.agent_id.clone());
+    // Claude Code lists its commands, described, only when asked: the slash menu needs them
+    // before the first message. Failing to ask costs the menu its descriptions, not the chat.
+    let ask = serde_json::json!({ "type": "control_request", "request_id": CONTROL_INITIALIZE, "request": { "subtype": "initialize" } });
+    let _ = stdin.write_all(format!("{ask}\n").as_bytes()).and_then(|_| stdin.flush());
+    let (app2, id2, cwd2) = (app.clone(), launch.agent_id.clone(), launch.cwd.clone());
     let (resumed, orchestrator) = (launch.resume.is_some(), launch.orchestrator);
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
@@ -1182,6 +1289,7 @@ fn start_claude(app: &tauri::AppHandle, launch: &Launch, gen: u64) -> Result<(Ch
             }
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                 let init = is_init(&v);
+                slash_line(&app2, &id2, conversation, &cwd2, &v);
                 if let Some(id) = v.get("session_id").and_then(|v| v.as_str()) {
                     sink.usage_session.as_mut().unwrap().session_id = Some(id.into());
                 }
@@ -1230,13 +1338,16 @@ pub fn send(app: &tauri::AppHandle, agent_id: &str, conversation: i64, turn: &Us
     // The orchestrator gets the current team + project map prepended to each turn,
     // so a renamed/added agent or project is reflected immediately (see §01.8).
     let mut content = turn.clone();
-    if crate::prompts::agent_is_orchestrator(app, agent_id) {
+    // A slash command only runs as the first thing in the message; context in front of it
+    // would leave the model to guess what to do. The command's own run carries on without it.
+    let runs_a_command = crate::slash::command_of(app, agent_id, conversation, cwd, &turn.text).is_some();
+    if !runs_a_command && crate::prompts::agent_is_orchestrator(app, agent_id) {
         let ctx = crate::prompts::orchestrator_turn_context(app, agent_id);
         if !ctx.is_empty() {
             content.text = format!("{ctx}\n\n{}", turn.text);
         }
     }
-    let workspace = crate::prompts::workspace_context(app, agent_id, cwd);
+    let workspace = if runs_a_command { String::new() } else { crate::prompts::workspace_context(app, agent_id, cwd) };
     if !workspace.is_empty() {
         content.text = format!("{workspace}\n\n{}", content.text);
     }
@@ -1341,7 +1452,9 @@ pub fn run_task_blocking(
     }
     runs::started(app, agent_id, conversation, cwd, AgentStatus::Thinking);
 
-    let context = crate::prompts::workspace_context(app, agent_id, cwd);
+    // As in `send`: a slash command only runs as the first thing in the message, so it goes without the context.
+    let runs_a_command = crate::slash::command_of(app, agent_id, conversation, cwd, task).is_some();
+    let context = if runs_a_command { String::new() } else { crate::prompts::workspace_context(app, agent_id, cwd) };
     let request = if context.is_empty() { task.to_string() } else { format!("{context}\n\n{task}") };
     let outcome = run_worker(app, agent_id, &request, cwd, &sink, None);
     (Some(child.id.clone()), settle_worker(app, &child.id, agent_id, conversation, task, outcome))
@@ -1373,6 +1486,9 @@ pub fn continue_task_blocking(app: &tauri::AppHandle, by: &str, task: &crate::le
     let resume = app.try_state::<crate::AppState>().and_then(|s| s.ledger.conversation_session(conversation)).filter(|_| resumable);
     let prompt = if resume.is_some() {
         request.to_string()
+    } else if crate::slash::command_of(app, agent_id, conversation, cwd, &task.prompt).is_some() {
+        // A slash command only runs as the first thing in the message: it runs again from the start, with any note after it.
+        if note.trim().is_empty() { task.prompt.trim().to_string() } else { format!("{}\n\n{}", task.prompt.trim(), note.trim()) }
     } else {
         let context = crate::prompts::workspace_context(app, agent_id, cwd);
         format!("{context}\n\nYou were asked this earlier and stopped before finishing:\n\n{}\n\n{request}", task.prompt).trim_start().to_string()

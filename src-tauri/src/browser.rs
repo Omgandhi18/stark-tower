@@ -1,6 +1,7 @@
-//! The built-in browser: one page, shown beside a conversation, that the
-//! developer and the agents both use. It's a real browser view (WebKit on macOS)
-//! laid over the panel the interface draws for it, so any site works. Agents
+//! The built-in browser: pages in tabs, shown beside a conversation, that the
+//! developer and the agents both use. Each tab is a real browser view (WebKit on macOS),
+//! so it keeps its own scroll, history and form input; the active one is laid over the
+//! panel the interface draws for it and the rest stay hidden, so any site works. Agents
 //! open pages, read them, click, type, run JavaScript, read the console and take
 //! screenshots through the `browser` tool. Pages on this Mac (localhost) are
 //! theirs to use; a page on the internet goes through the permission gate like
@@ -12,7 +13,6 @@ use std::sync::{mpsc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl};
 
-const LABEL: &str = "browser";
 const SCRIPT_TIMEOUT: Duration = Duration::from_secs(10);
 const LOAD_TIMEOUT: Duration = Duration::from_secs(20);
 /// After a click or a key, how long a page gets to start navigating before it counts as settled.
@@ -27,6 +27,25 @@ pub struct BrowserPage {
     pub url: String,
     pub title: String,
     pub loading: bool,
+    /// The page's icon, as an address the interface can show ("" until it has told us one).
+    pub favicon: String,
+}
+
+/// One tab, as the panel's tab strip shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
+pub struct BrowserTab {
+    pub id: u32,
+    pub url: String,
+    pub title: String,
+    pub loading: bool,
+    pub favicon: String,
+}
+
+/// The open tabs and which one is showing.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, specta::Type)]
+pub struct BrowserTabs {
+    pub tabs: Vec<BrowserTab>,
+    pub active: Option<u32>,
 }
 
 /// Where the panel is, in the window's own coordinates.
@@ -94,12 +113,15 @@ fn pick_rect(pick: &BrowserPick, zoom: f64) -> Result<Bounds, String> {
     Ok(Bounds { x: x * zoom, y: y * zoom, width: (right - x) * zoom, height: (bottom - y) * zoom })
 }
 
+/// Ends pointing on a page (the one being left, when the tab changes).
+const PICKER_CANCEL: &str = "(() => { window.__starkPicker?.cleanup(); if (window.__starkPicker) window.__starkPicker.pick = null; return {active:false,pick:null}; })()";
+
 /// Start pointing at the page, check for a pick, or stop. A pick is handed back once, with a
 /// picture of it on macOS.
 pub fn picker(app: &tauri::AppHandle, action: &str) -> Result<PickerResult, String> {
     let script = match action {
         "start" => include_str!("picker.js"),
-        "cancel" => "(() => { window.__starkPicker?.cleanup(); if (window.__starkPicker) window.__starkPicker.pick = null; return {active:false,pick:null}; })()",
+        "cancel" => PICKER_CANCEL,
         "poll" => "(() => { const s = window.__starkPicker; if (!s) return {active:false,pick:null}; const pick = s.pick; s.pick = null; return {active:s.active,pick}; })()",
         _ => return Err("That picker action isn't available.".into()),
     };
@@ -125,12 +147,86 @@ fn picture(app: &tauri::AppHandle, pick: &BrowserPick) -> Result<crate::attachme
     crate::attachments::store_data(&crate::attachments::root(app), "browser-point.jpg", &data)
 }
 
+struct Tab {
+    id: u32,
+    view: tauri::Webview,
+    page: BrowserPage,
+    /// Brought back from the last run but not opened yet: the page loads when the tab is first shown.
+    restore: Option<String>,
+}
+
+#[derive(Default)]
+struct TabList {
+    tabs: Vec<Tab>,
+    active: Option<u32>,
+    /// The last id given out; ids are never reused, so an agent's "tab 2" stays that tab.
+    last_id: u32,
+}
+
+// The locks are never held while a view is created or driven: the webview calls wait on the
+// main thread, where the page callbacks take these same locks.
 #[derive(Default)]
 pub struct Browser {
-    view: Mutex<Option<tauri::Webview>>,
+    list: Mutex<TabList>,
     zoom: Mutex<Option<f64>>,
-    page: Mutex<BrowserPage>,
+    /// Where the active tab is laid; none while the browser is out of the way.
+    bounds: Mutex<Option<Bounds>>,
+    /// What was last written to disk, so a change that isn't about the tabs doesn't rewrite it.
+    saved: Mutex<String>,
+    /// Tabs are only written once the last run's have been brought back, or they'd be overwritten.
+    saving: std::sync::atomic::AtomicBool,
 }
+
+/// Where the open tabs are kept between runs.
+const SAVED_FILE: &str = "browser-tabs.json";
+/// Longest favicon address kept (a data: icon can be large, and every tab change carries it).
+const FAVICON_LIMIT: usize = 4096;
+
+/// A tab as kept between runs: where it was and what it was called.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct SavedTab {
+    url: String,
+    title: String,
+}
+
+/// The open tabs as kept between runs: in order, with the one showing.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+struct SavedTabs {
+    tabs: Vec<SavedTab>,
+    active: Option<usize>,
+}
+
+/// What to keep of the open tabs. Empty tabs and pages that can't come back (a kept file is
+/// served from a port that is gone next run) are left out; the active one moves with them.
+fn to_saved(all: &BrowserTabs, keep: impl Fn(&str) -> bool) -> SavedTabs {
+    let mut saved = SavedTabs::default();
+    for tab in all.tabs.iter().filter(|t| !t.url.is_empty() && keep(&t.url)) {
+        if Some(tab.id) == all.active {
+            saved.active = Some(saved.tabs.len());
+        }
+        saved.tabs.push(SavedTab { url: tab.url.clone(), title: tab.title.clone() });
+    }
+    saved
+}
+
+/// The icon address a page reported, if it's one the interface can show: a web address or an inline image.
+fn parse_favicon(raw: &str) -> String {
+    let address: String = serde_json::from_str(raw).unwrap_or_default();
+    let shown = address.starts_with("https://") || address.starts_with("http://") || address.starts_with("data:image/");
+    if shown && address.len() <= FAVICON_LIMIT {
+        address
+    } else {
+        String::new()
+    }
+}
+
+/// Asks a loaded page which icon it has: the one it links, else the site's /favicon.ico.
+const FAVICON_SCRIPT: &str = r#"(() => { try {
+  const link = document.querySelector('link[rel~="icon"]');
+  const href = link && link.getAttribute("href");
+  if (href) return new URL(href, location.href).href;
+  return /^https?:$/.test(location.protocol) ? location.origin + "/favicon.ico" : "";
+} catch (_) { return ""; } })()"#;
 
 /// Records what the page writes to its console (and its uncaught errors), for agents to read.
 const CONSOLE_HOOK: &str = r#"(() => {
@@ -199,52 +295,158 @@ fn state(app: &tauri::AppHandle) -> Result<tauri::State<'_, Browser>, String> {
     app.try_state::<Browser>().ok_or_else(|| "Starkline isn't ready yet.".into())
 }
 
-fn changed(app: &tauri::AppHandle) {
-    if let Ok(s) = state(app) {
-        let page = s.page.lock().unwrap().clone();
-        let _ = app.emit("browser://changed", page);
+fn snapshot_tabs(list: &TabList) -> BrowserTabs {
+    BrowserTabs {
+        tabs: list
+            .tabs
+            .iter()
+            .map(|t| BrowserTab { id: t.id, url: t.page.url.clone(), title: t.page.title.clone(), loading: t.page.loading, favicon: t.page.favicon.clone() })
+            .collect(),
+        active: list.active,
     }
 }
 
-fn set_page(app: &tauri::AppHandle, f: impl FnOnce(&mut BrowserPage)) {
+fn changed(app: &tauri::AppHandle) {
+    let all = tabs(app);
+    let _ = app.emit("browser://changed", &all);
+    persist(app, &all);
+}
+
+/// Keep the open tabs for the next run, when they've changed.
+fn persist(app: &tauri::AppHandle, all: &BrowserTabs) {
+    let Ok(s) = state(app) else { return };
+    if !s.saving.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let Ok(json) = serde_json::to_string(&to_saved(all, |url| !crate::file_server::serves(url))) else { return };
+    let mut last = s.saved.lock().unwrap();
+    if *last == json {
+        return;
+    }
+    let file = saved_path(app);
+    let temp = file.with_extension("json.tmp");
+    if std::fs::write(&temp, &json).and_then(|_| std::fs::rename(&temp, &file)).is_ok() {
+        *last = json;
+    }
+}
+
+fn saved_path(app: &tauri::AppHandle) -> std::path::PathBuf {
+    app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir()).join(SAVED_FILE)
+}
+
+/// Bring back the tabs the last run had open. The one that was showing opens its page now; the rest
+/// open theirs when first shown, so a restart doesn't load every page at once.
+pub fn restore(app: &tauri::AppHandle) {
+    let Ok(s) = state(app) else { return };
+    let text = std::fs::read_to_string(saved_path(app)).ok();
+    let saved: SavedTabs = match text.as_deref().map(serde_json::from_str) {
+        Some(Ok(saved)) => saved,
+        // Nothing kept yet is fine; a file that can't be read is left for the developer, not overwritten.
+        Some(Err(_)) => return,
+        None => SavedTabs::default(),
+    };
+    *s.saved.lock().unwrap() = text.unwrap_or_default().trim().to_string();
+    let active = saved.active.filter(|i| *i < saved.tabs.len()).unwrap_or(0);
+    let mut showing = None;
+    for (i, tab) in saved.tabs.iter().enumerate() {
+        let Ok(url) = tab.url.parse::<tauri::Url>() else { continue };
+        let now = i == active;
+        let Ok(id) = create_tab_at(app, now.then_some(url)) else { return };
+        if !now {
+            if let Some(t) = s.list.lock().unwrap().tabs.iter_mut().find(|t| t.id == id) {
+                t.restore = Some(tab.url.clone());
+                t.page.url = tab.url.clone();
+                t.page.title = tab.title.clone();
+            }
+        } else {
+            showing = Some(id);
+            set_page(app, id, |p| {
+                p.url = tab.url.clone();
+                p.title = tab.title.clone();
+                p.loading = true;
+            });
+        }
+    }
+    if let Some(id) = showing {
+        let _ = activate(app, id);
+    }
+    s.saving.store(true, std::sync::atomic::Ordering::SeqCst);
+    changed(app);
+}
+
+/// The open tabs, and the one showing.
+pub fn tabs(app: &tauri::AppHandle) -> BrowserTabs {
+    state(app).map(|s| snapshot_tabs(&s.list.lock().unwrap())).unwrap_or_default()
+}
+
+fn set_page(app: &tauri::AppHandle, id: u32, f: impl FnOnce(&mut BrowserPage)) {
     if let Ok(s) = state(app) {
-        f(&mut s.page.lock().unwrap());
+        if let Some(tab) = s.list.lock().unwrap().tabs.iter_mut().find(|t| t.id == id) {
+            f(&mut tab.page);
+        }
     }
     changed(app);
 }
 
+/// The page in the tab that's showing.
 pub fn page(app: &tauri::AppHandle) -> BrowserPage {
-    state(app).map(|s| s.page.lock().unwrap().clone()).unwrap_or_default()
+    let Ok(s) = state(app) else { return BrowserPage::default() };
+    let list = s.list.lock().unwrap();
+    list.tabs.iter().find(|t| Some(t.id) == list.active).map(|t| t.page.clone()).unwrap_or_default()
 }
 
-/// The browser view, made the first time it's needed (hidden, until the panel places it).
-fn view(app: &tauri::AppHandle) -> Result<tauri::Webview, String> {
+/// A new, empty tab (hidden, until the panel places it). It doesn't become the active one.
+fn create_tab(app: &tauri::AppHandle) -> Result<u32, String> {
+    create_tab_at(app, None)
+}
+
+/// A new tab, opened on `url` if given (else blank).
+fn create_tab_at(app: &tauri::AppHandle, first: Option<tauri::Url>) -> Result<u32, String> {
     let s = state(app)?;
-    let mut slot = s.view.lock().unwrap();
-    if let Some(view) = slot.as_ref() {
-        return Ok(view.clone());
-    }
+    let id = {
+        let mut list = s.list.lock().unwrap();
+        list.last_id += 1;
+        list.last_id
+    };
     let window = app.get_window("main").ok_or("The main window isn't open.")?;
     let on_load = app.clone();
     let on_title = app.clone();
     let on_new = app.clone();
-    let builder = tauri::WebviewBuilder::new(LABEL, WebviewUrl::External(BLANK.parse().map_err(|_| "bad blank page")?))
+    let start = match first {
+        Some(url) => url,
+        None => BLANK.parse().map_err(|_| "bad blank page")?,
+    };
+    let builder = tauri::WebviewBuilder::new(format!("browser-{id}"), WebviewUrl::External(start))
         .initialization_script(CONSOLE_HOOK)
-        .on_page_load(move |_, payload| {
+        .on_page_load(move |view, payload| {
+            // A tab brought back from the last run keeps its page and name until it's first shown.
+            if awaiting_restore(&on_load, id) {
+                return;
+            }
             let url = payload.url().to_string();
-            let loading = matches!(payload.event(), tauri::webview::PageLoadEvent::Started);
-            set_page(&on_load, |p| {
-                p.url = if url == BLANK { String::new() } else { url };
-                p.loading = loading;
+            let started = matches!(payload.event(), tauri::webview::PageLoadEvent::Started);
+            set_page(&on_load, id, |p| {
+                if started {
+                    p.favicon.clear();
+                }
+                p.url = if url == BLANK { String::new() } else { url.clone() };
+                p.loading = started;
             });
+            if !started && url != BLANK {
+                ask_favicon(&on_load, id, &url, view);
+            }
         })
-        .on_document_title_changed(move |_, title| set_page(&on_title, |p| p.title = title))
-        // The panel is one page: a link that would open a new window opens here instead.
+        .on_document_title_changed(move |_, title| {
+            if !awaiting_restore(&on_title, id) {
+                set_page(&on_title, id, |p| p.title = title)
+            }
+        })
+        // A link that would open a new window opens in a new tab instead.
         .on_new_window(move |url, _| {
             let app = on_new.clone();
             let url = url.to_string();
             std::thread::spawn(move || {
-                let _ = navigate(&app, &url);
+                let _ = new_tab(&app, Some(&url));
             });
             tauri::webview::NewWindowResponse::Deny
         });
@@ -252,27 +454,174 @@ fn view(app: &tauri::AppHandle) -> Result<tauri::Webview, String> {
         .add_child(builder, LogicalPosition::new(0.0, 0.0), LogicalSize::new(1.0, 1.0))
         .map_err(|e| format!("The browser couldn't open: {e}"))?;
     let _ = created.hide();
-    *slot = Some(created.clone());
-    Ok(created)
+    s.list.lock().unwrap().tabs.push(Tab { id, view: created, page: BrowserPage::default(), restore: None });
+    Ok(id)
 }
 
-/// Place the browser over the panel and show it.
+/// Whether the tab is one brought back that hasn't been opened yet.
+fn awaiting_restore(app: &tauri::AppHandle, id: u32) -> bool {
+    state(app).map(|s| s.list.lock().unwrap().tabs.iter().any(|t| t.id == id && t.restore.is_some())).unwrap_or(false)
+}
+
+/// Ask a loaded page for its icon and record it, unless the tab has moved on by the time it answers.
+fn ask_favicon(app: &tauri::AppHandle, id: u32, url: &str, view: tauri::Webview) {
+    let (app, url) = (app.clone(), url.to_string());
+    // Driving a view waits on the main thread, which is where page callbacks run.
+    std::thread::spawn(move || {
+        let answer = app.clone();
+        let _ = view.eval_with_callback(FAVICON_SCRIPT, move |raw| {
+            let icon = parse_favicon(&raw);
+            let current = state(&answer).map(|s| s.list.lock().unwrap().tabs.iter().any(|t| t.id == id && t.page.url == url)).unwrap_or(false);
+            if current && !icon.is_empty() {
+                set_page(&answer, id, |p| p.favicon = icon);
+            }
+        });
+    });
+}
+
+/// The tab being acted on: the active one, made (blank) if there are none yet.
+fn active_view(app: &tauri::AppHandle) -> Result<(u32, tauri::Webview), String> {
+    let s = state(app)?;
+    let current = {
+        let list = s.list.lock().unwrap();
+        list.tabs.iter().find(|t| Some(t.id) == list.active).map(|t| (t.id, t.view.clone()))
+    };
+    if let Some(found) = current {
+        return Ok(found);
+    }
+    let id = create_tab(app)?;
+    activate(app, id)?;
+    let view = s.list.lock().unwrap().tabs.iter().find(|t| t.id == id).map(|t| t.view.clone()).ok_or("The browser couldn't open.")?;
+    Ok((id, view))
+}
+
+/// Make a tab the active one: pointing ends on the page being left, and the new one takes its place.
+fn activate(app: &tauri::AppHandle, id: u32) -> Result<(), String> {
+    let s = state(app)?;
+    let (left, opening) = {
+        let mut list = s.list.lock().unwrap();
+        if !list.tabs.iter().any(|t| t.id == id) {
+            return Err(format!("There is no tab {id}."));
+        }
+        let left = list.tabs.iter().find(|t| Some(t.id) == list.active && t.id != id).map(|t| t.view.clone());
+        list.active = Some(id);
+        let opening = list.tabs.iter_mut().find(|t| t.id == id).and_then(|t| t.restore.take().map(|url| (url, t.view.clone())));
+        (left, opening)
+    };
+    if let Some((url, view)) = opening {
+        if let Ok(url) = url.parse::<tauri::Url>() {
+            let _ = view.navigate(url);
+        }
+    }
+    if let Some(view) = left {
+        let _ = view.eval(PICKER_CANCEL);
+    }
+    changed(app);
+    layout(app);
+    Ok(())
+}
+
+/// Show the active tab over the panel and hide the rest (all of them, while the browser is out of the way).
+fn layout(app: &tauri::AppHandle) {
+    let Ok(s) = state(app) else { return };
+    let bounds = *s.bounds.lock().unwrap();
+    let zoom = s.zoom.lock().unwrap().unwrap_or(1.0);
+    let views: Vec<(bool, tauri::Webview)> = {
+        let list = s.list.lock().unwrap();
+        list.tabs.iter().map(|t| (Some(t.id) == list.active && !t.page.url.is_empty(), t.view.clone())).collect()
+    };
+    for (front, view) in views {
+        match bounds {
+            Some(b) if front => {
+                let _ = view.set_zoom(zoom);
+                let _ = view.set_position(LogicalPosition::new(b.x, b.y));
+                let _ = view.set_size(LogicalSize::new(b.width.max(1.0), b.height.max(1.0)));
+                let _ = view.show();
+            }
+            _ => {
+                let _ = view.hide();
+            }
+        }
+    }
+}
+
+/// Place the active tab over the panel and show it.
 pub fn show(app: &tauri::AppHandle, bounds: Bounds, zoom: f64) -> Result<(), String> {
     if !zoom.is_finite() || !(0.01..=1.0).contains(&zoom) || [bounds.x, bounds.y, bounds.width, bounds.height].iter().any(|n| !n.is_finite()) {
         return Err("The browser size or zoom is invalid.".into());
     }
-    let v = view(app)?;
-    v.set_zoom(zoom).map_err(|e| e.to_string())?;
-    *state(app)?.zoom.lock().unwrap() = Some(zoom);
-    v.set_position(LogicalPosition::new(bounds.x, bounds.y)).map_err(|e| e.to_string())?;
-    v.set_size(LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0))).map_err(|e| e.to_string())?;
-    v.show().map_err(|e| e.to_string())
+    let s = state(app)?;
+    *s.zoom.lock().unwrap() = Some(zoom);
+    *s.bounds.lock().unwrap() = Some(bounds);
+    layout(app);
+    Ok(())
 }
 
 /// Out of the way: the panel is closed, covered, or on another screen.
 pub fn hide(app: &tauri::AppHandle) {
-    if let Some(v) = state(app).ok().and_then(|s| s.view.lock().unwrap().clone()) {
-        let _ = v.hide();
+    if let Ok(s) = state(app) {
+        *s.bounds.lock().unwrap() = None;
+    }
+    layout(app);
+}
+
+/// Open a new tab and switch to it, on an address if given (as the address bar takes it).
+pub fn new_tab(app: &tauri::AppHandle, input: Option<&str>) -> Result<BrowserTabs, String> {
+    let url = input.filter(|i| !i.trim().is_empty()).map(|i| address(i).and_then(|u| u.parse::<tauri::Url>().map_err(|_| format!("\"{i}\" isn't an address the browser can open.")))).transpose()?;
+    let id = create_tab(app)?;
+    activate(app, id)?;
+    if let Some(url) = url {
+        navigate(app, url.as_str())?;
+    }
+    Ok(tabs(app))
+}
+
+/// Switch to a tab.
+pub fn select_tab(app: &tauri::AppHandle, id: u32) -> Result<BrowserTabs, String> {
+    activate(app, id)?;
+    Ok(tabs(app))
+}
+
+/// Which tab is next to show once the one at `index` is closed, out of `remaining` left.
+fn after_close(remaining: usize, index: usize) -> Option<usize> {
+    (remaining > 0).then(|| index.min(remaining - 1))
+}
+
+/// Close a tab; the one beside it takes over if it was showing.
+pub fn close_tab(app: &tauri::AppHandle, id: u32) -> Result<BrowserTabs, String> {
+    let s = state(app)?;
+    let gone = {
+        let mut list = s.list.lock().unwrap();
+        let index = list.tabs.iter().position(|t| t.id == id).ok_or_else(|| format!("There is no tab {id}."))?;
+        let gone = list.tabs.remove(index);
+        let next = after_close(list.tabs.len(), index).map(|i| list.tabs[i].id);
+        if list.active == Some(id) {
+            list.active = next;
+        }
+        gone
+    };
+    let _ = gone.view.eval(PICKER_CANCEL);
+    let _ = gone.view.close();
+    changed(app);
+    layout(app);
+    Ok(tabs(app))
+}
+
+/// Show a page in a tab of its own, or in the tab that's already on it (a kept file opened from a chat).
+/// A tab with nothing in it is used rather than left behind.
+pub fn open_tab(app: &tauri::AppHandle, input: &str) -> Result<BrowserTabs, String> {
+    let url = address(input)?;
+    let existing = tabs(app);
+    let same = |a: &str| a.trim_end_matches('/') == url.trim_end_matches('/');
+    if let Some(tab) = existing.tabs.iter().find(|t| same(&t.url)) {
+        return select_tab(app, tab.id);
+    }
+    match existing.tabs.iter().find(|t| Some(t.id) == existing.active && t.url.is_empty()) {
+        Some(_) => {
+            navigate(app, &url)?;
+            Ok(tabs(app))
+        }
+        None => new_tab(app, Some(&url)),
     }
 }
 
@@ -312,12 +661,13 @@ pub fn address(input: &str) -> Result<String, String> {
     Ok(format!("{SEARCH}{query}"))
 }
 
-/// Open an address (as the address bar takes it).
+/// Open an address (as the address bar takes it) in the active tab.
 pub fn navigate(app: &tauri::AppHandle, input: &str) -> Result<BrowserPage, String> {
     let url = address(input)?;
     let parsed: tauri::Url = url.parse().map_err(|_| format!("\"{input}\" isn't an address the browser can open."))?;
-    view(app)?.navigate(parsed).map_err(|e| e.to_string())?;
-    set_page(app, |p| {
+    let (id, view) = active_view(app)?;
+    view.navigate(parsed).map_err(|e| e.to_string())?;
+    set_page(app, id, |p| {
         p.url = url.clone();
         p.loading = true;
     });
@@ -333,14 +683,15 @@ pub fn go(app: &tauri::AppHandle, action: &str) -> Result<(), String> {
         "stop" => "window.stop()",
         other => return Err(format!("The browser can't {other}.")),
     };
-    view(app)?.eval(script).map_err(|e| e.to_string())
+    active_view(app)?.1.eval(script).map_err(|e| e.to_string())
 }
 
 /// Run a script on the page and hand back what it returned.
 fn run(app: &tauri::AppHandle, body: &str) -> Result<Value, String> {
     let (tx, rx) = mpsc::channel();
     let tx = Mutex::new(Some(tx));
-    view(app)?
+    active_view(app)?
+        .1
         .eval_with_callback(wrapped(body), move |result| {
             if let Some(tx) = tx.lock().unwrap().take() {
                 let _ = tx.send(result);
@@ -392,6 +743,26 @@ fn describe(p: &BrowserPage) -> String {
     }
 }
 
+/// The open tabs as an agent lists them, the one it's acting on marked.
+fn describe_tabs(all: &BrowserTabs) -> String {
+    if all.tabs.is_empty() {
+        return "No tabs are open.".into();
+    }
+    let lines: Vec<String> = all
+        .tabs
+        .iter()
+        .map(|t| {
+            let name = match (t.title.trim(), t.url.as_str()) {
+                (_, "") => "(empty)".to_string(),
+                ("", url) => url.to_string(),
+                (title, url) => format!("\"{title}\" ({url})"),
+            };
+            format!("[{}] {}{}", t.id, name, if Some(t.id) == all.active { "  <- you are here" } else { "" })
+        })
+        .collect();
+    format!("Tabs:\n{}", lines.join("\n"))
+}
+
 /// The page as an agent reads it: its words, then its numbered controls.
 pub fn format_read(page: &Value) -> String {
     let text = |key: &str| page.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -439,6 +810,25 @@ pub fn act(app: &tauri::AppHandle, agent_id: &str, action: &str, args: &Value) -
             let _ = app.emit("browser://reveal", json!({ "agentId": agent_id }));
             settle(app);
             Ok(Outcome::Text(format!("{} Use `read` to see it.", describe(&page(app)))))
+        }
+        "tabs" => Ok(Outcome::Text(describe_tabs(&tabs(app)))),
+        "new_tab" => {
+            let url = args.get("url").and_then(|u| u.as_str()).filter(|u| !u.trim().is_empty());
+            if let Some(url) = url {
+                allowed(app, &crate::bridge::actor_for(agent_id, args), &address(url)?)?;
+            }
+            new_tab(app, url)?;
+            let _ = app.emit("browser://reveal", json!({ "agentId": agent_id }));
+            if url.is_some() {
+                settle(app);
+            }
+            Ok(Outcome::Text(format!("Opened a new tab and switched to it. {}", describe_tabs(&tabs(app)))))
+        }
+        "switch_tab" => {
+            let id = args.get("tab").and_then(|t| t.as_u64().or_else(|| t.as_str().and_then(|s| s.trim().parse().ok())));
+            let id = id.and_then(|n| u32::try_from(n).ok()).ok_or("Say which tab: `tab`, its number from `tabs`.")?;
+            select_tab(app, id)?;
+            Ok(Outcome::Text(format!("Switched to tab {id}. {}", describe(&page(app)))))
         }
         "back" | "forward" | "reload" => {
             go(app, action)?;
@@ -521,14 +911,15 @@ pub fn act(app: &tauri::AppHandle, agent_id: &str, action: &str, args: &Value) -
             let jpeg = snapshot(app)?;
             Ok(Outcome::Image { jpeg, caption: describe(&page(app)) })
         }
-        other => Err(format!("The browser has no \"{other}\" action. Use open, read, click, type, run_js, console, screenshot, back, forward or reload.")),
+        other => Err(format!("The browser has no \"{other}\" action. Use open, read, click, type, run_js, console, screenshot, back, forward, reload, tabs, new_tab or switch_tab.")),
     }
 }
 
 #[cfg(target_os = "macos")]
 fn snapshot_rect(app: &tauri::AppHandle, rect: Option<Bounds>) -> Result<Vec<u8>, String> {
     let (tx, rx) = mpsc::channel();
-    view(app)?
+    active_view(app)?
+        .1
         .with_webview(move |platform| {
             // SAFETY: on macOS the platform view is the page's WKWebView, alive for this call.
             unsafe { crate::snapshot::capture(platform.inner(), rect, tx) }
@@ -605,6 +996,52 @@ mod tests {
         assert!(text.starts_with("Settings (http://localhost:5173/)\n\nAccount"));
         assert!(text.contains("[1] link \"Docs\" -> /docs"));
         assert!(text.contains("[2] input text \"Search settings\" = \"dark\""));
+    }
+
+    fn tab(id: u32, url: &str, title: &str) -> BrowserTab {
+        BrowserTab { id, url: url.into(), title: title.into(), loading: false, favicon: String::new() }
+    }
+
+    #[test]
+    fn tabs_are_kept_in_order_with_the_active_one_and_without_empty_or_unservable_pages() {
+        let all = BrowserTabs {
+            tabs: vec![tab(1, "https://a.dev/", "A"), tab(2, "", ""), tab(3, "http://127.0.0.1:5555/tok/x.png", "x.png"), tab(4, "http://localhost:5173/", "App")],
+            active: Some(4),
+        };
+        let saved = to_saved(&all, |url| !url.starts_with("http://127.0.0.1:5555/"));
+        assert_eq!(saved.tabs, vec![SavedTab { url: "https://a.dev/".into(), title: "A".into() }, SavedTab { url: "http://localhost:5173/".into(), title: "App".into() }]);
+        assert_eq!(saved.active, Some(1));
+        // A showing tab that can't be kept leaves none marked; the first opens on restore.
+        let lost = BrowserTabs { tabs: vec![tab(1, "https://a.dev/", "A"), tab(2, "", "")], active: Some(2) };
+        assert_eq!(to_saved(&lost, |_| true).active, None);
+        let round: SavedTabs = serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+        assert_eq!(round, saved);
+    }
+
+    #[test]
+    fn a_page_icon_is_shown_only_when_it_is_an_image_address() {
+        assert_eq!(parse_favicon("\"https://a.dev/favicon.ico\""), "https://a.dev/favicon.ico");
+        assert_eq!(parse_favicon("\"data:image/svg+xml,%3Csvg%3E%3C/svg%3E\""), "data:image/svg+xml,%3Csvg%3E%3C/svg%3E");
+        assert_eq!(parse_favicon("\"javascript:alert(1)\""), "");
+        assert_eq!(parse_favicon("\"file:///etc/passwd\""), "");
+        assert_eq!(parse_favicon("\"\""), "");
+        assert_eq!(parse_favicon("null"), "");
+        assert_eq!(parse_favicon(&format!("\"data:image/png;base64,{}\"", "A".repeat(FAVICON_LIMIT))), "");
+    }
+
+    #[test]
+    fn closing_a_tab_hands_over_to_the_one_beside_it() {
+        assert_eq!(after_close(0, 0), None);
+        assert_eq!(after_close(3, 1), Some(1));
+        assert_eq!(after_close(2, 2), Some(1));
+    }
+
+    #[test]
+    fn agents_see_their_tabs_with_the_active_one_marked() {
+        let tab = |id, url: &str, title: &str| BrowserTab { id, url: url.into(), title: title.into(), loading: false, favicon: String::new() };
+        assert_eq!(describe_tabs(&BrowserTabs::default()), "No tabs are open.");
+        let all = BrowserTabs { tabs: vec![tab(1, "http://localhost:5173/", "App"), tab(3, "", "")], active: Some(3) };
+        assert_eq!(describe_tabs(&all), "Tabs:\n[1] \"App\" (http://localhost:5173/)\n[3] (empty)  <- you are here");
     }
 
     #[test]

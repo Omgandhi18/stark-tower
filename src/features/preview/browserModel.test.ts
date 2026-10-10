@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { fitBrowser, mergeOutput } from "./browserModel";
+import { fitBrowser, mergeOutput, tabLabel } from "./browserModel";
+
+describe("browser tabs", () => {
+  it("names a tab for its title, else its site, else that it's new", () => {
+    expect(tabLabel({ url: "http://localhost:5173/a", title: " Checkout " })).toBe("Checkout");
+    expect(tabLabel({ url: "http://localhost:5173/a", title: "" })).toBe("localhost:5173");
+    expect(tabLabel({ url: "", title: "" })).toBe("New tab");
+  });
+});
 
 describe("browser sizes", () => {
   it("centres a CSS viewport and scales it to whichever edge runs out first", () => {

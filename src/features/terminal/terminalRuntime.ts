@@ -3,7 +3,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Channel } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { browserNavigate, terminalAttach, terminalResize, terminalWrite, terminalTitle } from "../../lib/api";
+import { browserOpenTab, terminalAttach, terminalResize, terminalWrite, terminalTitle } from "../../lib/api";
 import type { TerminalOutput } from "../../lib/bindings";
 import { useNavigation } from "../../stores/navigation";
 import { usePreview } from "../../stores/preview";
@@ -18,7 +18,7 @@ function openLink(uri: string) {
   const report = (message: string) => () => useTerminal.getState().report(message);
   if (localTerminalLink(uri) && useNavigation.getState().route === "task") {
     usePreview.getState().show("browser");
-    void browserNavigate(uri).catch(report("Couldn't open this page. Try the address in the browser panel."));
+    void browserOpenTab(uri).catch(report("Couldn't open this page. Try the address in the browser panel."));
   } else {
     void openUrl(uri).catch(report("Couldn't open this link. Copy it into your browser."));
   }
